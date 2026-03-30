@@ -1,378 +1,400 @@
-# Kusanagi Kajiki Developer Guide
+# DEVELOPER GUIDE — Kusanagi Kajiki
 
-> Audience: engineers onboarding to the repository who need a full-stack mental model (Rust crates, Tauri command layer, Svelte frontend, and operational workflows).
+This guide is code-driven and intended for maintainers.
+
+Conventions used below:
+- **Observed:** directly confirmed in repository files.
+- **Inferred:** likely true from code shape, but not explicitly guaranteed.
 
 ---
 
 ## 1) Project Identity
 
-### What Kusanagi Kajiki is
-Kusanagi Kajiki is a passive OT/ICS network discovery and analysis platform implemented as:
-- **Rust + Tauri 2 backend** for packet processing, analysis, and persistence.
-- **SvelteKit 5 frontend** for operator workflows and visualization.
-
-The core value proposition is **zero active probing** in production OT environments: packet captures and imported logs are analyzed without transmitting packets on target networks.
+### What the project does
+**Observed:** Kusanagi Kajiki is a desktop OT/ICS analysis tool that imports PCAPs, supports live capture, builds topology, performs protocol/deep-parse analysis, runs security analytics, and exports reports via a Tauri + Svelte application. (`src-tauri/src/main.rs`, `src-tauri/src/commands/*.rs`, `src/lib/components/*.svelte`)
 
 ### Why it exists
-- Active scanning can destabilize PLC/RTU/process-control systems.
-- OT security assessments still require asset inventory, communication mapping, and risk triage.
-- Kusanagi Kajiki provides passive discovery plus advanced security analytics and reporting.
+**Observed:** README frames the problem as passive ICS/SCADA discovery for environments where active scanning is risky. (`README.md`)
+
+### Intended users / operator persona
+**Observed:** command and UI surface target assessors/operators who need:
+- capture import/live capture,
+- asset inventory + topology,
+- ATT&CK/compliance findings,
+- reporting/export,
+- project/session management.
+
+Evidence: command domains and component names (`capture`, `analysis`, `export`, `projects`, `session`, `physical`, `segmentation`).
 
 ### Comparison to GRASSMARLIN
-Kusanagi Kajiki is explicitly positioned as a modern successor to GRASSMARLIN:
-- Rewritten from scratch in Rust/Svelte instead of Java Swing.
-- Adds ATT&CK-for-ICS detections, CVE/compliance mapping, malware behavior detection, baseline drift, segmentation recommendations, and richer exports.
-- Uses human-readable YAML signatures instead of legacy XML.
-
-See canonical positioning and capability matrix in `README.md`. 
+**Observed:** README explicitly states this is a rewrite/successor to NSA GRASSMARLIN and lists a capability comparison table. Use README as the canonical statement; do not repeat claims not backed by code. (`README.md`)
 
 ---
 
 ## 2) Tech Stack
 
-## Backend (Rust/Tauri)
-- **Tauri 2** desktop app shell + IPC command layer.
-- **Workspace architecture** with 10 domain crates under `src-tauri/crates/*`.
-- **Core deps** include:
-  - `serde`, `serde_json`, `serde_yaml` (serialization + config/signatures)
-  - `tokio` (async runtime in app setup/tasks)
-  - `rusqlite` (in gm-db)
-  - `pcap`/packet parsing ecosystem (in capture/parsers crates)
-  - `env_logger`, `log` (observability)
-  - `clap` (CLI switches for startup import/open)
+## Runtime and framework
+- **Backend:** Rust 2021 + Tauri 2 app crate (`src-tauri/Cargo.toml`, `src-tauri/src/main.rs`).
+- **Frontend:** SvelteKit + TypeScript (`src/routes`, `src/lib`, `package.json`).
 
-## Frontend (SvelteKit/TypeScript)
-- **SvelteKit + Svelte 5** application shell.
-- **TypeScript IPC contract** in `src/lib/types/index.ts`.
-- **Central stores** in `src/lib/stores/index.ts`.
-- **Typed Tauri wrappers** in `src/lib/utils/tauri.ts`.
-- Graph/UI utilities in Cytoscape-oriented components and helpers.
+## Workspace layout
+**Observed:** `src-tauri/Cargo.toml` workspace includes 10 crates:
+`gm-capture`, `gm-parsers`, `gm-signatures`, `gm-topology`, `gm-db`, `gm-physical`, `gm-ingest`, `gm-report`, `gm-analysis`, `gm-segmentation`.
+
+## Key dependencies by responsibility (Observed)
+
+| Responsibility | Evidence |
+|---|---|
+| Desktop shell + IPC | `tauri`, `tauri-plugin-dialog`, `tauri-plugin-shell` in `src-tauri/Cargo.toml` |
+| Packet ingest/parsing | `pcap`, `etherparse` in `gm-capture/Cargo.toml` |
+| Parsing + protocol model | `gm-parsers` depends on `gm-capture` |
+| Fingerprinting | `serde_yaml`, `regex` in `gm-signatures/Cargo.toml` |
+| Graph model | `petgraph` in `gm-topology/Cargo.toml` |
+| Persistence | `rusqlite (bundled)` + `maxminddb` in `gm-db/Cargo.toml` |
+| Reporting | `genpdf` in `gm-report/Cargo.toml` |
+| Ingest importers | `quick-xml` in `gm-ingest/Cargo.toml` |
+| Shared serialization | `serde`, `serde_json` across crates |
+| Errors + logging | `thiserror`, `log`, `env_logger` |
 
 ---
 
-## 3) Directory Map (Annotated)
+## 3) Repository and Directory Map
 
-The repo is split between a webview frontend and a Rust workspace backend.
+## Top-level map (major boundaries)
 
 ```text
 .
-├── README.md                     # Product overview, capability matrix, install/run/test quickstart
-├── DEVELOPER_GUIDE.md            # This onboarding guide
-├── package.json                  # Frontend scripts/dependencies
-├── vite.config.ts                # Vite/SvelteKit bundling config
-├── svelte.config.js              # SvelteKit adapter/preprocess config
+├── README.md                       # Product/docs entrypoint
+├── DEVELOPER_GUIDE.md              # This file
+├── package.json                    # Frontend scripts + deps
 ├── src/
-│   ├── routes/                   # App entry routes/layout wiring
-│   │   ├── +page.svelte          # Main UI shell composition
-│   │   ├── +layout.svelte        # Global layout wrapper
-│   │   └── +layout.ts            # Route-level preload config
+│   ├── routes/                     # SvelteKit route shell
 │   └── lib/
-│       ├── components/           # 20 primary view components (tabs/subviews)
-│       ├── stores/index.ts       # Global application state stores + derived stores
-│       ├── types/index.ts        # Frontend↔backend data contract types
-│       ├── utils/tauri.ts        # Typed invoke()/event wrappers for IPC
-│       ├── utils/graph.ts        # Graph helper logic for topology rendering
-│       └── layouts/purdueLayout.ts # Purdue model graph layout utility
-├── src-tauri/
-│   ├── Cargo.toml                # Tauri app crate + workspace membership + shared deps
-│   ├── src/main.rs               # App bootstrap, state setup, 96-command invoke handler
-│   ├── src/commands/             # Tauri command modules by domain
-│   ├── crates/
-│   │   ├── gm-capture/           # PCAP/live capture normalization to ParsedPacket
-│   │   ├── gm-parsers/           # Protocol ID + deep parse modules
-│   │   ├── gm-signatures/        # YAML signature engine + matcher
-│   │   ├── gm-topology/          # Topology graph builder (nodes/edges)
-│   │   ├── gm-db/                # SQLite sessions, assets, projects, OUI, GeoIP
-│   │   ├── gm-analysis/          # ATT&CK/Purdue/anomaly/CVE/compliance/malware/etc.
-│   │   ├── gm-physical/          # Vendor config parsing + physical topology inference
-│   │   ├── gm-ingest/            # External tool importers (Zeek/Suricata/Nmap/...)
-│   │   ├── gm-report/            # PDF/CSV/JSON/SBOM/STIX export models/generation
-│   │   └── gm-segmentation/      # Zone/matrix/enforcement recommendation engine
-│   ├── signatures/               # YAML fingerprint files (runtime-loaded)
-│   ├── data/oui.tsv              # IEEE OUI lookup dataset
-│   └── tauri.conf.json           # Tauri window/app packaging config
-└── tests/pcaps/                  # Sample/import test data helpers
+│       ├── components/             # UI views and feature panels
+│       ├── stores/index.ts         # Global frontend state model
+│       ├── types/index.ts          # TS IPC contract types
+│       └── utils/tauri.ts          # Typed invoke()/event wrappers
+└── src-tauri/
+    ├── Cargo.toml                  # Tauri app + workspace manifest
+    ├── src/main.rs                 # App bootstrap + command registration
+    ├── src/commands/               # Command layer + AppState + pipeline orchestration
+    ├── crates/                     # 10 backend domain crates
+    ├── signatures/                 # YAML fingerprint files loaded at runtime
+    └── data/oui.tsv                # OUI lookup data
 ```
 
-### `src/lib/components` file map (20)
-1. `TopologyView.svelte` — logical topology orchestration shell.
-2. `LogicalView.svelte` — node/edge logical graph rendering.
-3. `MeshView.svelte` — matrix-like connectivity view.
-4. `FilteredView.svelte` — subset graph tab with hidden-node controls.
-5. `WatchTab.svelte` — focused neighborhood tracking by node/depth.
-6. `PhysicalView.svelte` — physical/inferred topology visual layer.
-7. `InventoryView.svelte` — asset table/details/editing.
-8. `CaptureView.svelte` — import/live-capture control plane.
-9. `ProtocolStats.svelte` — protocol distribution presentation.
-10. `AnalysisView.svelte` — findings/anomalies/Purdue output.
-11. `CommunicationPatterns.svelte` — periodicity/jitter anomaly views.
-12. `SignatureEditor.svelte` — YAML signature editing/testing UX.
-13. `ExportView.svelte` — report and data export UX.
-14. `ProjectsView.svelte` — engagement/project management.
-15. `BaselineDriftView.svelte` — baseline-vs-current drift display.
-16. `SegmentationView.svelte` — microsegmentation recommendations.
-17. `SettingsView.svelte` — user preferences.
-18. `TimelineScrubber.svelte` — temporal filtering/playback controls.
-19. `PurdueOverlay.svelte` — Purdue level visual bands/annotations.
-20. `ConnectionTree.svelte` — per-node/connection packet summary explorer.
+## Command layer ownership (`src-tauri/src/commands`)
+- `capture.rs`: PCAP import + live capture + progress events + cancel.
+- `processor.rs`: shared packet pipeline used by import and live capture paths.
+- `data.rs`: topology/assets/connections/deep parse retrieval.
+- `analysis.rs`: transforms `AppState` -> `AnalysisInput` and invokes `gm-analysis`.
+- `export.rs`: export/report/allowlist endpoints.
+- `session.rs`: save/load/list/delete sessions and asset updates.
+- `projects.rs`: project CRUD and active project selection.
+- `physical.rs`: network-config and table imports for physical topology.
+- `ingest.rs`: Zeek/Suricata/Nmap/Masscan/Wazuh/SINEMA/TIA ingestion.
+- `segmentation.rs`: `AppState` -> `SegmentationInput` and segmentation execution.
+- `wireshark.rs`: external Wireshark process integration.
+- `correlation.rs`: enrich imported alerts with inventory context.
+- `baseline.rs`: baseline drift comparison logic.
+- `signatures.rs`, `system.rs`, `patterns.rs`: signature mgmt/system/pattern data endpoints.
+
+## Frontend components (Observed file inventory)
+`AnalysisView`, `BaselineDriftView`, `CaptureView`, `CommunicationPatterns`, `ConnectionTree`, `ExportView`, `FilteredView`, `InventoryView`, `LogicalView`, `MeshView`, `PhysicalView`, `ProjectsView`, `ProtocolStats`, `PurdueOverlay`, `SegmentationView`, `SettingsView`, `SignatureEditor`, `TimelineScrubber`, `TopologyView`, `WatchTab`.
 
 ---
 
-## 4) Core Data Pipeline (PCAP End-to-End)
+## 4) End-to-End Data Pipeline
 
-A packet capture flows through the system in this order:
+### Flow A: PCAP import -> UI
 
-1. **Ingestion** (`gm-capture`)
-   - Reads PCAP files or live interfaces.
-   - Produces normalized `ParsedPacket` records (L2/L3/L4 metadata + payload + origin file).
+1. **Command entry:** `import_pcap(paths, state, app_handle)` in `capture.rs`.
+2. **Blocking ingestion loop:** runs `PcapReader::stream_file(...)` in `spawn_blocking` and emits `import_progress` events.
+3. **Per-packet processing:** closure calls `PacketProcessor::process_packet(packet)`.
+4. **Deep parse materialization:** after ingest, `build_deep_parse_info()`.
+5. **Asset build + fingerprinting:** `build_assets(signature_engine, oui_lookup, geoip_lookup)`.
+6. **Topology snapshot:** `processor.topo_builder.snapshot()` then signature enrichment of node vendor/device_type.
+7. **Pattern outputs:** `build_pattern_results()` and `build_redundancy_info()`.
+8. **State commit:** lock `state.inner` once and write topology/assets/connections/summaries/deep_parse/stats.
+9. **Read side:** frontend calls `get_topology/get_assets/get_connections/...` via `tauri.ts` wrappers.
 
-2. **Protocol Identification + Deep Parse** (`gm-parsers`)
-   - Fast protocol ID using ports/signatures.
-   - Deep dissectors extract protocol-specific semantics (roles, FCs, object IDs, etc.) for 10 protocols (Modbus, DNP3, ENIP/CIP, S7, BACnet, IEC104, PROFINET DCP, LLDP, SNMP, redundancy protocols).
+### Flow B: live capture
+**Observed:** same processor path is reused; live capture commands maintain `live_capture` and `processing_thread` in `AppStateInner`, emit packet/capture stats events, and stop/pause/resume via command endpoints.
 
-3. **Packet Processing Orchestration** (`commands/processor.rs`)
-   - `PacketProcessor` accumulates:
-     - connections, packet summaries, per-asset metadata,
-     - deep-parse aggregates,
-     - LLDP/redundancy/SNMP identity data,
-     - communication timing stats and anomaly precursors.
+### Flow C: export/report
+1. Frontend invokes export command (`generate_pdf_report`, `export_assets_csv`, etc.).
+2. `export.rs` converts `AppState` structs to `gm-report` data structures.
+3. `gm-report` module-specific exporters produce files/strings returned by command.
 
-4. **Fingerprinting** (`gm-signatures`)
-   - `SignatureEngine` matches accumulated per-IP packet batches to YAML signatures.
-   - Produces confidence-scored vendor/device-type/product hints.
-
-5. **Graph Building** (`gm-topology`)
-   - `TopologyBuilder` materializes `TopoNode`/`TopoEdge` graph snapshot.
-
-6. **Enrichment + Persistence support** (`gm-db`)
-   - OUI vendor and GeoIP lookup enrich assets.
-   - Sessions/assets/connections/projects persisted in SQLite via command layer.
-
-7. **Security Analytics** (`gm-analysis`)
-   - ATT&CK detections + context attack logic.
-   - Purdue assignments/violations, anomaly scoring, CVE matching, malware signatures, compliance mappings, allowlist outputs.
-
-8. **Physical Context** (`gm-physical`)
-   - Config and neighbor tables from Cisco/Juniper/Aruba/generic files augment physical topology.
-
-9. **External Correlation** (`gm-ingest`)
-   - Zeek/Suricata/Nmap/Masscan/Wazuh/SINEMA/TIA imports merge signals into same model.
-
-10. **Export + Policy Design** (`gm-report`, `gm-segmentation`)
-   - Exports: PDF/CSV/JSON/SBOM/STIX and filtered PCAP derivatives.
-   - Segmentation engine builds identity groups, zones/conduits, comm matrix, enforcement configs, and simulation results.
+### Crate handoff summary
+`gm-capture` -> `commands/processor` (+ `gm-parsers`) -> `gm-signatures` + `gm-topology` + `gm-db` lookups -> persisted/queried via command layer -> `gm-analysis` / `gm-segmentation` / `gm-report` on demand -> TS wrappers -> stores/components.
 
 ---
 
-## 5) Backend Crates (One Section Each)
+## 5) Backend Crate Deep Dive
 
 ## `gm-capture`
-**Responsibility:** packet I/O and normalization.
-- `PcapReader` for file import, with progress reporting.
-- Live capture module with start/stop/pause/resume handles and stats.
-- `ParsedPacket` is the canonical packet struct consumed downstream.
+- **Responsibility (Observed):** read PCAP/live traffic and normalize as `ParsedPacket`.
+- **Key types:** `ParsedPacket`, `TransportProtocol`, `PcapReader`, `LiveCaptureHandle`, `CaptureStats`.
+- **Public entry points:** `PcapReader::read_file/stream_file`, interface listing, live capture handles.
+- **Input/Output:** bytes/interface traffic -> parsed packet records.
+- **Dependencies:** `pcap`, `etherparse`, `chrono`, `serde`.
+- **Extension points:** additional parsing metadata in `packet.rs` and `parsing.rs`.
+- **Failure areas:** malformed frames, interface privilege issues, blocking I/O behavior.
 
 ## `gm-parsers`
-**Responsibility:** protocol identification and deep decode.
-- `identify_protocol()` classifies packets.
-- `deep_parse()` dispatches to protocol parsers.
-- Includes modules for Modbus, DNP3, ENIP/CIP, S7, BACnet, IEC104, PROFINET DCP, LLDP, SNMP, redundancy.
-- `modbus.rs` is a good template for adding new parser behavior.
+- **Responsibility:** protocol identification and deep parsing dispatch.
+- **Key types:** `IcsProtocol`, per-protocol `*Info` structs, `DeepParseResult`.
+- **Entry points:** `identify_protocol`, `deep_parse`, parser functions (`parse_modbus`, `parse_dnp3`, ...).
+- **Input/Output:** `ParsedPacket` + payload bytes -> protocol enum + protocol-specific semantic fields.
+- **Dependencies:** depends on `gm-capture`.
+- **Extension points:** add enum variant + port mapping + parser module + dispatcher export.
+- **Failure areas:** misclassification by ports, payload length guards, role inference drift.
 
 ## `gm-signatures`
-**Responsibility:** YAML-based fingerprinting.
-- Loads `*.yaml`/`*.yml` signatures.
-- Compiles filter set (port/protocol/payload/OUI/min-len).
-- Matches packets and returns sorted confidence results.
-- Supports signature test workflows for editor UX.
+- **Responsibility:** YAML signature load/compile/match.
+- **Key types:** `SignatureEngine`, `PacketData`, `SignatureMatch`, `SignatureFilter`.
+- **Entry points:** `load_directory`, `reload`, `match_packet`, `match_device_packets`, `test_signature`.
+- **Input/Output:** packet slices + compiled signatures -> confidence-scored matches.
+- **Dependencies:** `serde_yaml`, `regex`, `gm-parsers`.
+- **Extension points:** new filter types + extractor behavior.
+- **Failure areas:** invalid YAML schema, low-specificity signatures producing noisy classifications.
 
 ## `gm-topology`
-**Responsibility:** logical graph model.
-- Maintains IP-keyed nodes and directional protocol edges.
-- Tracks byte/packet counters and bidirectionality.
-- Emits serializable `TopologyGraph` snapshots for frontend.
+- **Responsibility:** build serializable topology graph.
+- **Key types:** `TopologyBuilder`, `TopologyGraph`, `TopoNode`, `TopoEdge`.
+- **Entry points:** `add_connection`, `snapshot`, `build`.
+- **Input/Output:** directional packet/flow observations -> nodes/edges with counts.
+- **Dependencies:** `gm-parsers::IcsProtocol`, `petgraph` dep present (currently builder uses HashMaps).
+- **Extension points:** richer graph analytics or subnet/community strategies.
+- **Failure areas:** graph size blow-up; command-side caps mitigate UI load (`data.rs`).
 
 ## `gm-db`
-**Responsibility:** persistence + lookups.
-- Session CRUD, asset/history CRUD, connection and project operations.
-- OUI and GeoIP helper lookups.
-- Central `Database` wrapper around `rusqlite::Connection`.
+- **Responsibility:** SQLite persistence + OUI + GeoIP lookup.
+- **Key types:** `Database`, `SessionRow`, `AssetRow`, `ConnectionRow`, `Project*`, `OuiLookup`, `GeoIpLookup`.
+- **Entry points:** session/asset/connection/project CRUD methods on `Database`.
+- **Input/Output:** App snapshot rows -> DB records and query results.
+- **Dependencies:** `rusqlite`, `maxminddb`, `serde_json`.
+- **Extension points:** schema migrations in `schema.rs`, new repository methods.
+- **Failure areas:** schema drift, JSON metadata shape changes.
 
 ## `gm-analysis`
-**Responsibility:** security and posture analytics.
-- ATT&CK rule engine (`attack.rs` + context rules).
-- Purdue assignment/violation logic.
-- Anomaly and communication-pattern models.
-- CVE matching, malware behavior matching, default creds, risk/criticality, compliance mapping, switch hardening checks.
+- **Responsibility:** ATT&CK detections + Purdue/anomaly/risk/CVE/malware/compliance/etc.
+- **Key types:** `AnalysisInput`, `Finding`, `PurdueAssignment`, `AnomalyScore`, snapshot structs.
+- **Entry points:** detection and assessment exports in `lib.rs` (`detect_attack_techniques`, `assign_purdue_levels`, etc.).
+- **Input/Output:** immutable snapshot from command layer -> findings/assignments/scores.
+- **Dependencies:** mostly serde/chrono/uuid; no direct Tauri coupling.
+- **Extension points:** `attack.rs`/`context_attacks.rs`, matcher datasets under `data/`.
+- **Failure areas:** false positives from heuristic thresholds; snapshot mapper mismatches in `commands/analysis.rs`.
 
 ## `gm-physical`
-**Responsibility:** physical topology extraction.
-- Parsers for Cisco/Juniper/Aruba/generic input formats.
-- Link and location inference for switch-port-level maps.
+- **Responsibility:** parse vendor network config/table outputs and infer physical links.
+- **Key types:** `PhysicalTopology`, `InferredTopology` and parser result structs.
+- **Entry points:** parser functions per vendor module (`cisco`, `juniper`, `aruba`, `generic`) and inference module.
+- **Input/Output:** text/CSV/JSON config artifacts -> switch/port/link model.
+- **Dependencies:** `regex`, `serde`.
+- **Extension points:** vendor-specific grammar support.
+- **Failure areas:** CLI output format variance across device OS versions.
 
 ## `gm-ingest`
-**Responsibility:** external tool data import.
-- Parses Zeek, Suricata, Nmap, Masscan, Wazuh, SINEMA CSV, TIA XML.
-- Produces merged `IngestResult` with assets, connections, alerts.
+- **Responsibility:** ingest external tool outputs into shared asset/connection/alert model.
+- **Key types:** `IngestResult`, `IngestedAsset`, `IngestedConnection`, `IngestedAlert`, `IngestSource`.
+- **Entry points:** parser modules `zeek`, `suricata`, `nmap`, `masscan`, `wazuh`, `sinema`.
+- **Input/Output:** external logs/results -> normalized ingest bundle.
+- **Dependencies:** `gm-capture`, `gm-parsers`, `quick-xml`, `serde_json`.
+- **Extension points:** new source parser module + command wiring.
+- **Failure areas:** schema/version drift in upstream tools.
 
 ## `gm-report`
-**Responsibility:** output generation.
-- Structured export models (`ReportData`, `ExportAsset`, etc.).
-- PDF, CSV, JSON, SBOM, STIX output paths.
+- **Responsibility:** render/export report artifacts.
+- **Key types:** `ReportData`, `ReportConfig`, `ExportAsset`, `ExportConnection`, `ExportFinding`.
+- **Entry points:** module-specific exporters (`pdf`, `csv_export`, `json_export`, `sbom`, `stix`).
+- **Input/Output:** structured export model -> serialized report content/files.
+- **Dependencies:** `genpdf`, `serde`.
+- **Extension points:** new format modules and config fields.
+- **Failure areas:** large dataset rendering cost, format-specific escaping/encoding issues.
 
 ## `gm-segmentation`
-**Responsibility:** microsegmentation recommendations.
-- Policy groups (identity), zones/conduits, matrix, enforcement formats, simulation.
-- Orchestrated by `run_segmentation_analysis` returning `SegmentationReport`.
+- **Responsibility:** build microsegmentation recommendations from observed state.
+- **Key types:** `SegmentationInput`, `AssetProfile`, `ObservedConnection`, `SegmentationReport`.
+- **Entry points:** `run_segmentation_analysis` orchestrating phases 15A–15E.
+- **Input/Output:** enriched assets/connections/findings -> zones/matrix/enforcement/simulation report.
+- **Dependencies:** serde/uuid/chrono only (no Tauri coupling).
+- **Extension points:** phase modules (`identity_groups`, `zones`, `matrix`, `enforcement`, `simulation`).
+- **Failure areas:** role/classification quality directly affects policy quality.
 
 ---
 
-## 6) AppState Deep Dive
+## 6) AppState and Backend Runtime Model
 
-`AppState` is the Tauri-managed singleton and has two-layer structure:
-
+## AppState layout (Observed)
+`src-tauri/src/commands/mod.rs` defines:
 - `AppState { inner: Mutex<AppStateInner>, import_cancelled: Arc<AtomicBool> }`
-- `AppStateInner` contains all mutable domain state (topology, assets, connections, parse caches, findings, session context, physical/inferred topology, ingest alerts, segmentation cache, etc.).
+- `AppStateInner` includes topology, assets, connections, packet summaries, imported files, signature engine, deep parse cache, live capture handles/thread, OUI/GeoIP lookup, optional DB/session/project context, physical and inferred topology, analysis outputs, pattern outputs, redundancy frames, imported alerts, Zeek per-device summaries, and cached segmentation report.
 
-### Mutex pattern
-- Command handlers lock `inner` for coherent updates.
-- Heavy/long-running import pipeline keeps cancellation flag outside the mutex (`Arc<AtomicBool>`) to avoid lock contention and allow responsive cancel checks.
+## Synchronization model
+- **Observed:** Commands take `State<'_, AppState>` and lock `inner` to read/write shared state.
+- **Observed:** cancellation flag is outside mutex for low-contention import cancel checks.
+- **Observed:** import pipeline does expensive file IO + packet processing off async executor via `spawn_blocking`.
 
-### Cancel flag pattern
-- Import command resets flag, worker loop checks periodically.
-- `cancel_import` toggles atomic bool.
-- Import exits early and reports canceled status without requiring full state lock ownership.
+## Long-running coordination
+- Import: `cancel_import` sets atomic bool; ingest loop checks it.
+- Live capture: `live_capture` + `processing_thread` are stored in state and coordinated by start/stop/pause/resume commands.
+
+**Maintenance note:** keep lock scopes narrow when adding heavy analysis to commands; prefer local snapshots then write back.
 
 ---
 
-## 7) IPC Contract (Tauri Commands)
+## 7) IPC Contract
 
-### Reality check on command count
-- **Current code registers 96 commands** in `generate_handler!` (not 93).
-- If any docs/UI assume 93, treat that as stale.
+## Registered command surface
+**Observed:** `src-tauri/src/main.rs` `generate_handler!` registers **96** commands grouped by domain modules (`system`, `capture`, `data`, `analysis`, etc.).
 
-### Domain grouping
-- `system` (5): app info, settings, interface/plugin discovery.
-- `capture` (7): PCAP import/cancel + live capture lifecycle.
-- `data` (9): topology/assets/connections/counts/protocol/deep parse/timeline.
-- `signatures` (3): list/reload/test.
-- `session` (8): save/load/list/delete + asset update + archive import/export.
-- `baseline` (1): compare sessions.
-- `physical` (11): vendor imports, inferred topology, cleanup.
-- `ingest` (8): external tool imports + Zeek event summary.
-- `correlation` (3): alert correlation queries/clear.
-- `wireshark` (6): detect/open/frame exports.
-- `export` (12): CSV/JSON/PDF/SBOM/STIX/allowlist/firewall rules/filtered PCAP.
-- `analysis` (11): run + findings + Purdue/anomaly/credentials/criticality/naming/switch/malware/compliance/CVE.
-- `patterns` (3): connection stats, anomalies, redundancy protocols.
-- `projects` (7): CRUD + active project selection.
-- `segmentation` (2): run + enforcement export.
+## Domain summary (Observed)
+- `system`: interface enumeration, app info, settings, plugin listing.
+- `capture`: PCAP import/cancel + live capture lifecycle.
+- `data`: topology/assets/connections/deep parse/protocol stats/timeline data queries.
+- `signatures`: list/reload/test signature workflows.
+- `session`/`projects`/`baseline`: persistence and organization features.
+- `physical`/`ingest`/`correlation`/`wireshark`: integration paths.
+- `analysis`/`patterns`/`segmentation`/`export`: analytics and output workflows.
+
+## Rust <-> TypeScript mapping
+- Rust command payload/return structs are `serde` serialized.
+- Frontend defines corresponding TS interfaces in `src/lib/types/index.ts`.
+- Wrapper functions in `src/lib/utils/tauri.ts` call `invoke('<command_name>', args)` and type the response.
+
+## Coupling and brittle areas
+- **Observed:** `tauri.ts` has wrappers for almost all command names; one registered command appears without a frontend wrapper: `get_function_code_stats`.
+- **Observed:** field naming uses snake_case across Rust and TS; drift risk appears whenever Rust structs change but TS mirrors are not updated.
+- **Inferred:** because there is no generated schema, contract verification is mostly compile-time plus runtime smoke checks.
 
 ---
 
 ## 8) Frontend Architecture
 
-## State model (`src/lib/stores/index.ts`)
-- Stores mirror backend state domains: interfaces, assets, connections, topology, protocol stats, sessions, physical topology, findings, anomalies, segmentation report, capture stats/status, timeline controls, active tab/project, filters.
-- Derived stores (`selectedAsset`, `filteredAssets`) provide UI projections.
+## Stores (`src/lib/stores/index.ts`)
+Primary mirrors of backend state include:
+- capture (`captureStatus`, `captureStats`)
+- network data (`assets`, `connections`, `topology`, `protocolStats`, `assetCount`, `connectionCount`)
+- session/project (`sessions`, `currentSession`, `activeProject`)
+- analysis (`findings`, `purdueAssignments`, `anomalies`, `analysisSummary`)
+- physical/topology submodes (`physicalTopology`, topology tab state)
+- baseline/segmentation (`baselineDiff`, `segmentationReport`)
+- UI filters/timeline/theme state.
 
-## Component architecture (20 components)
-- The app composes domain-specific tab views from `src/lib/components/*`.
-- `TopologyView` controls logical/mesh/filtered/watch subtabs.
-- Capture/import and analysis flows are tab-first and store-driven.
+## Component map (Observed)
+- Topology: `TopologyView`, `LogicalView`, `MeshView`, `FilteredView`, `WatchTab`, `PurdueOverlay`, `TimelineScrubber`.
+- Data ops: `CaptureView`, `InventoryView`, `ConnectionTree`, `ProtocolStats`.
+- Security/analytics: `AnalysisView`, `CommunicationPatterns`, `SegmentationView`, `BaselineDriftView`.
+- Ops/reporting: `ProjectsView`, `ExportView`, `SignatureEditor`, `PhysicalView`, `SettingsView`.
 
 ## IPC wrapper layer (`src/lib/utils/tauri.ts`)
-- Single abstraction point for `invoke()` and event listeners.
-- Strongly typed signatures prevent ad-hoc stringly backend calls in components.
+- Single invoke/listen boundary; components call wrapper functions instead of direct IPC.
+- Provides typed event subscriptions (`onPacketEvent`, `onCaptureStats`, `onImportProgress`).
 
-## Type safety contract (`src/lib/types/index.ts`)
-- Frontend interfaces intentionally mirror Rust serialization structs.
-- Any Rust field/type change that crosses IPC boundary must be reflected here.
-- Discipline: update Rust struct + command payload + TS type + wrapper + component usage together.
-
----
-
-## 9) Adding New Features (Recipes)
-
-## A) New protocol parser
-1. Add parser module in `gm-parsers/src/<protocol>.rs`.
-2. Extend `IcsProtocol` and port/protocol ID mapping.
-3. Hook into `deep_parse()` dispatcher + expose parsed structs.
-4. Extend `PacketProcessor` accumulators/builders for frontend-relevant summaries.
-5. Add/adjust TS types + UI rendering (deep parse panel).
-6. Add parser/unit tests with realistic payload samples.
-
-## B) New YAML signature
-1. Add YAML under `src-tauri/signatures/`.
-2. Use existing filter primitives (port/protocol/payload/MAC OUI/min length).
-3. Set confidence 1–5 based on specificity.
-4. Reload signatures (`reload_signatures`) or restart app.
-5. Validate in Signature Editor test flow.
-
-## C) New ATT&CK detection rule
-1. Implement detection function in `gm-analysis/src/attack.rs` (or `context_attacks.rs` for cross-state logic).
-2. Emit `Finding::new(...)` with clear evidence and ATT&CK technique ID.
-3. Wire into `detect_attack_techniques()` orchestration.
-4. Add deterministic tests with representative synthetic snapshots.
-
-## D) New frontend view + Tauri command
-1. Add Rust `#[tauri::command]` in appropriate `src-tauri/src/commands/*.rs` module.
-2. Register in `generate_handler!` in `main.rs`.
-3. Add TS type(s) in `src/lib/types/index.ts`.
-4. Add wrapper in `src/lib/utils/tauri.ts`.
-5. Add store wiring if persistent UI state is needed.
-6. Build Svelte component and integrate into main tab shell.
+## Drift risks
+- Rust command rename without updating wrapper string literal.
+- Rust struct field change without TS type mirror update.
+- Added command not exposed in wrappers/stores (already visible for `get_function_code_stats`).
 
 ---
 
-## 10) Testing, Patterns, and CI/CD
+## 9) Change Recipes
 
-### Rust tests
-- Workspace tests run from `src-tauri` with `cargo test --all`.
-- Repo documentation and badge claim **356 tests** (use as current expected baseline).
+## A) Add a new protocol parser
+1. **Inspect first:** `gm-parsers/src/lib.rs`, existing parser template (`modbus.rs`), `commands/processor.rs`.
+2. Add parser module file and export it from `gm-parsers/lib.rs`.
+3. Extend `IcsProtocol` and detection path (`identify_protocol` and deep parse dispatch).
+4. In `commands/processor.rs`, fold parsed output into device-level accumulators and `DeepParseInfo`.
+5. Extend Rust `DeepParseInfo`/detail structs (`commands/mod.rs`) and TS mirrors (`src/lib/types/index.ts`).
+6. Add or update data command exposure and frontend rendering.
+7. Add parser tests near crate module + end-to-end smoke via import command.
 
-### Frontend checks
-- Type/lint checks from root via `npm run check` (and optional `npm run build` for bundle validation).
+**Pitfalls:** forgetting TS enum mirror, forgetting processor aggregation, returning parser details not serializable.
 
-### Test design patterns
-- Crate-level unit tests for parsers/engines/data transforms.
-- Snapshot-like assertions for serialization and export models.
-- In-memory DB tests (`Database::open_in_memory`) for persistence logic.
+## B) Add a new YAML signature
+1. **Inspect first:** `gm-signatures/src/signature.rs`, `engine.rs`, existing YAML files in `src-tauri/signatures/`.
+2. Add YAML file with valid schema and confidence 1–5.
+3. Reload via `reload_signatures` command; verify with `test_signature`.
+4. Confirm match appears in asset `signature_matches` and vendor/device_type mapping logic.
 
-### CI/CD practical note
-- Keep backend and frontend contract changes synchronized; most regressions are cross-boundary type drift.
-- For PRs touching commands/types/stores, run both Rust and frontend checks before merge.
+**Pitfalls:** overly broad filters; invalid hex payload filters; confidence misuse.
+
+## C) Add a new ATT&CK detection rule
+1. **Inspect first:** `gm-analysis/src/attack.rs`, `context_attacks.rs`, `commands/analysis.rs` snapshot builder.
+2. Add detection function returning `Vec<Finding>` with concrete evidence and optional technique ID.
+3. Register function in `detect_attack_techniques` orchestration.
+4. If rule needs additional fields, update snapshot structs and mapper in `commands/analysis.rs`.
+5. Add tests using synthetic `AnalysisInput`.
+
+**Pitfalls:** depending on data not populated in mapper; high false positive thresholds.
+
+## D) Add a new frontend view + Tauri command
+1. **Inspect first:** related command module, `src-tauri/src/main.rs`, `src/lib/utils/tauri.ts`, `src/lib/types/index.ts`, `src/lib/stores/index.ts`, and similar component.
+2. Implement `#[tauri::command]` function in command module.
+3. Register command in `generate_handler!`.
+4. Add TS request/response types.
+5. Add typed wrapper in `tauri.ts` and store wiring if persistent state is needed.
+6. Add Svelte component and integrate tab/routing composition.
+7. Run backend + frontend checks.
+
+**Pitfalls:** command added but not registered; wrapper added with wrong command string; store type mismatch.
 
 ---
 
-## 11) Developer Environment / Build / Debug
+## 10) Testing and Validation
 
-## Local setup
-1. Install Node + Rust toolchains and platform system dependencies (see README matrix).
-2. `npm install`
-3. `npm run tauri dev`
+## How to run (Observed from repo docs/scripts)
+- Backend tests: `cd src-tauri && cargo test --all`
+- Frontend check: `npm run check`
+- Full local dev smoke: `npm run tauri dev`
 
-## Useful debug switches
-- Set `RUST_LOG=info` (or `debug`) before running to inspect command/capture pipeline behavior.
-- Use CLI startup aids:
-  - `--open <pcap-or-kkj>`
-  - `--import-pcap <pcap>`
+## Test organization patterns (Observed)
+- Crate unit tests in module files (`#[cfg(test)]` blocks) for parsers/builders/report structs/db behavior.
+- In-memory DB tests (`Database::open_in_memory`) for persistence flows.
 
-## Practical debugging workflow
-- Reproduce with smallest PCAP or importer input.
-- Trace through `commands/processor.rs` for packet-path bugs.
-- Validate Rust↔TS payload compatibility via wrapper call sites and type definitions.
+## CI/CD expectations
+**Inferred:** no CI workflow file was inspected in this pass, so treat local command checks as required pre-commit baseline.
+
+## Pre-commit validation checklist (maintainer practice)
+1. Run Rust tests for touched crates (or all when changing shared types).
+2. Run `npm run check` when touching TS stores/types/components.
+3. Manually verify IPC commands touched are:
+   - registered in `main.rs`,
+   - wrapped in `tauri.ts`,
+   - typed in `types/index.ts`.
+4. For parser/signature/analysis changes, test against representative PCAP/log inputs.
 
 ---
 
-## Appendix: Critical Files (Read These First)
+## 11) Dev Environment and Debugging
 
-- `src-tauri/src/commands/mod.rs` — AppState model and shared command structs.
-- `src-tauri/src/commands/processor.rs` — packet processing and state accumulation pipeline.
-- `src-tauri/crates/gm-parsers/src/modbus.rs` — deep parser implementation pattern.
-- `src-tauri/crates/gm-analysis/src/attack.rs` — ATT&CK rule patterns.
-- `src-tauri/crates/gm-signatures/src/engine.rs` — signature lifecycle and matcher.
-- `src/lib/types/index.ts` — IPC type contract.
-- `src/lib/stores/index.ts` — frontend state source of truth.
-- `src-tauri/Cargo.toml` — workspace and backend dependency graph.
+## Build/run
+- `npm install`
+- `npm run tauri dev`
 
+## Logging
+- Set `RUST_LOG=info` or `RUST_LOG=debug` before `npm run tauri dev` to inspect backend flow.
+
+## Useful debug entry points
+- Import path: `commands/capture.rs::import_pcap`.
+- Processing path: `commands/processor.rs::process_packet` and builders.
+- Analysis mapping: `commands/analysis.rs::build_analysis_input`.
+- Contract layer: `src/lib/utils/tauri.ts` + `src/lib/types/index.ts`.
+
+## Common setup issues
+**Observed from project docs:** platform dependencies and Npcap/toolchain notes are documented in `README.md`; use that as the environment source of truth.
+
+---
+
+## Required-first file audit (completed)
+The following files were inspected and used as primary evidence while drafting this guide:
+- `src-tauri/src/commands/mod.rs`
+- `src-tauri/src/commands/processor.rs`
+- `src-tauri/crates/gm-parsers/src/modbus.rs`
+- `src-tauri/crates/gm-analysis/src/attack.rs`
+- `src-tauri/crates/gm-signatures/src/engine.rs`
+- `src/lib/types/index.ts`
+- `src/lib/stores/index.ts`
+- `src-tauri/Cargo.toml`
