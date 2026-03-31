@@ -31,23 +31,9 @@
 
 use std::collections::{HashMap, HashSet};
 
+use gm_constants::{OT_SERVER_PORTS as OT_PORTS, REMOTE_ACCESS_PORTS};
+
 use crate::{AnalysisInput, Finding, FindingType, Severity};
-
-/// Well-known OT server ports (mirrors the constant in `attack.rs`).
-const OT_PORTS: &[u16] = &[
-    102, 502, 1089, 1090, 1091, 2222, 2404, 4840, 5007, 5094, 18245, 18246, 20000, 34962, 34963,
-    34964, 44818, 47808,
-];
-
-/// Remote access / management ports that should not appear on OT segments.
-const REMOTE_ACCESS_PORTS: &[u16] = &[
-    22,   // SSH
-    23,   // Telnet
-    3389, // RDP
-    5900, 5901, 5902, 5903, 5904, 5905, 5906, 5907, 5908, 5909, 5910, // VNC
-    5938, // TeamViewer
-    7070, // AnyDesk
-];
 
 /// Rich per-capture state used by context-aware ATT&CK detections.
 ///

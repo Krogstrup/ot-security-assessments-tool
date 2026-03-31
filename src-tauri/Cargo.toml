@@ -2,6 +2,7 @@
 name = "kusanaginokajiki"
 version = "1.5.1"
 edition = "2021"
+default-run = "kusanaginokajiki"
 description = "Modern ICS/SCADA passive network discovery tool"
 license = "Apache-2.0"
 authors = ["David"]
@@ -10,6 +11,7 @@ rust-version = "1.77"
 [workspace]
 members = [
     ".",
+    "crates/gm-constants",
     "crates/gm-capture",
     "crates/gm-parsers",
     "crates/gm-signatures",
@@ -29,6 +31,7 @@ tauri-plugin-dialog = "2"
 tauri-plugin-shell = "2"
 
 # Workspace crates
+gm-constants = { path = "crates/gm-constants" }
 gm-capture = { path = "crates/gm-capture" }
 gm-parsers = { path = "crates/gm-parsers" }
 gm-topology = { path = "crates/gm-topology" }
@@ -47,6 +50,8 @@ serde_yaml = "0.9"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
+axum = "0.8"
+tower-http = { version = "0.6", features = ["fs"] }
 
 # Error handling
 thiserror = "2"
@@ -70,6 +75,10 @@ zip = "2"
 
 # CLI argument parsing
 clap = { version = "4", features = ["derive"] }
+
+[dev-dependencies]
+# TypeScript type generation from Rust structs
+ts-rs = { version = "10", features = ["chrono-impl", "uuid-impl"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

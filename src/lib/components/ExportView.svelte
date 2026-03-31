@@ -15,6 +15,7 @@
 		exportAllowlistCsv,
 		exportFirewallRules
 	} from '$lib/utils/tauri';
+	import { savePathDialog } from '$lib/utils/dialog';
 
 	// ─── PDF Report Config ───────────────────────────────
 	let assessorName = $state('');
@@ -44,8 +45,7 @@
 	}
 
 	async function saveDialog(title: string, defaultName: string, filterName: string, extensions: string[]): Promise<string | null> {
-		const { save } = await import('@tauri-apps/plugin-dialog');
-		return save({
+		return savePathDialog({
 			title,
 			defaultPath: defaultName,
 			filters: [

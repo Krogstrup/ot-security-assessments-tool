@@ -2,59 +2,9 @@
 	import { filteredAssets, assetFilter, selectedAssetId, selectedAsset, protocolFilter, assets, assetCount } from '$lib/stores';
 	import { getDeepParseInfo, getAssets, getDataCounts, updateAsset, bulkUpdateAssets, getCredentialWarnings, getAlertsForIp, getCveWarnings, getDeviceZeekEvents } from '$lib/utils/tauri';
 	import type { DeviceType, IcsProtocol, DeepParseInfo, AssetUpdate, Asset, EnipDetail, S7Detail, BacnetDetail, Iec104Detail, ProfinetDcpDetail, LldpDetail, DefaultCredential, CorrelatedAlert, CveMatch, DeviceZeekEvents } from '$lib/types';
-
-	const deviceTypeLabels: Record<DeviceType, string> = {
-		plc: 'PLC',
-		rtu: 'RTU',
-		hmi: 'HMI',
-		historian: 'Historian',
-		engineering_workstation: 'Eng. WS',
-		scada_server: 'SCADA Server',
-		it_device: 'IT Device',
-		unknown: 'Unknown'
-	};
-
-	const deviceTypeColors: Record<DeviceType, string> = {
-		plc: '#f59e0b',
-		rtu: '#10b981',
-		hmi: '#3b82f6',
-		historian: '#8b5cf6',
-		engineering_workstation: '#06b6d4',
-		scada_server: '#ec4899',
-		it_device: '#475569',
-		unknown: '#64748b'
-	};
-
-	const deviceTypeOptions: DeviceType[] = ['plc', 'rtu', 'hmi', 'historian', 'engineering_workstation', 'scada_server', 'it_device', 'unknown'];
-
-	const purdueLabels: Record<number, string> = {
-		0: 'L0 — Process',
-		1: 'L1 — Control',
-		2: 'L2 — Supervisory',
-		3: 'L3 — Operations',
-		4: 'L4 — Enterprise',
-		5: 'L5 — Internet/DMZ'
-	};
+	import { DEVICE_TYPE_LABELS as deviceTypeLabels, DEVICE_TYPE_COLORS as deviceTypeColors, DEVICE_TYPE_OPTIONS as deviceTypeOptions, PURDUE_LABELS as purdueLabels, CONFIDENCE_LABELS as confidenceLabels, CONFIDENCE_COLORS as confidenceColors } from '$lib/constants';
 
 	const protocols: IcsProtocol[] = ['modbus', 'dnp3', 'ethernet_ip', 'bacnet', 's7comm', 'opc_ua'];
-
-	const confidenceLabels: Record<number, string> = {
-		0: '—',
-		1: 'Port',
-		2: 'Pattern',
-		3: 'MAC OUI',
-		4: 'Payload',
-		5: 'Deep'
-	};
-
-	const confidenceColors: Record<number, string> = {
-		5: 'var(--gm-confidence-5, #10b981)',
-		4: 'var(--gm-confidence-4, #3b82f6)',
-		3: 'var(--gm-confidence-3, #f59e0b)',
-		2: 'var(--gm-confidence-2, #f97316)',
-		1: 'var(--gm-confidence-1, #ef4444)',
-		0: '#64748b'
-	};
 
 	// Country code → flag emoji mapping
 	function countryFlag(code: string): string {

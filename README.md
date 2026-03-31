@@ -1,16 +1,14 @@
-<div align="center">
-  <img src="KusanaginoKajikiLogo.jpg" alt="Kusanagi Kajiki Logo" width="400"/>
+# Kusanagi Kajiki 草薙カジキ
 
-  # Kusanagi Kajiki 草薙カジキ
+![KusanaginoKajikiLogo](KusanaginoKajikiLogo.jpg)
 
-  **Passive ICS/SCADA network discovery and topology visualization for OT security assessments.**
+**Passive ICS/SCADA network discovery and topology visualization for OT security assessments.**
 
-  ![Rust](https://img.shields.io/badge/rust-1.77+-orange?logo=rust)
-  ![Tauri](https://img.shields.io/badge/tauri-2.0-24C8D8?logo=tauri)
-  ![Svelte](https://img.shields.io/badge/svelte-5-FF3E00?logo=svelte)
-  ![License](https://img.shields.io/badge/license-Apache%202.0-blue)
-  ![Tests](https://img.shields.io/badge/tests-356%20passing-brightgreen)
-</div>
+![Rust](https://img.shields.io/badge/rust-1.77+-orange?logo=rust)
+![Tauri](https://img.shields.io/badge/tauri-2.0-24C8D8?logo=tauri)
+![Svelte](https://img.shields.io/badge/svelte-5-FF3E00?logo=svelte)
+![License](https://img.shields.io/badge/license-Apache%202.0-blue)
+![Tests](https://img.shields.io/badge/tests-356%20passing-brightgreen)
 
 ---
 
@@ -35,12 +33,14 @@ The tool achieves full feature parity with GRASSMARLIN 3.2 and extends well beyo
 ## Key Features
 
 ### Network Discovery
+
 - **Multi-PCAP import** with simultaneous file processing and per-packet origin tracking
 - **Live capture** with real-time streaming topology updates, pause/resume, ring buffer, and PCAP save
 - **19+ protocol detection** by port, payload signature, and deep packet inspection
 - **Connection tracking** with packet/byte counts, timestamps, and protocol classification
 
 ### Topology Visualization
+
 - **Logical view** — fcose + Purdue layered layout with subnet grouping, compound nodes, filtered sub-views, and watch tabs
 - **Physical view** — Multi-vendor switch/port topology (Cisco, Juniper, HP/Aruba, generic CSV/JSON) plus traffic-inferred topology
 - **Mesh view** — All-to-all connection matrix with protocol and time filters
@@ -48,6 +48,7 @@ The tool achieves full feature parity with GRASSMARLIN 3.2 and extends well beyo
 - **Purdue overlay** — Horizontal bands by Purdue level (L0–L5 + DMZ) with cross-zone edge highlighting
 
 ### Deep Protocol Analysis
+
 - **Modbus** — MBAP parsing, function code extraction, FC 43/14 Device ID, master/slave detection, register ranges, polling intervals
 - **DNP3** — Link layer validation, function code extraction, master/outstation detection, unsolicited response flagging
 - **EtherNet/IP + CIP** — Encapsulation header parsing, ListIdentity device identification (vendor/product/serial/firmware), CIP service and class analysis, scanner/adapter role detection
@@ -60,6 +61,7 @@ The tool achieves full feature parity with GRASSMARLIN 3.2 and extends well beyo
 - **Ring Redundancy** — MRP, RSTP, HSR, PRP, DLR protocol detection and ring topology identification
 
 ### Device Identification
+
 - **30 YAML signatures** covering ICS protocols and vendor-specific patterns
 - **MAC OUI vendor lookup** — IEEE OUI database (~30k entries)
 - **GeoIP enrichment** — Country identification for public IPs
@@ -70,6 +72,7 @@ The tool achieves full feature parity with GRASSMARLIN 3.2 and extends well beyo
 - **Infrastructure classification** — Managed switch, router, firewall, AP role identification from LLDP/SNMP
 
 ### Security Analysis
+
 - **MITRE ATT&CK for ICS** — 40+ automated detection rules across 10+ techniques including T0855 (unauthorized commands), T0836 (firmware modification), T0843/T0845 (program download/upload), T0809 (data destruction), T0816 (device shutdown), T0814 (DoS), T0856 (alarm suppression), T0886 (cross-zone), T0846 (discovery), T0811 (comm control)
 - **Context-aware detections** — 18 additional rules that analyze the full network state: unauthorized engineering workstations, rogue SCADA masters, lateral OT movement, abnormal protocol usage
 - **ICS malware detection** — Behavioral signatures for FrostyGoop, PIPEDREAM/INCONTROLLER, and Industroyer2
@@ -87,6 +90,7 @@ The tool achieves full feature parity with GRASSMARLIN 3.2 and extends well beyo
 - **Internet exposure analysis** — Public IPs on OT devices flagged with severity
 
 ### External Tool Integration
+
 - **Zeek** — Import conn.log, modbus.log, dnp3.log, s7comm.log with per-device event drill-down
 - **Suricata** — Import EVE JSON (flow and alert events) with alert–device correlation
 - **Nmap/Masscan** — Import scan results with `[active-scan]` tagging
@@ -96,6 +100,7 @@ The tool achieves full feature parity with GRASSMARLIN 3.2 and extends well beyo
 - **Wireshark** — Auto-detect, right-click to open, frame-level inspection
 
 ### Reporting & Export
+
 - **PDF assessment reports** — Professional reports with executive summary, asset inventory, findings, recommendations
 - **CSV/JSON export** — Assets, connections, topology data
 - **SBOM** — CISA BOD 23-01 aligned software bill of materials
@@ -105,12 +110,14 @@ The tool achieves full feature parity with GRASSMARLIN 3.2 and extends well beyo
 - **Communication allowlist** — Flow classification with firewall rule generation
 
 ### Session & Project Management
+
 - **SQLite persistence** — Save/load sessions with full asset history
 - **`.kkj` archives** — Portable ZIP-based session format
 - **Baseline drift detection** — Compare assessments, quantified drift score, new/missing/changed assets
 - **Project/engagement management** — Named engagements with metadata, session scoping
 
 ### Advanced
+
 - **Dark/light/system theme** — Persistent preference with OS detection
 - **CLI** — `--open <file>` (PCAP or .kkj), `--import-pcap <path>`
 - **Plugin architecture** — Manifest-based plugin discovery
@@ -120,7 +127,7 @@ The tool achieves full feature parity with GRASSMARLIN 3.2 and extends well beyo
 ## Beyond GRASSMARLIN
 
 | Capability | GRASSMARLIN 3.2 | Kusanagi Kajiki |
-|------------|----------------|-----------------|
+| ---------- | --------------- | --------------- |
 | Signature format | XML (opaque) | YAML (human-readable, git-friendly) |
 | Security analysis | None | ATT&CK for ICS (40+ rules) + Purdue + anomaly + CVE + malware |
 | Deep protocol parsing | Limited | 10 protocols with full dissection |
@@ -145,7 +152,7 @@ The tool achieves full feature parity with GRASSMARLIN 3.2 and extends well beyo
 ## Supported Protocols
 
 | Protocol | Port(s) | Detection | Standard / Vendor |
-|----------|---------|-----------|-------------------|
+| -------- | ------- | --------- | ----------------- |
 | Modbus TCP | 502 | Deep parse | Schneider Electric, multi-vendor |
 | DNP3 | 20000 | Deep parse | IEEE 1815 (utilities, substations) |
 | EtherNet/IP (CIP) | 44818, 2222 | Deep parse | Rockwell / Allen-Bradley (ODVA) |
@@ -177,12 +184,44 @@ The tool achieves full feature parity with GRASSMARLIN 3.2 and extends well beyo
 
 ## Installation
 
-**Quick start:** Clone → `npm install` → drop a PCAP in `tests/pcaps/` → `npm run tauri dev` → import the PCAP from the Capture tab.
+**Quick start:** Clone → `npm install` → `npm run app:dev` → import the PCAP from the Capture tab.
+
+Run all `npm` commands from the repository root (the folder that contains `package.json`).
+
+### Build/Run Commands (Simple)
+
+| Goal | Command |
+| ---- | ------- |
+| Desktop app (dev) | `npm run app:dev` |
+| Desktop app (release package) | `npm run app:build` |
+| Web/headless UI (dev) | `npm run web:dev` |
+| Web/headless frontend assets only | `npm run web:build` |
+| Web/headless release binary + frontend | `npm run web:build:release` |
+| Build both desktop + web release binaries | `npm run build:all` |
+
+### NPM Script Reference
+
+`package.json` is strict JSON, so inline comments are not allowed there. Use this table as the script "comments":
+
+| Script | What it does |
+| ------ | ------------ |
+| `npm run dev` | Starts Vite dev server for frontend-only development. |
+| `npm run build` | Builds frontend static files into `build/`. |
+| `npm run preview` | Serves the built frontend locally for quick verification. |
+| `npm run app:dev` | Runs desktop Tauri app in development mode (frontend + Rust app). |
+| `npm run app:build` | Builds desktop Tauri release bundle/installer. |
+| `npm run web:start -- [args]` | Starts the Rust headless web/API binary (`kusanaginokajiki_web`). Pass flags after `--`, for example `--port 4174`. |
+| `npm run web:build` | Frontend-only build for web/headless mode. |
+| `npm run web:dev -- [args]` | Builds frontend, then starts headless web/API server. |
+| `npm run web:build:release` | Builds frontend and compiles release binary for headless web server. |
+| `npm run build:all` | Builds both desktop release bundle and headless web release binary. |
+| `npm run check` | Runs Svelte/TypeScript checks (`svelte-check`). |
+| `npm run tauri` | Direct passthrough to Tauri CLI commands. |
 
 ### Quick Reference — Platform Dependencies
 
 | Platform | System Dependencies | Special Notes |
-|----------|-------------------|---------------|
+| -------- | ------------------- | ------------- |
 | **Fedora/RHEL** | `libpcap-devel webkit2gtk4.1-devel libsoup3-devel javascriptcoregtk4.1-devel` | Primary dev platform |
 | **Ubuntu/Debian** | `libpcap-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf` | |
 | **macOS** | `brew install libpcap` + Xcode CLI tools | |
@@ -195,8 +234,7 @@ sudo dnf install libpcap-devel webkit2gtk4.1-devel libsoup3-devel javascriptcore
 git clone https://github.com/TheSecurityLead/KusanagiNoKajiki.git
 cd KusanagiNoKajiki
 npm install
-npm run build
-npm run tauri dev
+npm run app:dev
 ```
 
 ### Ubuntu / Debian
@@ -206,8 +244,7 @@ sudo apt install libpcap-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2
 git clone https://github.com/TheSecurityLead/KusanagiNoKajiki.git
 cd KusanagiNoKajiki
 npm install
-npm run build
-npm run tauri dev
+npm run app:dev
 ```
 
 ### macOS
@@ -218,13 +255,13 @@ xcode-select --install
 git clone https://github.com/TheSecurityLead/KusanagiNoKajiki.git
 cd KusanagiNoKajiki
 npm install
-npm run build
-npm run tauri dev
+npm run app:dev
 ```
 
 ### Windows
 
 **Prerequisites (install in order):**
+
 1. **Visual Studio C++ Build Tools** — "Desktop development with C++" workload
 2. **Rust** via [rustup.rs](https://rustup.rs) (stable-x86_64-pc-windows-msvc)
 3. **Npcap** — check "Install Npcap in WinPcap API-compatible Mode", download SDK, set `LIB` to SDK `Lib\x64`
@@ -234,8 +271,7 @@ npm run tauri dev
 git clone https://github.com/TheSecurityLead/KusanagiNoKajiki.git
 cd KusanagiNoKajiki
 npm install
-npm run build
-npm run tauri dev
+npm run app:dev
 ```
 
 > If `npm install` fails with ERESOLVE, see Troubleshooting below.
@@ -244,7 +280,42 @@ npm run tauri dev
 
 ```bash
 sudo setcap cap_net_raw,cap_net_admin=eip src-tauri/target/release/kusanaginokajiki
+sudo setcap cap_net_raw,cap_net_admin=eip src-tauri/target/release/kusanaginokajiki_web
 ```
+
+### Headless Web Server Mode (No Desktop/WebView)
+
+This repo now includes a headless server that:
+
+- serves the built Svelte frontend over HTTP
+- exposes backend APIs used by the frontend so the full UI can run from a browser without a desktop environment
+
+```bash
+# Dev: build frontend + start headless API/web server
+npm run web:dev -- --host 0.0.0.0 --port 4173
+
+# Release build for web/headless deployment
+npm run web:build:release
+```
+
+Open `http://<server-ip>:4173` from a browser.
+
+In headless mode:
+
+- **Capture → Import PCAP** opens a server-side chooser list from one fixed import directory, then imports by server path.
+- Other import/export dialogs use server-side path prompts.
+
+Notes:
+
+- Import roots are under `~/.kusanaginokajiki/imports/<kind>/` (auto-created), including:
+  - `pcap`, `zeek`, `suricata`, `nmap`, `masscan`, `wazuh`, `sinema`, `tia`, `session_archive`
+  - `physical_config`, `physical_mac`, `physical_neighbor`, `physical_arp`
+  - legacy `KK_HEADLESS_IMPORT_DIR` still overrides the `pcap` folder only
+- You can override the imports root with `KK_HEADLESS_IMPORTS_ROOT`.
+- PCAP file picker list size is capped by `KK_HEADLESS_IMPORT_LIST_LIMIT` (default: `500`) to keep UI load fast on large directories.
+- Export outputs are written to `~/.kusanaginokajiki/export/` by default (`KK_HEADLESS_EXPORT_DIR` to override).
+- Prompted paths are resolved on the server host filesystem (not your local browser machine).
+- Features that launch local desktop applications (for example Wireshark) require those tools to exist on the server host.
 
 ---
 
@@ -268,7 +339,7 @@ kusanaginokajiki --import-pcap /path/to/capture.pcap
 
 ## Architecture
 
-```
+```text
 ┌────────────────────────────────────────────────────────────┐
 │  SvelteKit Frontend (Tauri Webview)                        │
 │  Topology · Inventory · Analysis · Export · Projects       │

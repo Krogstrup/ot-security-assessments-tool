@@ -3,6 +3,7 @@
 	import { signatureSummary } from '$lib/stores';
 	import { getSignatures, reloadSignatures, testSignature } from '$lib/utils/tauri';
 	import type { SignatureTestResult } from '$lib/types';
+	import { CONFIDENCE_COLORS as confidenceColors } from '$lib/constants';
 
 	// CodeMirror loaded dynamically (heavy dependency)
 	let editorContainer: HTMLDivElement;
@@ -127,14 +128,6 @@ payloads: []
 			setEditorContent(yamlStr);
 		}
 	}
-
-	const confidenceColors: Record<number, string> = {
-		5: '#10b981',
-		4: '#3b82f6',
-		3: '#f59e0b',
-		2: '#f97316',
-		1: '#ef4444'
-	};
 
 	onMount(async () => {
 		await initEditor();

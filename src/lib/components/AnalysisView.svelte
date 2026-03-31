@@ -13,6 +13,7 @@
 	import { assetCount } from '$lib/stores';
 	import type { CorrelatedAlert } from '$lib/types';
 	import BaselineDriftView from './BaselineDriftView.svelte';
+	import { PURDUE_LABELS as purdueLabels } from '$lib/constants';
 
 	let activeSection = $state<'findings' | 'purdue' | 'anomalies' | 'summary' | 'drift' | 'switch_security' | 'external_alerts' | 'malware' | 'compliance'>('summary');
 	let switchFindings = $state<SwitchSecurityFinding[]>([]);
@@ -124,14 +125,6 @@
 		info: 'var(--gm-severity-info)'
 	};
 
-	const purdueLabels: Record<number, string> = {
-		0: 'L0 — Process',
-		1: 'L1 — Basic Control',
-		2: 'L2 — Supervisory',
-		3: 'L3 — Site Operations',
-		4: 'L4 — Enterprise IT',
-		5: 'L5 — Enterprise Network'
-	};
 
 	const purdueColors: Record<number, string> = {
 		0: 'var(--gm-purdue-l0)',

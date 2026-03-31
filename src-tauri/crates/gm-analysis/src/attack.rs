@@ -15,16 +15,9 @@
 
 use std::collections::{HashMap, HashSet};
 
+use gm_constants::{CLEARTEXT_OT_PORTS, MODBUS_WRITE_FCS, OT_SERVER_PORTS};
+
 use crate::{AnalysisInput, CaptureContext, Finding, FindingType, Severity};
-
-/// Well-known OT server ports used to identify PLCs/RTUs.
-const OT_SERVER_PORTS: &[u16] = &[
-    102, 502, 1089, 1090, 1091, 2222, 2404, 4840, 5007, 5094, 18245, 18246, 20000, 34962, 34963,
-    34964, 44818, 47808,
-];
-
-/// Modbus write function codes.
-const MODBUS_WRITE_FCS: &[u8] = &[5, 6, 15, 16];
 
 /// Run all ATT&CK technique detections on the input data.
 ///
@@ -787,20 +780,6 @@ fn ip_to_slash24(ip: &str) -> String {
 /// are cleartext. This function computes what percentage of OT connections
 /// are unencrypted and generates a finding if any cleartext OT traffic exists.
 fn detect_cleartext_ot(input: &AnalysisInput) -> Vec<Finding> {
-    const CLEARTEXT_OT_PORTS: &[u16] = &[
-        502,   // Modbus
-        20000, // DNP3
-        44818, // EtherNet/IP
-        102,   // S7comm (ISO-TSAP)
-        47808, // BACnet
-        2404,  // IEC 104
-        34962, 34963, 34964, // PROFINET
-        4840,  // OPC UA (unencrypted)
-        1883,  // MQTT (unencrypted)
-        5094,  // HART-IP
-        18245, 18246, // GE SRTP
-    ];
-
     let mut findings = Vec::new();
     let mut cleartext_by_proto: HashMap<String, u64> = HashMap::new();
     let mut total_cleartext: u64 = 0;

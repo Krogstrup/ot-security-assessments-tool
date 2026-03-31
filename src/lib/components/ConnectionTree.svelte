@@ -1,30 +1,10 @@
 <script lang="ts">
 	import { connectionTree, selectedAssetId } from '$lib/stores';
 	import { getConnectionPackets, openInWireshark, detectWireshark, getConnectionFrames } from '$lib/utils/tauri';
+	import { savePathDialog } from '$lib/utils/dialog';
 	import type { Connection, PacketSummary, DeviceType, FrameRow } from '$lib/types';
 	import { onMount } from 'svelte';
-
-	const deviceTypeLabels: Record<DeviceType, string> = {
-		plc: 'PLC',
-		rtu: 'RTU',
-		hmi: 'HMI',
-		historian: 'Historian',
-		engineering_workstation: 'Eng. WS',
-		scada_server: 'SCADA Server',
-		it_device: 'IT Device',
-		unknown: 'Unknown'
-	};
-
-	const deviceTypeColors: Record<DeviceType, string> = {
-		plc: '#f59e0b',
-		rtu: '#10b981',
-		hmi: '#3b82f6',
-		historian: '#8b5cf6',
-		engineering_workstation: '#06b6d4',
-		scada_server: '#ec4899',
-		it_device: '#475569',
-		unknown: '#64748b'
-	};
+	import { DEVICE_TYPE_LABELS as deviceTypeLabels, DEVICE_TYPE_COLORS as deviceTypeColors } from '$lib/constants';
 
 	// Track which tree nodes are expanded
 	let expandedNodes = $state<Set<string>>(new Set());
@@ -149,8 +129,7 @@
 	async function handleExportCsv() {
 		if (!viewFrames.connId) return;
 		try {
-			const { save } = await import('@tauri-apps/plugin-dialog');
-			const path = await save({
+			const path = await savePathDialog({
 				title: 'Export Frames as CSV',
 				defaultPath: `frames_${viewFrames.connId.slice(0, 8)}.csv`,
 				filters: [{ name: 'CSV Files', extensions: ['csv'] }]

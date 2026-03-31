@@ -7,8 +7,16 @@ export default defineConfig({
 
 	// Tauri expects a fixed port during development
 	server: {
+		host: '0.0.0.0',
 		port: 1420,
-		strictPort: true
+		strictPort: true,
+		proxy: {
+			// In browser/headless development, forward frontend /api calls to the Rust headless server.
+			'/api': {
+				target: 'http://127.0.0.1:4173',
+				changeOrigin: true
+			}
+		}
 	},
 
 	// Env prefix for Tauri

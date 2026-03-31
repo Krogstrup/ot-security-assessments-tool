@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { open } from '@tauri-apps/plugin-dialog';
+	import { openPathDialog } from '$lib/utils/dialog';
 	import {
 		physicalTopology,
 		physicalHighlightIp,
@@ -415,7 +415,7 @@
 		importError = '';
 		importSuccess = '';
 
-		const result = await open({
+		const result = await openPathDialog({
 			multiple: false,
 			filters: [{ name: 'Text Files', extensions: ['txt', 'cfg', 'conf', 'log'] }]
 		});

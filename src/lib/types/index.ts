@@ -2,9 +2,35 @@
  * Kusanagi Kajiki — Core Types
  *
  * These types define the IPC contract between the Rust backend
- * and the SvelteKit frontend. Keep these in sync with the Rust
- * structs in src-tauri/src/commands/*.rs
+ * and the SvelteKit frontend. The canonical source for these types
+ * is the Rust structs in src-tauri/src/commands/*.rs (annotated with
+ * #[derive(Serialize)]). When modifying Rust structs, update this file
+ * accordingly (or generate via ts-rs if configured).
  */
+
+// ─── Structured error type ────────────────────────────────────────────────────
+
+/**
+ * Machine-readable error returned by all Tauri command handlers.
+ *
+ * Serialised as `{ code: "no_session", message?: "..." }`.
+ * The frontend can switch on `code` to decide how to handle the error.
+ */
+export type AppErrorCode =
+	| 'state_lock'
+	| 'no_session'
+	| 'no_project'
+	| 'invalid_input'
+	| 'parse_failure'
+	| 'db_error'
+	| 'io_error'
+	| 'no_capture_running'
+	| 'external_process';
+
+export interface AppError {
+	code: AppErrorCode;
+	message?: string;
+}
 
 // ─── Network Interfaces ───────────────────────────────────────
 

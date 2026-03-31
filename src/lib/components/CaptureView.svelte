@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { interfaces, captureStatus, captureStats, assets, connections, topology, sessions, currentSession, assetCount, connectionCount } from '$lib/stores';
 	import {
-		importPcap, cancelImport, onImportProgress,
+		importPcap, listHeadlessImportFiles, cancelImport, onImportProgress,
 		getAssets, getConnections, getDataCounts, getTopology, getProtocolStats,
 		startCapture, stopCapture, pauseCapture, resumeCapture,
 		onCaptureStats, onCaptureError,
@@ -9,9 +9,10 @@
 		exportSessionArchive, importSessionArchive,
 		importZeekLogs, importSuricataEve, importNmapXml, importMasscanJson, importWazuhAlerts,
 		importSinemaCsv, importTiaXml,
-		getFindings
+		getFindings, isTauriRuntime
 	} from '$lib/utils/tauri';
-	import type { ImportProgressEvent } from '$lib/utils/tauri';
+	import { openPathDialog, savePathDialog } from '$lib/utils/dialog';
+	import type { ImportProgressEvent, HeadlessImportKind } from '$lib/utils/tauri';
 	import { protocolStats } from '$lib/stores';
 	import type { FileImportResult, CaptureStatsEvent, SessionInfo, IngestImportResult } from '$lib/types';
 	import { onMount, onDestroy } from 'svelte';
@@ -24,6 +25,17 @@
 	let totalStats = $state({ packets: 0, assets: 0, connections: 0, ms: 0, files: 0 });
 	let importProgress = $state<ImportProgressEvent | null>(null);
 	let unlistenProgress: (() => void) | null = null;
+	let showServerPicker = $state(false);
+	let serverPickerLoading = $state(false);
+	let serverPickerError = $state('');
+	let serverPickerBaseDir = $state('');
+	let serverPickerFiles = $state<Array<{ name: string; path: string; size_bytes: number }>>([]);
+	let selectedServerPaths = $state<string[]>([]);
+	let serverPickerListLimit = $state(0);
+	let serverPickerTruncated = $state(false);
+	let serverPickerTitle = $state('Select Server Files');
+	let serverPickerAllowMultiple = $state(true);
+	let serverPickerResolve: ((paths: string[] | null) => void) | null = null;
 
 	// ── Live Capture State ────────────────────────────────
 	let selectedInterface = $state('');
@@ -178,10 +190,113 @@
 	}
 
 	// ── PCAP Import ──────────────────────────────────────
+	async function runPcapImport(importTask: Promise<import('$lib/types').ImportResult>, fileCount: number) {
+		importStatus = 'importing';
+		captureSummary = null;
+		importProgress = null;
+		importMessage = `Importing ${fileCount} file${fileCount > 1 ? 's' : ''}...`;
+		fileResults = [];
+
+		const result = await importTask;
+
+		importProgress = null;
+		importStatus = 'done';
+		fileResults = result.per_file;
+		totalStats = {
+			packets: result.packet_count,
+			assets: result.asset_count,
+			connections: result.connection_count,
+			ms: result.duration_ms,
+			files: result.file_count
+		};
+		importMessage = `Imported ${result.packet_count.toLocaleString()} packets from ${result.file_count} file${result.file_count > 1 ? 's' : ''} → ${result.asset_count} assets, ${result.connection_count} connections (${result.duration_ms}ms)`;
+
+		const [assetPage, connPage, newTopology, newStats, counts] = await Promise.all([
+			getAssets(0, 200),
+			getConnections(0, 500),
+			getTopology(),
+			getProtocolStats(),
+			getDataCounts()
+		]);
+
+		assets.set(assetPage.assets);
+		connections.set(connPage.connections);
+		topology.set(newTopology);
+		protocolStats.set(newStats);
+		assetCount.set(counts.asset_count);
+		connectionCount.set(counts.connection_count);
+		await buildCaptureSummary();
+	}
+
+	function toggleServerPickerPath(path: string, checked: boolean) {
+		if (!serverPickerAllowMultiple) {
+			selectedServerPaths = checked ? [path] : [];
+			return;
+		}
+		if (checked) {
+			if (!selectedServerPaths.includes(path)) {
+				selectedServerPaths = [...selectedServerPaths, path];
+			}
+			return;
+		}
+		selectedServerPaths = selectedServerPaths.filter((p) => p !== path);
+	}
+
+	function closeServerPicker(result: string[] | null) {
+		showServerPicker = false;
+		const resolve = serverPickerResolve;
+		serverPickerResolve = null;
+		if (resolve) resolve(result);
+	}
+
+	async function openServerImportPicker(
+		kind: HeadlessImportKind,
+		title: string,
+		multiple: boolean
+	): Promise<string[] | null> {
+		serverPickerLoading = true;
+		serverPickerError = '';
+		serverPickerFiles = [];
+		serverPickerBaseDir = '';
+		selectedServerPaths = [];
+		serverPickerListLimit = 0;
+		serverPickerTruncated = false;
+		serverPickerTitle = title;
+		serverPickerAllowMultiple = multiple;
+		showServerPicker = true;
+
+		const pickerResult = new Promise<string[] | null>((resolve) => {
+			serverPickerResolve = resolve;
+		});
+
+		try {
+			const listing = await listHeadlessImportFiles(kind);
+			serverPickerBaseDir = listing.base_dir;
+			serverPickerFiles = listing.files;
+			serverPickerListLimit = listing.list_limit;
+			serverPickerTruncated = listing.truncated;
+			if (listing.files.length === 0) {
+				serverPickerError = `No importable files found in ${listing.base_dir}`;
+			}
+		} catch (err) {
+			closeServerPicker(null);
+			throw err;
+		} finally {
+			serverPickerLoading = false;
+		}
+		return pickerResult;
+	}
+
 	async function handleImportPcap() {
 		try {
-			const { open } = await import('@tauri-apps/plugin-dialog');
-			const selected = await open({
+			if (!isTauriRuntime()) {
+				const paths = await openServerImportPicker('pcap', 'Select Server PCAP Files', true);
+				if (!paths || paths.length === 0) return;
+				await runPcapImport(importPcap(paths), paths.length);
+				return;
+			}
+
+			const selected = await openPathDialog({
 				title: 'Import PCAP Files',
 				multiple: true,
 				filters: [
@@ -189,47 +304,10 @@
 					{ name: 'All Files', extensions: ['*'] }
 				]
 			});
-
-			if (!selected || selected.length === 0) return;
-			const paths: string[] = selected;
+			if (!selected) return;
+			const paths = Array.isArray(selected) ? selected : [selected];
 			if (paths.length === 0) return;
-
-			importStatus = 'importing';
-			captureSummary = null;
-			importProgress = null;
-			const fileCount = paths.length;
-			importMessage = `Importing ${fileCount} file${fileCount > 1 ? 's' : ''}...`;
-			fileResults = [];
-
-			const result = await importPcap(paths);
-
-			importProgress = null;
-			importStatus = 'done';
-			fileResults = result.per_file;
-			totalStats = {
-				packets: result.packet_count,
-				assets: result.asset_count,
-				connections: result.connection_count,
-				ms: result.duration_ms,
-				files: result.file_count
-			};
-			importMessage = `Imported ${result.packet_count.toLocaleString()} packets from ${result.file_count} file${result.file_count > 1 ? 's' : ''} → ${result.asset_count} assets, ${result.connection_count} connections (${result.duration_ms}ms)`;
-
-			const [assetPage, connPage, newTopology, newStats, counts] = await Promise.all([
-				getAssets(0, 200),
-				getConnections(0, 500),
-				getTopology(),
-				getProtocolStats(),
-				getDataCounts()
-			]);
-
-			assets.set(assetPage.assets);
-			connections.set(connPage.connections);
-			topology.set(newTopology);
-			protocolStats.set(newStats);
-			assetCount.set(counts.asset_count);
-			connectionCount.set(counts.connection_count);
-			await buildCaptureSummary();
+			await runPcapImport(importPcap(paths), paths.length);
 		} catch (err) {
 			importProgress = null;
 			importStatus = 'error';
@@ -265,9 +343,7 @@
 
 	async function handleStopCapture() {
 		try {
-			// Show save dialog
-			const { save } = await import('@tauri-apps/plugin-dialog');
-			const savePath = await save({
+			const savePath = await savePathDialog({
 				title: 'Save Capture as PCAP',
 				defaultPath: `capture_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.pcap`,
 				filters: [
@@ -405,8 +481,7 @@
 
 	async function handleExportSession(session: SessionInfo) {
 		try {
-			const { save } = await import('@tauri-apps/plugin-dialog');
-			const path = await save({
+			const path = await savePathDialog({
 				title: 'Export Session Archive',
 				defaultPath: `${session.name.replace(/[^a-zA-Z0-9_-]/g, '_')}.kkj`,
 				filters: [
@@ -426,17 +501,22 @@
 
 	async function handleImportArchive() {
 		try {
-			const { open } = await import('@tauri-apps/plugin-dialog');
-			const selected = await open({
-				title: 'Import Session Archive',
-				multiple: false,
-				filters: [
-					{ name: 'Kusanagi Kajiki Archive', extensions: ['kkj'] },
-					{ name: 'All Files', extensions: ['*'] }
-				]
-			});
-			if (!selected) return;
-			const path = typeof selected === 'string' ? selected : selected[0];
+			let path: string | null = null;
+			if (!isTauriRuntime()) {
+				const paths = await openServerImportPicker('session_archive', 'Import Session Archive', false);
+				path = paths && paths.length > 0 ? paths[0] : null;
+			} else {
+				const selected = await openPathDialog({
+					title: 'Import Session Archive',
+					multiple: false,
+					filters: [
+						{ name: 'Kusanagi Kajiki Archive', extensions: ['kkj'] },
+						{ name: 'All Files', extensions: ['*'] }
+					]
+				});
+				if (!selected) return;
+				path = Array.isArray(selected) ? selected[0] : selected;
+			}
 			if (!path) return;
 			const info = await importSessionArchive(path);
 			currentSession.set(info);
@@ -462,17 +542,22 @@
 	// ── External Tool Import Handlers ────────────────────
 	async function handleImportZeek() {
 		try {
-			const { open } = await import('@tauri-apps/plugin-dialog');
-			const selected = await open({
-				title: 'Import Zeek Logs',
-				multiple: true,
-				filters: [
-					{ name: 'Zeek Logs', extensions: ['log'] },
-					{ name: 'All Files', extensions: ['*'] }
-				]
-			});
-			if (!selected || selected.length === 0) return;
-			const paths: string[] = selected;
+			let paths: string[] = [];
+			if (!isTauriRuntime()) {
+				const selected = await openServerImportPicker('zeek', 'Import Zeek Logs', true);
+				paths = selected ?? [];
+			} else {
+				const selected = await openPathDialog({
+					title: 'Import Zeek Logs',
+					multiple: true,
+					filters: [
+						{ name: 'Zeek Logs', extensions: ['log'] },
+						{ name: 'All Files', extensions: ['*'] }
+					]
+				});
+				if (!selected) return;
+				paths = Array.isArray(selected) ? selected : [selected];
+			}
 			if (paths.length === 0) return;
 
 			ingestStatus = 'importing';
@@ -493,17 +578,22 @@
 
 	async function handleImportSuricata() {
 		try {
-			const { open } = await import('@tauri-apps/plugin-dialog');
-			const selected = await open({
-				title: 'Import Suricata eve.json',
-				multiple: false,
-				filters: [
-					{ name: 'JSON Files', extensions: ['json'] },
-					{ name: 'All Files', extensions: ['*'] }
-				]
-			});
-			if (!selected) return;
-			const path = typeof selected === 'string' ? selected : selected[0];
+			let path: string | null = null;
+			if (!isTauriRuntime()) {
+				const paths = await openServerImportPicker('suricata', 'Import Suricata eve.json', false);
+				path = paths && paths.length > 0 ? paths[0] : null;
+			} else {
+				const selected = await openPathDialog({
+					title: 'Import Suricata eve.json',
+					multiple: false,
+					filters: [
+						{ name: 'JSON Files', extensions: ['json'] },
+						{ name: 'All Files', extensions: ['*'] }
+					]
+				});
+				if (!selected) return;
+				path = Array.isArray(selected) ? selected[0] : selected;
+			}
 			if (!path) return;
 
 			ingestStatus = 'importing';
@@ -524,17 +614,22 @@
 
 	async function handleImportNmap() {
 		try {
-			const { open } = await import('@tauri-apps/plugin-dialog');
-			const selected = await open({
-				title: 'Import Nmap XML',
-				multiple: false,
-				filters: [
-					{ name: 'XML Files', extensions: ['xml'] },
-					{ name: 'All Files', extensions: ['*'] }
-				]
-			});
-			if (!selected) return;
-			const path = typeof selected === 'string' ? selected : selected[0];
+			let path: string | null = null;
+			if (!isTauriRuntime()) {
+				const paths = await openServerImportPicker('nmap', 'Import Nmap XML', false);
+				path = paths && paths.length > 0 ? paths[0] : null;
+			} else {
+				const selected = await openPathDialog({
+					title: 'Import Nmap XML',
+					multiple: false,
+					filters: [
+						{ name: 'XML Files', extensions: ['xml'] },
+						{ name: 'All Files', extensions: ['*'] }
+					]
+				});
+				if (!selected) return;
+				path = Array.isArray(selected) ? selected[0] : selected;
+			}
 			if (!path) return;
 
 			ingestStatus = 'importing';
@@ -555,17 +650,22 @@
 
 	async function handleImportMasscan() {
 		try {
-			const { open } = await import('@tauri-apps/plugin-dialog');
-			const selected = await open({
-				title: 'Import Masscan JSON',
-				multiple: false,
-				filters: [
-					{ name: 'JSON Files', extensions: ['json'] },
-					{ name: 'All Files', extensions: ['*'] }
-				]
-			});
-			if (!selected) return;
-			const path = typeof selected === 'string' ? selected : selected[0];
+			let path: string | null = null;
+			if (!isTauriRuntime()) {
+				const paths = await openServerImportPicker('masscan', 'Import Masscan JSON', false);
+				path = paths && paths.length > 0 ? paths[0] : null;
+			} else {
+				const selected = await openPathDialog({
+					title: 'Import Masscan JSON',
+					multiple: false,
+					filters: [
+						{ name: 'JSON Files', extensions: ['json'] },
+						{ name: 'All Files', extensions: ['*'] }
+					]
+				});
+				if (!selected) return;
+				path = Array.isArray(selected) ? selected[0] : selected;
+			}
 			if (!path) return;
 
 			ingestStatus = 'importing';
@@ -586,17 +686,23 @@
 
 	async function handleImportWazuh() {
 		try {
-			const { open } = await import('@tauri-apps/plugin-dialog');
-			const selected = await open({
-				title: 'Import Wazuh Alert Export',
-				multiple: false,
-				filters: [
-					{ name: 'JSON Files', extensions: ['json', 'jsonl', 'ndjson'] },
-					{ name: 'All Files', extensions: ['*'] }
-				]
-			});
-			if (!selected) return;
-			const path = selected as string;
+			let path: string | null = null;
+			if (!isTauriRuntime()) {
+				const paths = await openServerImportPicker('wazuh', 'Import Wazuh Alert Export', false);
+				path = paths && paths.length > 0 ? paths[0] : null;
+			} else {
+				const selected = await openPathDialog({
+					title: 'Import Wazuh Alert Export',
+					multiple: false,
+					filters: [
+						{ name: 'JSON Files', extensions: ['json', 'jsonl', 'ndjson'] },
+						{ name: 'All Files', extensions: ['*'] }
+					]
+				});
+				if (!selected) return;
+				path = Array.isArray(selected) ? selected[0] : selected;
+			}
+			if (!path) return;
 
 			ingestStatus = 'importing';
 			ingestMessage = 'Importing Wazuh alerts...';
@@ -616,17 +722,23 @@
 
 	async function handleImportSinemaCsv() {
 		try {
-			const { open } = await import('@tauri-apps/plugin-dialog');
-			const selected = await open({
-				title: 'Import SINEMA Server CSV',
-				multiple: false,
-				filters: [
-					{ name: 'CSV Files', extensions: ['csv', 'txt'] },
-					{ name: 'All Files', extensions: ['*'] }
-				]
-			});
-			if (!selected) return;
-			const path = selected as string;
+			let path: string | null = null;
+			if (!isTauriRuntime()) {
+				const paths = await openServerImportPicker('sinema', 'Import SINEMA Server CSV', false);
+				path = paths && paths.length > 0 ? paths[0] : null;
+			} else {
+				const selected = await openPathDialog({
+					title: 'Import SINEMA Server CSV',
+					multiple: false,
+					filters: [
+						{ name: 'CSV Files', extensions: ['csv', 'txt'] },
+						{ name: 'All Files', extensions: ['*'] }
+					]
+				});
+				if (!selected) return;
+				path = Array.isArray(selected) ? selected[0] : selected;
+			}
+			if (!path) return;
 
 			ingestStatus = 'importing';
 			ingestMessage = 'Importing SINEMA Server CSV...';
@@ -646,17 +758,23 @@
 
 	async function handleImportTiaXml() {
 		try {
-			const { open } = await import('@tauri-apps/plugin-dialog');
-			const selected = await open({
-				title: 'Import TIA Portal XML',
-				multiple: false,
-				filters: [
-					{ name: 'XML Files', extensions: ['xml'] },
-					{ name: 'All Files', extensions: ['*'] }
-				]
-			});
-			if (!selected) return;
-			const path = selected as string;
+			let path: string | null = null;
+			if (!isTauriRuntime()) {
+				const paths = await openServerImportPicker('tia', 'Import TIA Portal XML', false);
+				path = paths && paths.length > 0 ? paths[0] : null;
+			} else {
+				const selected = await openPathDialog({
+					title: 'Import TIA Portal XML',
+					multiple: false,
+					filters: [
+						{ name: 'XML Files', extensions: ['xml'] },
+						{ name: 'All Files', extensions: ['*'] }
+					]
+				});
+				if (!selected) return;
+				path = Array.isArray(selected) ? selected[0] : selected;
+			}
+			if (!path) return;
 
 			ingestStatus = 'importing';
 			ingestMessage = 'Importing TIA Portal XML...';
@@ -706,6 +824,88 @@
 			<button class="action-btn primary" onclick={handleImportPcap} disabled={importStatus === 'importing' || isCapturing}>
 				{importStatus === 'importing' ? 'Importing...' : 'Import PCAP Files'}
 			</button>
+
+			{#if showServerPicker}
+				<div
+					class="server-picker-overlay"
+					role="button"
+					tabindex="0"
+					onclick={() => {
+						closeServerPicker(null);
+					}}
+					onkeydown={(e) => {
+						if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') {
+							closeServerPicker(null);
+						}
+					}}
+				>
+					<div
+						class="server-picker-dialog"
+						role="dialog"
+						aria-modal="true"
+						tabindex="-1"
+						onclick={(e) => e.stopPropagation()}
+						onkeydown={(e) => e.stopPropagation()}
+					>
+						<div class="server-picker-header">
+							<h4 class="server-picker-title">{serverPickerTitle}</h4>
+							<button
+								class="server-picker-close"
+								onclick={() => {
+									closeServerPicker(null);
+								}}
+							>&times;</button>
+						</div>
+						<div class="server-picker-subtitle">
+							Fixed import directory: <code>{serverPickerBaseDir || '(loading...)'}</code>
+						</div>
+						{#if serverPickerTruncated}
+							<div class="server-picker-warning">
+								Showing first {serverPickerFiles.length} files (limit {serverPickerListLimit}). Narrow
+								<code>KK_HEADLESS_IMPORTS_ROOT</code> or increase
+								<code>KK_HEADLESS_IMPORT_LIST_LIMIT</code> on the server.
+							</div>
+						{/if}
+
+						{#if serverPickerLoading}
+							<div class="server-picker-empty">Loading server files...</div>
+						{:else if serverPickerError}
+							<div class="import-result error">{serverPickerError}</div>
+						{:else if serverPickerFiles.length === 0}
+							<div class="server-picker-empty">No importable PCAP files found.</div>
+						{:else}
+							<div class="server-picker-list">
+								{#each serverPickerFiles as file}
+										<label class="server-picker-row">
+											<input
+												type={serverPickerAllowMultiple ? 'checkbox' : 'radio'}
+												name="server-import-file"
+												checked={selectedServerPaths.includes(file.path)}
+												onchange={(e) =>
+													toggleServerPickerPath(file.path, (e.currentTarget as HTMLInputElement).checked)}
+										/>
+										<span class="server-picker-name">{file.name}</span>
+										<span class="server-picker-size">{formatBytes(file.size_bytes)}</span>
+									</label>
+								{/each}
+							</div>
+						{/if}
+
+						<div class="server-picker-actions">
+							<button class="action-btn secondary" onclick={() => { closeServerPicker(null); }}>
+								Cancel
+							</button>
+							<button
+								class="action-btn primary"
+								onclick={() => closeServerPicker([...selectedServerPaths])}
+								disabled={serverPickerLoading || selectedServerPaths.length === 0}
+							>
+								Select ({selectedServerPaths.length})
+							</button>
+						</div>
+					</div>
+				</div>
+			{/if}
 
 			{#if importStatus === 'importing'}
 				<div class="import-progress-card">
@@ -1355,6 +1555,125 @@
 		background: rgba(59, 130, 246, 0.1);
 		border: 1px solid rgba(59, 130, 246, 0.2);
 		color: #3b82f6;
+	}
+
+	.server-picker-overlay {
+		position: fixed;
+		inset: 0;
+		background: rgba(2, 6, 23, 0.68);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 16px;
+		z-index: 1200;
+	}
+
+	.server-picker-dialog {
+		width: min(760px, 96vw);
+		max-height: 84vh;
+		overflow: hidden;
+		background: var(--gm-bg-secondary);
+		border: 1px solid var(--gm-border);
+		border-radius: 8px;
+		padding: 14px;
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+	}
+
+	.server-picker-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+	}
+
+	.server-picker-title {
+		margin: 0;
+		font-size: 12px;
+		font-weight: 600;
+		color: var(--gm-text-primary);
+	}
+
+	.server-picker-close {
+		background: transparent;
+		border: 1px solid var(--gm-border);
+		color: var(--gm-text-muted);
+		border-radius: 6px;
+		width: 28px;
+		height: 28px;
+		font-size: 18px;
+		line-height: 1;
+		cursor: pointer;
+	}
+
+	.server-picker-subtitle {
+		font-size: 11px;
+		color: var(--gm-text-muted);
+	}
+
+	.server-picker-subtitle code {
+		color: var(--gm-text-primary);
+	}
+
+	.server-picker-warning {
+		font-size: 11px;
+		color: #fbbf24;
+		background: rgba(251, 191, 36, 0.1);
+		border: 1px solid rgba(251, 191, 36, 0.25);
+		border-radius: 6px;
+		padding: 8px 10px;
+		line-height: 1.5;
+	}
+
+	.server-picker-warning code {
+		color: #fde68a;
+	}
+
+	.server-picker-list {
+		border: 1px solid var(--gm-border);
+		border-radius: 6px;
+		background: var(--gm-bg-panel);
+		max-height: 44vh;
+		overflow: auto;
+	}
+
+	.server-picker-row {
+		display: grid;
+		grid-template-columns: 20px 1fr auto;
+		gap: 10px;
+		align-items: center;
+		padding: 8px 10px;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+		font-size: 11px;
+		cursor: pointer;
+	}
+
+	.server-picker-row:last-child {
+		border-bottom: none;
+	}
+
+	.server-picker-name {
+		color: var(--gm-text-primary);
+		word-break: break-all;
+	}
+
+	.server-picker-size {
+		color: var(--gm-text-muted);
+		white-space: nowrap;
+	}
+
+	.server-picker-empty {
+		font-size: 11px;
+		color: var(--gm-text-muted);
+		padding: 10px;
+		border: 1px dashed var(--gm-border);
+		border-radius: 6px;
+	}
+
+	.server-picker-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 8px;
 	}
 
 	/* ── Import progress card ──────────────────────── */
