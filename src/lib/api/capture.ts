@@ -4,7 +4,7 @@
 
 import { invokeCompat, httpJson, isTauriRuntime } from './core';
 import { listen } from '@tauri-apps/api/event';
-import type { ImportResult, CaptureStatusInfo, StopCaptureResult, PacketEvent, CaptureStatsEvent } from '/types';
+import type { ImportResult, CaptureStatusInfo, StopCaptureResult, PacketEvent, CaptureStatsEvent } from '$lib/types';
 import type { HeadlessImportKind, HeadlessImportPcapList } from './system';
 
 export async function importPcap(paths: string[]): Promise<ImportResult> {

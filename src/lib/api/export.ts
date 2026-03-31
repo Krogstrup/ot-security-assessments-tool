@@ -3,7 +3,7 @@
  */
 
 import { invokeCompat } from './core';
-import type { ReportConfig, FilteredPcapResult, AllowlistEntry, EnforcementFormat, SegmentationReport } from '/types';
+import type { ReportConfig, FilteredPcapResult, AllowlistEntry, EnforcementFormat, SegmentationReport } from '$lib/types';
 
 export async function exportAssetsCsv(outputPath: string): Promise<string> {
 	return invokeCompat<string>('export_assets_csv', { outputPath });

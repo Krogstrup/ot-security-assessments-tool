@@ -3,7 +3,7 @@
  */
 
 import { invokeCompat } from './core';
-import type { Project, ProjectSummary } from '/types';
+import type { Project, ProjectSummary } from '$lib/types';
 
 export async function createProject(
 	name: string,

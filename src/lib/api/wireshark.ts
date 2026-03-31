@@ -3,7 +3,7 @@
  */
 
 import { invokeCompat } from './core';
-import type { WiresharkInfo, FrameRow } from '/types';
+import type { WiresharkInfo, FrameRow } from '$lib/types';
 
 export async function detectWireshark(): Promise<WiresharkInfo> {
 	return invokeCompat<WiresharkInfo>('detect_wireshark');

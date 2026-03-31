@@ -3,7 +3,7 @@
  */
 
 import { invokeCompat, httpJson, isTauriRuntime } from './core';
-import type { NetworkInterface, UserSettings, TimelineRange, PluginManifest } from '/types';
+import type { NetworkInterface, UserSettings, TimelineRange, PluginManifest } from '$lib/types';
 
 export async function listInterfaces(): Promise<NetworkInterface[]> {
 	if (!isTauriRuntime()) {

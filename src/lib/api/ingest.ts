@@ -3,7 +3,7 @@
  */
 
 import { invokeCompat } from './core';
-import type { IngestImportResult } from '/types';
+import type { IngestImportResult } from '$lib/types';
 
 export async function importZeekLogs(paths: string[]): Promise<IngestImportResult> {
 	return invokeCompat<IngestImportResult>('import_zeek_logs', { paths });

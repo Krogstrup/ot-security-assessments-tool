@@ -28,6 +28,9 @@
 	import InferredTopologyPanel from './physical/InferredTopologyPanel.svelte';
 	import RedundancyPanel from './physical/RedundancyPanel.svelte';
 
+	// ── Graph Ref ──────────────────────────────────────────────────
+	let graphRef = $state<{ fit: () => void; runLayout: () => void } | null>(null);
+
 	// ── Tab State ──────────────────────────────────────────────────
 	let activePhysicalTab = $state<'imported' | 'inferred' | 'redundancy'>('imported');
 	let inferredTopology = $state<InferredTopology | null>(null);
@@ -225,8 +228,8 @@
 		</div>
 		<div class="toolbar-section">
 			{#if activePhysicalTab === 'imported'}
-				<button class="tool-btn" onclick={() => {}}>Fit</button>
-				<button class="tool-btn" onclick={() => {}}>Relayout</button>
+				<button class="tool-btn" onclick={() => graphRef?.fit()}>Fit</button>
+				<button class="tool-btn" onclick={() => graphRef?.runLayout()}>Relayout</button>
 				<button class="tool-btn danger" onclick={handleClear}>Clear</button>
 			{:else}
 				<button class="tool-btn" onclick={handleRunInference} disabled={inferring}>
@@ -253,6 +256,7 @@
 
 			<div class="graph-container">
 				<PhysicalGraph
+					bind:this={graphRef}
 					topology={currentTopo}
 					highlightIp={$physicalHighlightIp}
 					onSelectSwitch={(hostname) => {
@@ -271,8 +275,6 @@
 						selectedSwitch = null;
 						selectedPort = null;
 					}}
-					onFit={() => {}}
-					onLayout={() => {}}
 				/>
 
 				<PhysicalDetailPanel

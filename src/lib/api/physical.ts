@@ -3,7 +3,7 @@
  */
 
 import { invokeCompat } from './core';
-import type { PhysicalTopology, InferredTopology } from '/types';
+import type { PhysicalTopology, InferredTopology } from '$lib/types';
 
 export async function importCiscoConfig(path: string): Promise<PhysicalTopology> {
 	return invokeCompat<PhysicalTopology>('import_cisco_config', { path });

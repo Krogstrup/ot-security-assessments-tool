@@ -3,7 +3,7 @@
  */
 
 import { invokeCompat } from './core';
-import type { SessionInfo, BaselineDiff } from '/types';
+import type { SessionInfo, BaselineDiff } from '$lib/types';
 
 export async function saveSession(name: string, description?: string): Promise<SessionInfo> {
 	return invokeCompat<SessionInfo>('save_session', { name, description: description ?? null });

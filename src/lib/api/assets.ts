@@ -3,7 +3,7 @@
  */
 
 import { invokeCompat, httpJson, isTauriRuntime } from './core';
-import type { AssetPage, AssetUpdate, Asset, DeepParseInfo, FunctionCodeStat, TopologyGraph } from '/types';
+import type { AssetPage, AssetUpdate, Asset, DeepParseInfo, FunctionCodeStat, TopologyGraph } from '$lib/types';
 
 export async function getAssets(page = 0, pageSize = 200, sortBy?: string): Promise<AssetPage> {
 	if (!isTauriRuntime()) {

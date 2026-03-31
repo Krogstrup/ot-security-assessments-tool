@@ -3,7 +3,7 @@
  */
 
 import { invokeCompat } from './core';
-import type { AnalysisResult, Finding, PurdueAssignment, AnomalyScore, DefaultCredential, CriticalityAssessment, NamingSuggestion, MalwareFinding, ComplianceMapping, CveMatch, SwitchSecurityFinding } from '/types';
+import type { AnalysisResult, Finding, PurdueAssignment, AnomalyScore, DefaultCredential, CriticalityAssessment, NamingSuggestion, MalwareFinding, ComplianceMapping, CveMatch, SwitchSecurityFinding } from '$lib/types';
 
 export async function runAnalysis(): Promise<AnalysisResult> {
 	return invokeCompat<AnalysisResult>('run_analysis');

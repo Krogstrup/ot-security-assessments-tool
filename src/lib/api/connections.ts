@@ -3,7 +3,7 @@
  */
 
 import { invokeCompat, httpJson, isTauriRuntime } from './core';
-import type { ConnectionPage, DataCounts, PacketSummary, ProtocolStats, ConnectionStats, PatternAnomaly, RedundancyInfo } from '/types';
+import type { ConnectionPage, DataCounts, PacketSummary, ProtocolStats, ConnectionStats, PatternAnomaly, RedundancyInfo } from '$lib/types';
 
 export async function getConnections(page = 0, pageSize = 500, sortBy?: string): Promise<ConnectionPage> {
 	if (!isTauriRuntime()) {

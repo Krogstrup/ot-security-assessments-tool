@@ -8,8 +8,6 @@
 		onSelectSwitch: (hostname: string) => void;
 		onSelectPort: (switchHostname: string, portName: string) => void;
 		onDeselect: () => void;
-		onFit: () => void;
-		onLayout: () => void;
 	}
 
 	let {
@@ -17,9 +15,7 @@
 		highlightIp,
 		onSelectSwitch,
 		onSelectPort,
-		onDeselect,
-		onFit,
-		onLayout
+		onDeselect
 	}: Props = $props();
 
 	let graphContainer: HTMLDivElement;
@@ -123,7 +119,7 @@
 		}
 
 		const addedLinks = new Set<string>();
-		for (const link of topology.links) {
+		for (const link of topo.links) {
 			const key = [link.src_switch, link.dst_switch].sort().join('---');
 			if (addedLinks.has(key)) continue;
 			addedLinks.add(key);
@@ -151,6 +147,30 @@
 		return elements;
 	}
 
+	export function runLayout() {
+		if (!cy) return;
+		cy.layout({
+			name: 'cose',
+			animate: true,
+			animationDuration: 400,
+			nodeOverlap: 20,
+			idealEdgeLength: 100,
+			componentSpacing: 100,
+			nodeRepulsion: 400000,
+			edgeElasticity: 100,
+			nestingFactor: 5,
+			gravity: 80,
+			numIter: 1000,
+			coolingFactor: 0.95,
+			minTemp: 1.0
+		}).run();
+	}
+
+	export function fit() {
+		if (!cy) return;
+		cy.fit(undefined, 40);
+	}
+
 	function updateGraph() {
 		if (!cy) return;
 		cy.elements().remove();
@@ -158,7 +178,7 @@
 
 		const elements = buildElements(topology);
 		cy.add(elements);
-		onLayout();
+		runLayout();
 	}
 
 	onMount(async () => {
