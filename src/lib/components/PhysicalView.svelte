@@ -11,405 +11,76 @@
 	import type { PhysicalTopology, PhysicalSwitch, PhysicalPort, InferredTopology, RedundancyInfo } from '$lib/types';
 	import {
 		importCiscoConfig,
-		importMacTable,
-		importCdpNeighbors,
+		importMacTableAuto,
+		importNeighborTable,
 		importArpTable,
 		getPhysicalTopology,
 		clearPhysicalTopology,
 		importNetworkConfig,
-		importMacTableAuto,
-		importNeighborTable,
 		runTopologyInference,
 		getInferredTopology,
 		getRedundancyProtocols
-	} from '$lib/utils/tauri';
+	} from '$lib/api';
 
-	let graphContainer: HTMLDivElement;
-	let cy: any = null;
+	import PhysicalImportPanel from './physical/PhysicalImportPanel.svelte';
+	import PhysicalGraph from './physical/PhysicalGraph.svelte';
+	import PhysicalDetailPanel from './physical/PhysicalDetailPanel.svelte';
+	import InferredTopologyPanel from './physical/InferredTopologyPanel.svelte';
+	import RedundancyPanel from './physical/RedundancyPanel.svelte';
 
-	// ── Tab State ───────────────────────────────────────
+	// ── Tab State ──────────────────────────────────────────────────
 	let activePhysicalTab = $state<'imported' | 'inferred' | 'redundancy'>('imported');
 	let inferredTopology = $state<InferredTopology | null>(null);
 	let inferring = $state(false);
 
-	// ── Redundancy State ─────────────────────────────────
+	// ── Redundancy State ───────────────────────────────────────────
 	let redundancyProtocols = $state<RedundancyInfo[]>([]);
 	let loadingRedundancy = $state(false);
 
-	let redundancyProtocolNames = $derived([...new Set(redundancyProtocols.map(r => r.protocol))]);
-
-	async function loadRedundancy() {
-		loadingRedundancy = true;
-		try {
-			redundancyProtocols = await getRedundancyProtocols();
-		} catch {
-			redundancyProtocols = [];
-		} finally {
-			loadingRedundancy = false;
-		}
-	}
-
-	// ── Import State ───────────────────────────────────
+	// ── Import State ───────────────────────────────────────────────
 	let importType = $state<'config' | 'mac' | 'cdp' | 'arp'>('config');
 	let switchHostname = $state('');
 	let importError = $state('');
 	let importSuccess = $state('');
 	let importing = $state(false);
 
-	// ── Detail Panel ────────────────────────────────────
+	// ── Detail Panel ───────────────────────────────────────────────
 	let selectedSwitch = $state<PhysicalSwitch | null>(null);
 	let selectedPort = $state<PhysicalPort | null>(null);
 
-	// ── Cytoscape ───────────────────────────────────────
+	// ── Store Subscriptions ────────────────────────────────────────
+	let currentTopo = $state<PhysicalTopology>({ switches: [], links: [], device_locations: {} });
 
-	async function initCytoscape() {
-		const cytoscape = (await import('cytoscape')).default;
+	const unsubTopo = physicalTopology.subscribe((t) => {
+		currentTopo = t;
+	});
 
-		cy = cytoscape({
-			container: graphContainer,
-			style: [
-				// Switch node (compound parent)
-				{
-					selector: 'node.switch',
-					style: {
-						'background-color': 'rgba(16, 185, 129, 0.08)',
-						'background-opacity': 0.6,
-						'border-color': '#10b981',
-						'border-width': 2,
-						'border-style': 'solid' as any,
-						label: 'data(label)',
-						color: '#e2e8f0',
-						'font-size': '11px',
-						'font-family': 'JetBrains Mono, monospace',
-						'font-weight': '600' as any,
-						'text-valign': 'top',
-						'text-halign': 'center',
-						'text-margin-y': -6,
-						padding: '20px',
-						shape: 'roundrectangle'
-					}
-				},
-				// Port node
-				{
-					selector: 'node.port',
-					style: {
-						'background-color': '#1e293b',
-						'border-color': 'data(color)',
-						'border-width': 1.5,
-						label: 'data(label)',
-						color: '#94a3b8',
-						'font-size': '8px',
-						'font-family': 'JetBrains Mono, monospace',
-						'text-valign': 'bottom',
-						'text-margin-y': 4,
-						width: 20,
-						height: 20,
-						'text-wrap': 'wrap' as any,
-						'text-max-width': '80px'
-					}
-				},
-				// Port with devices connected
-				{
-					selector: 'node.port.has-device',
-					style: {
-						'background-color': '#0f2942',
-						'border-color': '#3b82f6',
-						'border-width': 2,
-						width: 24,
-						height: 24
-					}
-				},
-				// Port with CDP neighbor
-				{
-					selector: 'node.port.has-cdp',
-					style: {
-						'border-color': '#f59e0b',
-						'border-width': 2
-					}
-				},
-				// Shutdown port
-				{
-					selector: 'node.port.shutdown',
-					style: {
-						'background-color': '#1a1a2e',
-						'border-color': '#374151',
-						'border-style': 'dashed' as any,
-						opacity: 0.5
-					}
-				},
-				// Trunk port
-				{
-					selector: 'node.port.trunk',
-					style: {
-						'border-color': '#8b5cf6',
-						shape: 'diamond'
-					}
-				},
-				// Highlighted port (cross-reference)
-				{
-					selector: 'node.port.highlighted',
-					style: {
-						'background-color': '#1e3a5f',
-						'border-color': '#ef4444',
-						'border-width': 3,
-						width: 28,
-						height: 28
-					}
-				},
-				// Selected node
-				{
-					selector: 'node:selected',
-					style: {
-						'border-color': '#3b82f6',
-						'border-width': 3
-					}
-				},
-				// CDP link edge (between switches)
-				{
-					selector: 'edge.cdp-link',
-					style: {
-						width: 2.5,
-						'line-color': '#f59e0b',
-						'line-style': 'solid' as any,
-						'target-arrow-shape': 'none',
-						'curve-style': 'bezier',
-						opacity: 0.8,
-						label: 'data(label)',
-						color: '#f59e0b',
-						'font-size': '8px',
-						'text-rotation': 'autorotate' as any,
-						'text-background-color': '#0a0e17',
-						'text-background-opacity': 0.9,
-						'text-background-padding': '2px' as any
-					}
-				},
-				// Device connection edge (port → external device label)
-				{
-					selector: 'edge.device-link',
-					style: {
-						width: 1,
-						'line-color': '#3b82f6',
-						'line-style': 'dashed' as any,
-						'target-arrow-shape': 'none',
-						opacity: 0.5
-					}
-				}
-			],
-			layout: { name: 'preset' },
-			minZoom: 0.1,
-			maxZoom: 5,
-			wheelSensitivity: 0.3
-		});
-
-		// Click on switch compound node → show details
-		cy.on('tap', 'node.switch', (event: any) => {
-			const hostname = event.target.data('hostname');
-			let currentTopo: PhysicalTopology = { switches: [], links: [], device_locations: {} };
-			physicalTopology.subscribe((t) => (currentTopo = t))();
-			selectedSwitch = currentTopo.switches.find((s) => s.hostname === hostname) ?? null;
-			selectedPort = null;
-		});
-
-		// Click on port → show port details
-		cy.on('tap', 'node.port', (event: any) => {
-			const portName = event.target.data('portName');
-			const switchHostname = event.target.data('switchHostname');
-			let currentTopo: PhysicalTopology = { switches: [], links: [], device_locations: {} };
-			physicalTopology.subscribe((t) => (currentTopo = t))();
-			const sw = currentTopo.switches.find((s) => s.hostname === switchHostname);
-			if (sw) {
-				selectedSwitch = sw;
-				selectedPort = sw.ports.find((p) => p.name === portName) ?? null;
-			}
-		});
-
-		// Background tap → deselect
-		cy.on('tap', (event: any) => {
-			if (event.target === cy) {
-				selectedSwitch = null;
-				selectedPort = null;
-			}
-		});
-	}
-
-	/** Build Cytoscape elements from the physical topology */
-	function buildElements(topo: PhysicalTopology) {
-		const elements: any[] = [];
-
-		// Build asset map for cross-reference
-		let currentAssets: any[] = [];
-		assets.subscribe((a) => (currentAssets = a))();
-		const assetMap = new Map(currentAssets.map((a: any) => [a.ip_address, a]));
-
-		let highlightIp: string | null = null;
-		physicalHighlightIp.subscribe((ip) => (highlightIp = ip))();
-
-		for (const sw of topo.switches) {
-			// Add switch as compound parent
-			const switchId = `sw-${sw.hostname}`;
-			let switchLabel = sw.hostname;
-			if (sw.management_ip) {
-				switchLabel += `\n${sw.management_ip}`;
-			}
-
-			elements.push({
-				group: 'nodes',
-				data: {
-					id: switchId,
-					label: switchLabel,
-					hostname: sw.hostname
-				},
-				classes: 'switch'
-			});
-
-			// Add ports as child nodes
-			// Only show physical ports (Gi, Fa, Te, Po) and SVIs with IPs
-			const visiblePorts = sw.ports.filter((p) => {
-				const name = p.name.toLowerCase();
-				return (
-					name.startsWith('gigabitethernet') ||
-					name.startsWith('fastethernet') ||
-					name.startsWith('tengigabitethernet') ||
-					name.startsWith('port-channel') ||
-					(name.startsWith('vlan') && p.ip_address)
-				);
-			});
-
-			for (const port of visiblePorts) {
-				const portId = `${switchId}-${port.short_name}`;
-				const hasDevice = port.mac_addresses.length > 0 || port.ip_addresses.length > 0;
-				const hasCdp = port.cdp_neighbor !== null;
-				const isTrunk = port.mode === 'trunk';
-
-				// Check if any device on this port is the highlighted one
-				const isHighlighted = highlightIp !== null && port.ip_addresses.includes(highlightIp);
-
-				let classes = 'port';
-				if (hasDevice) classes += ' has-device';
-				if (hasCdp) classes += ' has-cdp';
-				if (port.shutdown) classes += ' shutdown';
-				if (isTrunk) classes += ' trunk';
-				if (isHighlighted) classes += ' highlighted';
-
-				// Build label
-				let label = port.short_name;
-				if (port.description) {
-					label += `\n${port.description}`;
-				}
-				if (port.ip_addresses.length > 0) {
-					label += `\n${port.ip_addresses[0]}`;
-				}
-
-				let color = '#475569'; // default gray
-				if (isHighlighted) color = '#ef4444';
-				else if (hasCdp) color = '#f59e0b';
-				else if (hasDevice) color = '#3b82f6';
-				else if (isTrunk) color = '#8b5cf6';
-				else if (port.shutdown) color = '#374151';
-
-				elements.push({
-					group: 'nodes',
-					data: {
-						id: portId,
-						label,
-						parent: switchId,
-						portName: port.name,
-						switchHostname: sw.hostname,
-						color,
-						vlans: port.vlans.join(', '),
-						macCount: port.mac_addresses.length,
-						ipCount: port.ip_addresses.length
-					},
-					classes
-				});
-			}
+	onMount(async () => {
+		// Load existing physical topology
+		try {
+			const topo = await getPhysicalTopology();
+			physicalTopology.set(topo);
+		} catch {
+			// Expected in browser dev mode
 		}
-
-		// Add CDP/LLDP inter-switch links
-		const addedLinks = new Set<string>();
-		for (const link of topo.links) {
-			// Create a canonical key to avoid duplicating bidirectional links
-			const key = [link.src_switch, link.dst_switch].sort().join('---');
-			if (addedLinks.has(key)) continue;
-			addedLinks.add(key);
-
-			// Find the port nodes
-			const srcPortId = `sw-${link.src_switch}-${shortenName(link.src_port)}`;
-			const dstPortId = `sw-${link.dst_switch}-${shortenName(link.dst_port)}`;
-
-			// Only add if both nodes exist
-			const srcExists = elements.some((e) => e.data?.id === srcPortId);
-			const dstExists = elements.some((e) => e.data?.id === dstPortId);
-
-			if (srcExists && dstExists) {
-				elements.push({
-					group: 'edges',
-					data: {
-						id: `link-${link.src_switch}-${link.dst_switch}`,
-						source: srcPortId,
-						target: dstPortId,
-						label: 'CDP'
-					},
-					classes: 'cdp-link'
-				});
+		// Load previously computed inferred topology if available
+		try {
+			const inferred = await getInferredTopology();
+			if (inferred) {
+				inferredTopology = inferred;
 			}
+		} catch {
+			// Expected in browser dev mode
 		}
+	});
 
-		return elements;
-	}
+	onDestroy(() => {
+		unsubTopo();
+	});
 
-	function shortenName(name: string): string {
-		const prefixes: [string, string][] = [
-			['TenGigabitEthernet', 'Te'],
-			['GigabitEthernet', 'Gi'],
-			['FastEthernet', 'Fa'],
-			['Ethernet', 'Et'],
-			['Loopback', 'Lo'],
-			['Tunnel', 'Tu'],
-			['Port-channel', 'Po'],
-			['Vlan', 'Vl']
-		];
-		for (const [long, short] of prefixes) {
-			if (name.startsWith(long)) {
-				return short + name.slice(long.length);
-			}
-		}
-		return name;
-	}
-
-	function runLayout() {
-		if (!cy || cy.nodes().length === 0) return;
-
-		cy.layout({
-			name: 'grid',
-			fit: true,
-			padding: 50,
-			avoidOverlap: true,
-			avoidOverlapPadding: 10,
-			condense: false,
-			rows: undefined,
-			cols: undefined,
-			sort: (a: any, b: any) => {
-				// Sort: switches first, then ports by name
-				const aIsSwitch = a.hasClass('switch');
-				const bIsSwitch = b.hasClass('switch');
-				if (aIsSwitch !== bIsSwitch) return aIsSwitch ? -1 : 1;
-				return (a.data('label') || '').localeCompare(b.data('label') || '');
-			}
-		}).run();
-	}
-
-	function updateGraph(topo: PhysicalTopology) {
-		if (!cy) return;
-		cy.elements().remove();
-		if (topo.switches.length === 0) return;
-
-		const elements = buildElements(topo);
-		cy.add(elements);
-		runLayout();
-	}
-
-	// ── Import Handlers ──────────────────────────────────
+	// ────────────────────────────────────────────────────────────────
+	// IMPORT HANDLERS
+	// ────────────────────────────────────────────────────────────────
 
 	async function handleImport() {
 		importError = '';
@@ -429,7 +100,6 @@
 
 			switch (importType) {
 				case 'config':
-					// Auto-detect vendor (Cisco/JunOS/HP-Aruba)
 					topo = await importNetworkConfig(filePath);
 					importSuccess = `Imported config from ${filePath.split(/[/\\]/).pop()}`;
 					break;
@@ -439,7 +109,6 @@
 						importing = false;
 						return;
 					}
-					// Auto-detect vendor MAC table format
 					topo = await importMacTableAuto(filePath, switchHostname.trim());
 					importSuccess = `Imported MAC table for ${switchHostname}`;
 					break;
@@ -449,7 +118,6 @@
 						importing = false;
 						return;
 					}
-					// Auto-detect CDP/LLDP format
 					topo = await importNeighborTable(filePath, switchHostname.trim());
 					importSuccess = `Imported neighbors for ${switchHostname}`;
 					break;
@@ -490,53 +158,31 @@
 		}
 	}
 
-	/** Navigate to logical view and highlight a device */
+	async function loadRedundancy() {
+		loadingRedundancy = true;
+		try {
+			redundancyProtocols = await getRedundancyProtocols();
+		} catch {
+			redundancyProtocols = [];
+		} finally {
+			loadingRedundancy = false;
+		}
+	}
+
+	// ────────────────────────────────────────────────────────────────
+	// NAVIGATION
+	// ────────────────────────────────────────────────────────────────
+
 	function showInLogical(ip: string) {
 		selectedAssetId.set(ip);
 		activeTab.set('topology');
 	}
 
-	// ── Store Subscriptions ──────────────────────────────
+	// ────────────────────────────────────────────────────────────────
+	// DERIVED STATE
+	// ────────────────────────────────────────────────────────────────
 
-	let currentTopo = $state<PhysicalTopology>({ switches: [], links: [], device_locations: {} });
-
-	const unsubTopo = physicalTopology.subscribe((t) => {
-		currentTopo = t;
-		updateGraph(t);
-	});
-
-	const unsubHighlight = physicalHighlightIp.subscribe(() => {
-		updateGraph(currentTopo);
-	});
-
-	onMount(async () => {
-		await initCytoscape();
-		// Load existing physical topology
-		try {
-			const topo = await getPhysicalTopology();
-			physicalTopology.set(topo);
-		} catch {
-			// Expected in browser dev mode
-		}
-		// Load previously computed inferred topology if available
-		try {
-			const inferred = await getInferredTopology();
-			if (inferred) {
-				inferredTopology = inferred;
-			}
-		} catch {
-			// Expected in browser dev mode
-		}
-	});
-
-	onDestroy(() => {
-		unsubTopo();
-		unsubHighlight();
-		cy?.destroy();
-	});
-
-	// Available switch hostnames for dropdown
-	let switchOptions = $derived(currentTopo.switches.map((s) => s.hostname));
+	const switchOptions = $derived(currentTopo.switches.map((s) => s.hostname));
 </script>
 
 <div class="physical-container">
@@ -579,8 +225,8 @@
 		</div>
 		<div class="toolbar-section">
 			{#if activePhysicalTab === 'imported'}
-				<button class="tool-btn" onclick={() => cy?.fit(undefined, 40)}>Fit</button>
-				<button class="tool-btn" onclick={runLayout}>Relayout</button>
+				<button class="tool-btn" onclick={() => {}}>Fit</button>
+				<button class="tool-btn" onclick={() => {}}>Relayout</button>
 				<button class="tool-btn danger" onclick={handleClear}>Clear</button>
 			{:else}
 				<button class="tool-btn" onclick={handleRunInference} disabled={inferring}>
@@ -591,67 +237,57 @@
 	</div>
 
 	{#if activePhysicalTab === 'imported'}
-	<div class="physical-body">
-		<!-- Import Panel (left side) -->
-		<div class="import-panel">
-			<h3 class="panel-title">Import Network Data</h3>
+		<div class="physical-body">
+			<PhysicalImportPanel
+				{importType}
+				{switchHostname}
+				{switchOptions}
+				{importError}
+				{importSuccess}
+				{importing}
+				onTypeChange={(type) => (importType = type)}
+				onSwitchChange={(hostname) => (switchHostname = hostname)}
+				onImport={handleImport}
+				onClear={handleClear}
+			/>
 
-			<div class="import-form">
-				<label class="import-label">
-					Import Type:
-					<select class="import-select" bind:value={importType}>
-						<option value="config">Running Config (auto-detect vendor)</option>
-						<option value="mac">MAC Address Table</option>
-						<option value="cdp">CDP / LLDP Neighbors</option>
-						<option value="arp">ARP Table</option>
-					</select>
-				</label>
+			<div class="graph-container">
+				<PhysicalGraph
+					topology={currentTopo}
+					highlightIp={$physicalHighlightIp}
+					onSelectSwitch={(hostname) => {
+						const sw = currentTopo.switches.find(s => s.hostname === hostname);
+						selectedSwitch = sw ?? null;
+						selectedPort = null;
+					}}
+					onSelectPort={(switchHostname, portName) => {
+						const sw = currentTopo.switches.find(s => s.hostname === switchHostname);
+						if (sw) {
+							selectedSwitch = sw;
+							selectedPort = sw.ports.find(p => p.name === portName) ?? null;
+						}
+					}}
+					onDeselect={() => {
+						selectedSwitch = null;
+						selectedPort = null;
+					}}
+					onFit={() => {}}
+					onLayout={() => {}}
+				/>
 
-				{#if importType === 'mac' || importType === 'cdp'}
-					<label class="import-label">
-						Switch:
-						{#if switchOptions.length > 0}
-							<select class="import-select" bind:value={switchHostname}>
-								<option value="">Select switch...</option>
-								{#each switchOptions as hostname}
-									<option value={hostname}>{hostname}</option>
-								{/each}
-							</select>
-						{:else}
-							<input
-								class="import-input"
-								type="text"
-								placeholder="Import a config first"
-								bind:value={switchHostname}
-							/>
-						{/if}
-					</label>
-				{/if}
-
-				<button class="import-btn" onclick={handleImport} disabled={importing}>
-					{importing ? 'Importing...' : 'Import File'}
-				</button>
+				<PhysicalDetailPanel
+					{selectedSwitch}
+					{selectedPort}
+					onClose={() => {
+						selectedSwitch = null;
+						selectedPort = null;
+					}}
+					onShowInLogical={showInLogical}
+					onSelectPort={(port) => (selectedPort = port)}
+				/>
 			</div>
 
-			{#if importError}
-				<div class="msg error">{importError}</div>
-			{/if}
-			{#if importSuccess}
-				<div class="msg success">{importSuccess}</div>
-			{/if}
-
-			<div class="import-help">
-				<h4>Import Order</h4>
-				<ol>
-					<li><strong>Running Config</strong> — creates the switch &amp; ports</li>
-					<li><strong>MAC Address Table</strong> — maps MACs to ports</li>
-					<li><strong>ARP Table</strong> — maps IPs to MACs</li>
-					<li><strong>CDP Neighbors</strong> — discovers switch links</li>
-				</ol>
-			</div>
-
-			<!-- Device Locations Summary -->
-			{#if Object.keys(currentTopo.device_locations).length > 0}
+			{#if currentTopo.device_locations && Object.keys(currentTopo.device_locations).length > 0}
 				<div class="locations-panel">
 					<h4>Device Locations</h4>
 					<div class="locations-list">
@@ -671,384 +307,32 @@
 			{/if}
 		</div>
 
-		<!-- Graph Area -->
-		<div class="graph-wrapper">
-			<div class="graph-area" bind:this={graphContainer}>
-				{#if currentTopo.switches.length === 0}
-					<div class="empty-state">
-						<div class="empty-icon">&#x2B22;</div>
-						<h3>No Physical Topology</h3>
-						<p>Import a Cisco IOS running-config to build the physical topology.</p>
-						<p class="hint">Use the import panel on the left to get started.</p>
-					</div>
-				{/if}
-			</div>
-
-			<!-- Detail Panel (right side, when something is selected) -->
-			{#if selectedSwitch}
-				<div class="detail-panel">
-					<div class="detail-header">
-						<h3>{selectedSwitch.hostname}</h3>
-						<button class="detail-close" onclick={() => { selectedSwitch = null; selectedPort = null; }}>
-							&times;
-						</button>
-					</div>
-
-					{#if selectedPort}
-						<!-- Port detail -->
-						<div class="detail-section">
-							<h4>{selectedPort.short_name}</h4>
-							{#if selectedPort.description}
-								<div class="detail-row">
-									<span class="detail-label">Description</span>
-									<span class="detail-value">{selectedPort.description}</span>
-								</div>
-							{/if}
-							<div class="detail-row">
-								<span class="detail-label">Mode</span>
-								<span class="detail-value badge" class:badge-purple={selectedPort.mode === 'trunk'}>
-									{selectedPort.mode}
-								</span>
-							</div>
-							<div class="detail-row">
-								<span class="detail-label">VLANs</span>
-								<span class="detail-value">{selectedPort.vlans.join(', ') || 'none'}</span>
-							</div>
-							<div class="detail-row">
-								<span class="detail-label">Status</span>
-								<span class="detail-value" class:text-red={selectedPort.shutdown}>
-									{selectedPort.shutdown ? 'shutdown' : 'up'}
-								</span>
-							</div>
-							{#if selectedPort.speed}
-								<div class="detail-row">
-									<span class="detail-label">Speed</span>
-									<span class="detail-value">{selectedPort.speed}</span>
-								</div>
-							{/if}
-							{#if selectedPort.ip_address}
-								<div class="detail-row">
-									<span class="detail-label">IP</span>
-									<span class="detail-value">{selectedPort.ip_address}/{selectedPort.subnet_mask}</span>
-								</div>
-							{/if}
-						</div>
-
-						<!-- Connected devices on this port -->
-						{#if selectedPort.ip_addresses.length > 0}
-							<div class="detail-section">
-								<h4>Connected Devices</h4>
-								{#each selectedPort.ip_addresses as ip}
-									<button class="device-item" onclick={() => showInLogical(ip)}>
-										{ip}
-										<span class="show-logical">Show in Logical</span>
-									</button>
-								{/each}
-							</div>
-						{/if}
-
-						{#if selectedPort.mac_addresses.length > 0}
-							<div class="detail-section">
-								<h4>MAC Addresses ({selectedPort.mac_addresses.length})</h4>
-								{#each selectedPort.mac_addresses as mac}
-									<div class="mac-item">{mac}</div>
-								{/each}
-							</div>
-						{/if}
-
-						{#if selectedPort.cdp_neighbor}
-							<div class="detail-section">
-								<h4>CDP Neighbor</h4>
-								<div class="detail-row">
-									<span class="detail-label">Device</span>
-									<span class="detail-value">{selectedPort.cdp_neighbor.device_id}</span>
-								</div>
-								<div class="detail-row">
-									<span class="detail-label">Port</span>
-									<span class="detail-value">{selectedPort.cdp_neighbor.remote_port}</span>
-								</div>
-								{#if selectedPort.cdp_neighbor.platform}
-									<div class="detail-row">
-										<span class="detail-label">Platform</span>
-										<span class="detail-value">{selectedPort.cdp_neighbor.platform}</span>
-									</div>
-								{/if}
-								{#if selectedPort.cdp_neighbor.ip_address}
-									<div class="detail-row">
-										<span class="detail-label">IP</span>
-										<span class="detail-value">{selectedPort.cdp_neighbor.ip_address}</span>
-									</div>
-								{/if}
-							</div>
-						{/if}
-					{:else}
-						<!-- Switch overview -->
-						<div class="detail-section">
-							{#if selectedSwitch.management_ip}
-								<div class="detail-row">
-									<span class="detail-label">Mgmt IP</span>
-									<span class="detail-value">{selectedSwitch.management_ip}</span>
-								</div>
-							{/if}
-							{#if selectedSwitch.ios_version}
-								<div class="detail-row">
-									<span class="detail-label">IOS Version</span>
-									<span class="detail-value">{selectedSwitch.ios_version}</span>
-								</div>
-							{/if}
-							<div class="detail-row">
-								<span class="detail-label">Ports</span>
-								<span class="detail-value">{selectedSwitch.ports.length}</span>
-							</div>
-							<div class="detail-row">
-								<span class="detail-label">VLANs</span>
-								<span class="detail-value">{Object.keys(selectedSwitch.vlans).length}</span>
-							</div>
-						</div>
-
-						<!-- VLAN list -->
-						{#if Object.keys(selectedSwitch.vlans).length > 0}
-							<div class="detail-section">
-								<h4>VLANs</h4>
-								{#each Object.entries(selectedSwitch.vlans) as [id, name]}
-									<div class="detail-row">
-										<span class="detail-label">VLAN {id}</span>
-										<span class="detail-value">{name}</span>
-									</div>
-								{/each}
-							</div>
-						{/if}
-
-						<!-- Port summary -->
-						<div class="detail-section">
-							<h4>Ports</h4>
-							<div class="port-grid">
-								{#each selectedSwitch.ports.filter((p) => !p.name.startsWith('Vlan') && !p.name.startsWith('Loopback')) as port}
-									<button
-										class="port-chip"
-										class:has-device={port.mac_addresses.length > 0 || port.ip_addresses.length > 0}
-										class:is-shutdown={port.shutdown}
-										class:is-trunk={port.mode === 'trunk'}
-										onclick={() => (selectedPort = port)}
-									>
-										{port.short_name}
-									</button>
-								{/each}
-							</div>
-						</div>
-					{/if}
-				</div>
-			{/if}
+		<!-- Legend -->
+		<div class="physical-legend">
+			<span class="legend-title">PORTS</span>
+			<span class="legend-item">
+				<span class="legend-dot" style="background: #475569"></span> Empty
+			</span>
+			<span class="legend-item">
+				<span class="legend-dot" style="background: #3b82f6"></span> Has Devices
+			</span>
+			<span class="legend-item">
+				<span class="legend-dot" style="background: #f59e0b"></span> CDP Link
+			</span>
+			<span class="legend-item">
+				<span class="legend-dot" style="background: #8b5cf6; border-radius: 2px"></span> Trunk
+			</span>
+			<span class="legend-item">
+				<span class="legend-dot" style="background: #374151; opacity: 0.5"></span> Shutdown
+			</span>
+			<span class="legend-item">
+				<span class="legend-dot" style="background: #ef4444"></span> Highlighted
+			</span>
 		</div>
-	</div>
-
-	<!-- Legend -->
-	<div class="physical-legend">
-		<span class="legend-title">PORTS</span>
-		<span class="legend-item">
-			<span class="legend-dot" style="background: #475569"></span> Empty
-		</span>
-		<span class="legend-item">
-			<span class="legend-dot" style="background: #3b82f6"></span> Has Devices
-		</span>
-		<span class="legend-item">
-			<span class="legend-dot" style="background: #f59e0b"></span> CDP Link
-		</span>
-		<span class="legend-item">
-			<span class="legend-dot" style="background: #8b5cf6; border-radius: 2px"></span> Trunk
-		</span>
-		<span class="legend-item">
-			<span class="legend-dot" style="background: #374151; opacity: 0.5"></span> Shutdown
-		</span>
-		<span class="legend-item">
-			<span class="legend-dot" style="background: #ef4444"></span> Highlighted
-		</span>
-	</div>
 	{:else if activePhysicalTab === 'inferred'}
-	<!-- ── Inferred Tab ───────────────────────────────── -->
-	<div class="inferred-container">
-		{#if !inferredTopology}
-			<div class="inferred-empty">
-				<div class="empty-icon">&#x1F4E1;</div>
-				<h3>No Inferred Topology</h3>
-				<p>Click <strong>Run Inference</strong> to analyze the current dataset and infer network structure from traffic patterns.</p>
-				<button class="import-btn" onclick={handleRunInference} disabled={inferring}>
-					{inferring ? 'Running...' : 'Run Inference'}
-				</button>
-			</div>
-		{:else}
-			<div class="inferred-content">
-				<!-- Subnets -->
-				<div class="inferred-section">
-					<h3 class="inferred-section-title">Subnets ({inferredTopology.subnets.length})</h3>
-					{#each inferredTopology.subnets as subnet}
-						<div class="inferred-card">
-							<div class="card-header">
-								<span class="card-network">{subnet.network}</span>
-								<span class="card-badge">{subnet.member_ips.length} hosts</span>
-							</div>
-							{#if subnet.gateway_ip}
-								<div class="card-detail">
-									<span class="card-label">Gateway</span>
-									<span class="card-value gw-ip">{subnet.gateway_ip}</span>
-								</div>
-							{/if}
-							<div class="card-ips">
-								{#each subnet.member_ips.slice(0, 6) as ip}
-									<span class="ip-chip">{ip}</span>
-								{/each}
-								{#if subnet.member_ips.length > 6}
-									<span class="ip-chip muted">+{subnet.member_ips.length - 6} more</span>
-								{/if}
-							</div>
-						</div>
-					{/each}
-				</div>
-
-				<!-- Gateways -->
-				{#if inferredTopology.gateways.length > 0}
-					<div class="inferred-section">
-						<h3 class="inferred-section-title">Gateways ({inferredTopology.gateways.length})</h3>
-						{#each inferredTopology.gateways as gw}
-							<div class="inferred-card">
-								<div class="card-header">
-									<span class="card-network">{gw.ip_address}</span>
-									<span class="card-badge confidence-{gw.confidence}">Conf {gw.confidence}</span>
-								</div>
-								{#if gw.mac_address}
-									<div class="card-detail">
-										<span class="card-label">MAC</span>
-										<span class="card-value">{gw.mac_address}</span>
-									</div>
-								{/if}
-								<div class="card-detail">
-									<span class="card-label">Connects</span>
-									<span class="card-value">{gw.connected_subnets.join(', ')}</span>
-								</div>
-							</div>
-						{/each}
-					</div>
-				{/if}
-
-				<!-- Switch Candidates -->
-				{#if inferredTopology.switch_candidates.length > 0}
-					<div class="inferred-section">
-						<h3 class="inferred-section-title">Switch Candidates ({inferredTopology.switch_candidates.length})</h3>
-						{#each inferredTopology.switch_candidates as sw}
-							<div class="inferred-card">
-								<div class="card-header">
-									<span class="card-network">{sw.ip_address ?? 'unknown'}</span>
-									<span class="card-badge confidence-{sw.confidence}">Conf {sw.confidence}</span>
-								</div>
-								<div class="card-detail">
-									<span class="card-label">Fan-out</span>
-									<span class="card-value">{sw.connected_ips.length} hosts</span>
-								</div>
-							</div>
-						{/each}
-					</div>
-				{/if}
-
-				<!-- Broadcast Domains -->
-				{#if inferredTopology.broadcast_domains.length > 0}
-					<div class="inferred-section">
-						<h3 class="inferred-section-title">Broadcast Domains ({inferredTopology.broadcast_domains.length})</h3>
-						{#each inferredTopology.broadcast_domains as bd}
-							<div class="inferred-card">
-								<div class="card-header">
-									<span class="card-network">{bd.network}</span>
-									<span class="card-badge">{bd.inferred_from}</span>
-								</div>
-								<div class="card-detail">
-									<span class="card-label">Members</span>
-									<span class="card-value">{bd.member_ips.length} hosts</span>
-								</div>
-								{#if bd.gateway_ip}
-									<div class="card-detail">
-										<span class="card-label">Gateway</span>
-										<span class="card-value gw-ip">{bd.gateway_ip}</span>
-									</div>
-								{/if}
-							</div>
-						{/each}
-					</div>
-				{/if}
-			</div>
-		{/if}
-	</div>
+		<InferredTopologyPanel {inferredTopology} {inferring} onRunInference={handleRunInference} />
 	{:else}
-	<!-- ── Ring Redundancy Tab ─────────────────────────── -->
-	<div class="inferred-container">
-		{#if loadingRedundancy}
-			<div class="inferred-empty">
-				<div class="empty-icon">&#x23F3;</div>
-				<h3>Loading...</h3>
-			</div>
-		{:else if redundancyProtocols.length === 0}
-			<div class="inferred-empty">
-				<div class="empty-icon">&#x1F4E1;</div>
-				<h3>No Redundancy Frames Detected</h3>
-				<p>No MRP, RSTP, HSR, PRP, or DLR frames were observed in the current capture. Import a PCAP that contains ring redundancy traffic to see topology change events and ring manager roles.</p>
-				<button class="import-btn" onclick={loadRedundancy}>Refresh</button>
-			</div>
-		{:else}
-			<div class="inferred-content">
-				<!-- Summary by protocol -->
-				<div class="inferred-section">
-					<h3 class="inferred-section-title">Protocols Detected ({redundancyProtocolNames.length})</h3>
-					<div class="redundancy-protocol-badges">
-						{#each redundancyProtocolNames as proto}
-							{@const count = redundancyProtocols.filter(r => r.protocol === proto).length}
-							{@const hasManager = redundancyProtocols.some(r => r.protocol === proto && r.is_manager)}
-							{@const hasTc = redundancyProtocols.some(r => r.protocol === proto && r.topology_change)}
-							<div class="redundancy-badge" class:has-tc={hasTc}>
-								<span class="proto-name">{proto.toUpperCase()}</span>
-								<span class="proto-count">{count} devices</span>
-								{#if hasManager}<span class="proto-flag manager">Manager</span>{/if}
-								{#if hasTc}<span class="proto-flag tc-flag">TC</span>{/if}
-							</div>
-						{/each}
-					</div>
-				</div>
-
-				<!-- Device list -->
-				<div class="inferred-section">
-					<h3 class="inferred-section-title">Participating Devices ({redundancyProtocols.length})</h3>
-					{#each redundancyProtocols as r}
-						<div class="inferred-card" class:tc-card={r.topology_change}>
-							<div class="card-header">
-								<span class="card-network">{r.source_mac}</span>
-								<span class="card-badge">{r.protocol.toUpperCase()}</span>
-								{#if r.is_manager}<span class="card-badge" style="background: #d97706; color: #fff">Manager</span>{/if}
-								{#if r.topology_change}<span class="card-badge" style="background: #ef4444; color: #fff">TC</span>{/if}
-							</div>
-							{#if r.role}
-								<div class="card-detail">
-									<span class="card-label">Role</span>
-									<span class="card-value">{r.role}</span>
-								</div>
-							{/if}
-							{#if r.priority != null}
-								<div class="card-detail">
-									<span class="card-label">Priority</span>
-									<span class="card-value">{r.priority} (0x{r.priority.toString(16).padStart(4,'0').toUpperCase()})</span>
-								</div>
-							{/if}
-							{#if r.ring_id != null}
-								<div class="card-detail">
-									<span class="card-label">Ring ID / Seq</span>
-									<span class="card-value">{r.ring_id}</span>
-								</div>
-							{/if}
-							<div class="card-detail" style="margin-top: 4px">
-								<span class="card-value" style="color: var(--gm-text-muted); font-size: 0.75rem">{r.details}</span>
-							</div>
-						</div>
-					{/each}
-				</div>
-			</div>
-		{/if}
-	</div>
+		<RedundancyPanel {redundancyProtocols} loading={loadingRedundancy} />
 	{/if}
 </div>
 
@@ -1057,701 +341,211 @@
 		display: flex;
 		flex-direction: column;
 		height: 100%;
+		background: var(--gm-bg-primary);
 	}
-
-	/* ── Toolbar ─────────────────────────────────── */
 
 	.physical-toolbar {
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		padding: 8px 16px;
-		border-bottom: 1px solid var(--gm-border);
+		padding: 0.75rem 1rem;
 		background: var(--gm-bg-secondary);
+		border-bottom: 1px solid var(--gm-border);
 		flex-shrink: 0;
+		gap: 1rem;
+		flex-wrap: wrap;
 	}
 
 	.toolbar-section {
 		display: flex;
 		align-items: center;
-		gap: 8px;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+	}
+
+	.view-title {
+		margin: 0;
+		font-size: 1.125rem;
+		font-weight: 600;
+		color: var(--gm-text-primary);
+		white-space: nowrap;
 	}
 
 	.toolbar-sep {
 		width: 1px;
-		height: 18px;
+		height: 1.5rem;
 		background: var(--gm-border);
-		margin: 0 4px;
 	}
 
-	.view-title {
-		font-size: 13px;
-		font-weight: 600;
-		letter-spacing: 1px;
-		text-transform: uppercase;
-		color: var(--gm-text-primary);
-		margin: 0;
+	.tab-switcher {
+		display: flex;
+		gap: 0.35rem;
 	}
 
-	.switch-count, .link-count, .device-count {
-		font-size: 10px;
-		color: var(--gm-text-muted);
-		padding: 2px 8px;
-		background: var(--gm-bg-panel);
+	.tab-btn {
+		padding: 0.35rem 0.75rem;
+		border: 1px solid var(--gm-border);
 		border-radius: 3px;
+		background: transparent;
+		color: var(--gm-text-secondary);
+		cursor: pointer;
+		font-size: 0.8125rem;
+		font-weight: 500;
+		transition: all 0.2s;
+	}
+
+	.tab-btn:hover {
+		background: rgba(255, 255, 255, 0.05);
+	}
+
+	.tab-btn.active {
+		background: #6366f1;
+		color: white;
+		border-color: #6366f1;
+	}
+
+	.switch-count,
+	.link-count,
+	.device-count {
+		font-size: 0.75rem;
+		color: var(--gm-text-secondary);
+		font-weight: 500;
+		white-space: nowrap;
 	}
 
 	.tool-btn {
-		padding: 5px 12px;
-		background: var(--gm-bg-panel);
+		padding: 0.35rem 0.75rem;
 		border: 1px solid var(--gm-border);
-		border-radius: 4px;
-		color: var(--gm-text-secondary);
-		font-family: inherit;
-		font-size: 11px;
-		cursor: pointer;
-		transition: all 0.15s;
-	}
-
-	.tool-btn:hover {
-		background: var(--gm-bg-hover);
+		border-radius: 3px;
+		background: var(--gm-bg-tertiary);
 		color: var(--gm-text-primary);
+		cursor: pointer;
+		font-size: 0.8125rem;
+		font-weight: 500;
+		transition: all 0.2s;
 	}
 
-	.tool-btn.danger:hover {
-		border-color: #ef4444;
+	.tool-btn:hover:not(:disabled) {
+		background: rgba(255, 255, 255, 0.05);
+	}
+
+	.tool-btn.danger {
 		color: #ef4444;
 	}
 
-	/* ── Body Layout ─────────────────────────────── */
+	.tool-btn.danger:hover:not(:disabled) {
+		background: rgba(239, 68, 68, 0.1);
+	}
+
+	.tool-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
 
 	.physical-body {
 		flex: 1;
 		display: flex;
-		min-height: 0;
+		overflow: hidden;
+		gap: 0;
+	}
+
+	.graph-container {
+		flex: 1;
+		position: relative;
+		display: flex;
 		overflow: hidden;
 	}
 
-	/* ── Import Panel ─────────────────────────────── */
-
-	.import-panel {
-		width: 260px;
-		min-width: 220px;
-		border-right: 1px solid var(--gm-border);
+	.locations-panel {
+		position: absolute;
+		bottom: 0;
+		left: 280px;
+		right: 0;
+		max-height: 200px;
 		background: var(--gm-bg-secondary);
+		border-top: 1px solid var(--gm-border);
+		padding: 0.75rem;
 		overflow-y: auto;
-		padding: 12px;
-		display: flex;
-		flex-direction: column;
-		gap: 12px;
 	}
-
-	.panel-title {
-		font-size: 11px;
-		font-weight: 600;
-		text-transform: uppercase;
-		letter-spacing: 1px;
-		color: var(--gm-text-secondary);
-		margin: 0;
-	}
-
-	.import-form {
-		display: flex;
-		flex-direction: column;
-		gap: 8px;
-	}
-
-	.import-label {
-		font-size: 10px;
-		color: var(--gm-text-muted);
-		text-transform: uppercase;
-		letter-spacing: 0.5px;
-		display: flex;
-		flex-direction: column;
-		gap: 4px;
-	}
-
-	.import-select, .import-input {
-		background: var(--gm-bg-panel);
-		border: 1px solid var(--gm-border);
-		border-radius: 4px;
-		color: var(--gm-text-primary);
-		font-family: inherit;
-		font-size: 11px;
-		padding: 6px 8px;
-	}
-
-	.import-btn {
-		padding: 8px 12px;
-		background: #10b981;
-		border: none;
-		border-radius: 4px;
-		color: #0a0e17;
-		font-family: inherit;
-		font-size: 11px;
-		font-weight: 600;
-		cursor: pointer;
-		transition: all 0.15s;
-	}
-
-	.import-btn:hover { background: #059669; }
-	.import-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-	.msg {
-		font-size: 10px;
-		padding: 6px 8px;
-		border-radius: 4px;
-	}
-
-	.msg.error { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
-	.msg.success { background: rgba(16, 185, 129, 0.15); color: #10b981; }
-
-	.import-help {
-		font-size: 10px;
-		color: var(--gm-text-muted);
-		line-height: 1.5;
-	}
-
-	.import-help h4 {
-		font-size: 10px;
-		color: var(--gm-text-secondary);
-		margin: 0 0 4px 0;
-		text-transform: uppercase;
-		letter-spacing: 0.5px;
-	}
-
-	.import-help ol {
-		margin: 0;
-		padding-left: 16px;
-	}
-
-	.import-help li {
-		margin-bottom: 4px;
-	}
-
-	/* ── Locations Panel ─────────────────────────── */
 
 	.locations-panel h4 {
-		font-size: 10px;
-		color: var(--gm-text-secondary);
-		margin: 0 0 6px 0;
-		text-transform: uppercase;
-		letter-spacing: 0.5px;
+		margin: 0 0 0.5rem 0;
+		font-size: 0.875rem;
+		color: var(--gm-text-primary);
+		font-weight: 600;
 	}
 
 	.locations-list {
 		display: flex;
-		flex-direction: column;
-		gap: 2px;
-		max-height: 200px;
-		overflow-y: auto;
+		gap: 0.5rem;
+		flex-wrap: wrap;
 	}
 
 	.location-item {
+		padding: 0.5rem 0.75rem;
+		background: rgba(99, 102, 241, 0.1);
+		border: 1px solid rgba(99, 102, 241, 0.3);
+		border-radius: 3px;
+		color: #6366f1;
+		cursor: pointer;
+		font-size: 0.8125rem;
+		transition: all 0.2s;
 		display: flex;
 		flex-direction: column;
-		padding: 4px 8px;
-		background: transparent;
-		border: none;
-		border-radius: 3px;
-		cursor: pointer;
-		text-align: left;
-		font-family: inherit;
-		transition: background 0.1s;
+		gap: 0.25rem;
+		white-space: nowrap;
 	}
 
-	.location-item:hover { background: var(--gm-bg-hover); }
+	.location-item:hover {
+		background: rgba(99, 102, 241, 0.2);
+	}
 
 	.loc-ip {
-		font-size: 11px;
-		color: var(--gm-text-primary);
-		font-weight: 500;
+		font-family: 'JetBrains Mono', monospace;
+		font-weight: 600;
 	}
 
 	.loc-detail {
-		font-size: 9px;
-		color: var(--gm-text-muted);
+		font-size: 0.75rem;
+		opacity: 0.8;
 	}
 
 	.loc-vlan {
-		padding: 0 4px;
-		background: rgba(139, 92, 246, 0.2);
+		font-size: 0.7rem;
+		background: rgba(0, 0, 0, 0.2);
+		padding: 0.1rem 0.3rem;
 		border-radius: 2px;
-		color: #a78bfa;
-		font-size: 8px;
+		margin-left: 0.25rem;
 	}
-
-	/* ── Graph ─────────────────────────────────────── */
-
-	.graph-wrapper {
-		flex: 1;
-		display: flex;
-		min-width: 0;
-		position: relative;
-	}
-
-	.graph-area {
-		flex: 1;
-		position: relative;
-		background: var(--gm-bg-primary);
-		background-image: radial-gradient(circle, var(--gm-bg-dot) 1px, transparent 1px);
-		background-size: 24px 24px;
-	}
-
-	.empty-state {
-		position: absolute;
-		top: 50%;
-		left: 50%;
-		transform: translate(-50%, -50%);
-		text-align: center;
-		color: var(--gm-text-muted);
-		z-index: 1;
-	}
-
-	.empty-icon {
-		font-size: 48px;
-		margin-bottom: 12px;
-		opacity: 0.3;
-	}
-
-	.empty-state h3 {
-		font-size: 14px;
-		font-weight: 600;
-		color: var(--gm-text-secondary);
-		margin: 0 0 8px 0;
-	}
-
-	.empty-state p {
-		font-size: 12px;
-		margin: 4px 0;
-		line-height: 1.5;
-	}
-
-	.hint { color: var(--gm-text-muted); }
-
-	/* ── Detail Panel ──────────────────────────────── */
-
-	.detail-panel {
-		width: 280px;
-		min-width: 240px;
-		border-left: 1px solid var(--gm-border);
-		background: var(--gm-bg-secondary);
-		overflow-y: auto;
-		padding: 0;
-	}
-
-	.detail-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 12px;
-		border-bottom: 1px solid var(--gm-border);
-	}
-
-	.detail-header h3 {
-		font-size: 13px;
-		font-weight: 600;
-		color: var(--gm-text-primary);
-		margin: 0;
-	}
-
-	.detail-close {
-		background: none;
-		border: none;
-		color: var(--gm-text-muted);
-		font-size: 18px;
-		cursor: pointer;
-		padding: 2px 6px;
-		border-radius: 3px;
-	}
-
-	.detail-close:hover { background: var(--gm-bg-hover); color: var(--gm-text-primary); }
-
-	.detail-section {
-		padding: 10px 12px;
-		border-bottom: 1px solid var(--gm-border);
-	}
-
-	.detail-section h4 {
-		font-size: 10px;
-		font-weight: 600;
-		text-transform: uppercase;
-		letter-spacing: 0.5px;
-		color: var(--gm-text-secondary);
-		margin: 0 0 8px 0;
-	}
-
-	.detail-row {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 3px 0;
-		font-size: 11px;
-	}
-
-	.detail-label {
-		color: var(--gm-text-muted);
-		font-size: 10px;
-	}
-
-	.detail-value {
-		color: var(--gm-text-primary);
-	}
-
-	.badge {
-		padding: 1px 6px;
-		border-radius: 3px;
-		font-size: 10px;
-		background: rgba(16, 185, 129, 0.15);
-		color: #10b981;
-	}
-
-	.badge-purple {
-		background: rgba(139, 92, 246, 0.15);
-		color: #a78bfa;
-	}
-
-	.text-red { color: #ef4444; }
-
-	.device-item {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		width: 100%;
-		padding: 4px 8px;
-		background: transparent;
-		border: none;
-		border-radius: 3px;
-		color: var(--gm-text-primary);
-		font-family: inherit;
-		font-size: 11px;
-		cursor: pointer;
-		text-align: left;
-		transition: background 0.1s;
-	}
-
-	.device-item:hover { background: var(--gm-bg-hover); }
-
-	.show-logical {
-		font-size: 9px;
-		color: #3b82f6;
-		opacity: 0;
-		transition: opacity 0.1s;
-	}
-
-	.device-item:hover .show-logical { opacity: 1; }
-
-	.mac-item {
-		font-size: 10px;
-		color: var(--gm-text-muted);
-		font-family: 'JetBrains Mono', monospace;
-		padding: 2px 0;
-	}
-
-	/* ── Port Grid ──────────────────────────────────── */
-
-	.port-grid {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 4px;
-	}
-
-	.port-chip {
-		padding: 3px 6px;
-		background: var(--gm-bg-panel);
-		border: 1px solid var(--gm-border);
-		border-radius: 3px;
-		color: var(--gm-text-muted);
-		font-family: 'JetBrains Mono', monospace;
-		font-size: 9px;
-		cursor: pointer;
-		transition: all 0.1s;
-	}
-
-	.port-chip:hover {
-		border-color: var(--gm-text-secondary);
-		color: var(--gm-text-primary);
-	}
-
-	.port-chip.has-device {
-		border-color: #3b82f6;
-		color: #93c5fd;
-	}
-
-	.port-chip.is-trunk {
-		border-color: #8b5cf6;
-		color: #c4b5fd;
-	}
-
-	.port-chip.is-shutdown {
-		opacity: 0.4;
-		border-style: dashed;
-	}
-
-	/* ── Legend ──────────────────────────────────────── */
 
 	.physical-legend {
 		display: flex;
 		align-items: center;
-		gap: 14px;
-		padding: 8px 16px;
-		border-top: 1px solid var(--gm-border);
+		gap: 0.75rem;
+		padding: 0.5rem 1rem;
 		background: var(--gm-bg-secondary);
-		font-size: 9px;
-		letter-spacing: 0.5px;
+		border-top: 1px solid var(--gm-border);
+		flex-wrap: wrap;
 		flex-shrink: 0;
+		font-size: 0.75rem;
 	}
 
 	.legend-title {
-		color: var(--gm-text-muted);
 		font-weight: 600;
-		letter-spacing: 1.5px;
+		color: var(--gm-text-secondary);
+		margin-right: 0.5rem;
 	}
 
 	.legend-item {
 		display: flex;
 		align-items: center;
-		gap: 4px;
+		gap: 0.35rem;
 		color: var(--gm-text-secondary);
 	}
 
 	.legend-dot {
-		width: 8px;
-		height: 8px;
-		border-radius: 50%;
-	}
-
-	/* ── Tab Switcher ─────────────────────────────────── */
-
-	.tab-switcher {
-		display: flex;
-		gap: 2px;
-		background: var(--gm-bg-panel);
-		border: 1px solid var(--gm-border);
-		border-radius: 5px;
-		padding: 2px;
-	}
-
-	.tab-btn {
-		padding: 3px 12px;
-		background: transparent;
-		border: none;
-		border-radius: 3px;
-		color: var(--gm-text-secondary);
-		font-family: inherit;
-		font-size: 11px;
-		cursor: pointer;
-		transition: all 0.15s;
-	}
-
-	.tab-btn:hover {
-		color: var(--gm-text-primary);
-	}
-
-	.tab-btn.active {
-		background: var(--gm-bg-hover);
-		color: var(--gm-text-primary);
-	}
-
-	/* ── Inferred Tab ─────────────────────────────────── */
-
-	.inferred-container {
-		flex: 1;
-		overflow-y: auto;
-		padding: 16px;
-		background: var(--gm-bg-primary);
-	}
-
-	.inferred-empty {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-		height: 60%;
-		text-align: center;
-		color: var(--gm-text-muted);
-		gap: 12px;
-	}
-
-	.inferred-empty h3 {
-		font-size: 14px;
-		font-weight: 600;
-		color: var(--gm-text-secondary);
-		margin: 0;
-	}
-
-	.inferred-empty p {
-		font-size: 12px;
-		margin: 0;
-		max-width: 360px;
-	}
-
-	.inferred-content {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-		gap: 16px;
-		align-content: start;
-	}
-
-	.inferred-section {
-		display: flex;
-		flex-direction: column;
-		gap: 8px;
-	}
-
-	.inferred-section-title {
-		font-size: 10px;
-		font-weight: 600;
-		text-transform: uppercase;
-		letter-spacing: 1px;
-		color: var(--gm-text-secondary);
-		margin: 0;
-	}
-
-	.inferred-card {
-		background: var(--gm-bg-secondary);
-		border: 1px solid var(--gm-border);
-		border-radius: 6px;
-		padding: 10px 12px;
-		display: flex;
-		flex-direction: column;
-		gap: 6px;
-	}
-
-	.card-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-	}
-
-	.card-network {
-		font-size: 12px;
-		font-weight: 600;
-		color: var(--gm-text-primary);
-		font-family: 'JetBrains Mono', monospace;
-	}
-
-	.card-badge {
-		font-size: 9px;
-		padding: 1px 6px;
-		border-radius: 3px;
-		background: rgba(16, 185, 129, 0.15);
-		color: #10b981;
-	}
-
-	.card-badge.confidence-1 {
-		background: rgba(234, 179, 8, 0.15);
-		color: #eab308;
-	}
-
-	.card-badge.confidence-2 {
-		background: rgba(249, 115, 22, 0.15);
-		color: #f97316;
-	}
-
-	.card-badge.confidence-3 {
-		background: rgba(16, 185, 129, 0.15);
-		color: #10b981;
-	}
-
-	.card-detail {
-		display: flex;
-		gap: 8px;
-		align-items: baseline;
-	}
-
-	.card-label {
-		font-size: 9px;
-		color: var(--gm-text-muted);
-		text-transform: uppercase;
-		letter-spacing: 0.5px;
-		min-width: 52px;
-		flex-shrink: 0;
-	}
-
-	.card-value {
-		font-size: 10px;
-		color: var(--gm-text-secondary);
-		font-family: 'JetBrains Mono', monospace;
-	}
-
-	.gw-ip {
-		color: #10b981;
-	}
-
-	.card-ips {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 3px;
-		margin-top: 2px;
-	}
-
-	.ip-chip {
-		font-size: 9px;
-		padding: 1px 5px;
-		background: var(--gm-bg-panel);
-		border: 1px solid var(--gm-border);
-		border-radius: 3px;
-		color: var(--gm-text-muted);
-		font-family: 'JetBrains Mono', monospace;
-	}
-
-	.ip-chip.muted {
-		opacity: 0.6;
-	}
-
-	/* ── Ring Redundancy Tab ─────────────────────────────── */
-
-	.redundancy-protocol-badges {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 8px;
-	}
-
-	.redundancy-badge {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		padding: 6px 10px;
-		background: var(--gm-bg-secondary);
-		border: 1px solid var(--gm-border);
-		border-radius: 6px;
-		font-size: 11px;
-	}
-
-	.redundancy-badge.has-tc {
-		border-color: #ef4444;
-	}
-
-	.proto-name {
-		font-weight: 700;
-		color: #38bdf8;
-		font-family: monospace;
-	}
-
-	.proto-count {
-		color: var(--gm-text-muted);
-		font-size: 10px;
-	}
-
-	.proto-flag {
-		font-size: 9px;
-		padding: 1px 5px;
-		border-radius: 3px;
-		font-weight: 600;
-	}
-
-	.proto-flag.manager {
-		background: #d97706;
-		color: #fff;
-	}
-
-	.proto-flag.tc-flag {
-		background: #ef4444;
-		color: #fff;
-	}
-
-	.tc-card {
-		border-color: #ef444455;
+		width: 12px;
+		height: 12px;
+		border-radius: 2px;
 	}
 </style>

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { interfaces, captureStatus, captureStats, assets, connections, topology, sessions, currentSession, assetCount, connectionCount } from '$lib/stores';
+	import { interfaces, captureStatus, captureStats, assets, connections, topology, sessions, currentSession, assetCount, connectionCount, protocolStats } from '$lib/stores';
 	import {
 		importPcap, listHeadlessImportFiles, cancelImport, onImportProgress,
 		getAssets, getConnections, getDataCounts, getTopology, getProtocolStats,
@@ -10,19 +10,23 @@
 		importZeekLogs, importSuricataEve, importNmapXml, importMasscanJson, importWazuhAlerts,
 		importSinemaCsv, importTiaXml,
 		getFindings, isTauriRuntime
-	} from '$lib/utils/tauri';
+	} from '$lib/api';
 	import { openPathDialog, savePathDialog } from '$lib/utils/dialog';
-	import type { ImportProgressEvent, HeadlessImportKind } from '$lib/utils/tauri';
-	import { protocolStats } from '$lib/stores';
+	import type { ImportProgressEvent, HeadlessImportKind } from '$lib/types';
 	import type { FileImportResult, CaptureStatsEvent, SessionInfo, IngestImportResult } from '$lib/types';
 	import { onMount, onDestroy } from 'svelte';
 	import { get } from 'svelte/store';
 
-	// ── PCAP Import State ─────────────────────────────────
+	import CaptureImportPanel from './capture/CaptureImportPanel.svelte';
+	import LiveCapturePanel from './capture/LiveCapturePanel.svelte';
+	import ProtocolStatsPanel from './capture/ProtocolStatsPanel.svelte';
+	import SessionPanel from './capture/SessionPanel.svelte';
+	import ExternalImportPanel from './capture/ExternalImportPanel.svelte';
+
+	// ── PCAP Import State ──────────────────────────────────────────
 	let importStatus = $state<'idle' | 'importing' | 'done' | 'error'>('idle');
 	let importMessage = $state('');
 	let fileResults = $state<FileImportResult[]>([]);
-	let totalStats = $state({ packets: 0, assets: 0, connections: 0, ms: 0, files: 0 });
 	let importProgress = $state<ImportProgressEvent | null>(null);
 	let unlistenProgress: (() => void) | null = null;
 	let showServerPicker = $state(false);
@@ -37,13 +41,16 @@
 	let serverPickerAllowMultiple = $state(true);
 	let serverPickerResolve: ((paths: string[] | null) => void) | null = null;
 
-	// ── Live Capture State ────────────────────────────────
+	// ── Live Capture State ────────────────────────────────────────
 	let selectedInterface = $state('');
 	let bpfFilter = $state('');
 	let captureError = $state('');
 	let stopResult = $state<{ packets: number; bytes: number; elapsed: number; saved: boolean; path: string | null } | null>(null);
+	let unlistenStats: (() => void) | null = null;
+	let unlistenError: (() => void) | null = null;
+	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
-	// ── Session State ──────────────────────────────────
+	// ── Session State ──────────────────────────────────────────────
 	let sessionName = $state('');
 	let sessionDesc = $state('');
 	let sessionMessage = $state('');
@@ -51,75 +58,19 @@
 	let showSaveForm = $state(false);
 	let confirmDeleteId = $state<string | null>(null);
 
-	// ── Capture Summary State ─────────────────────────────
-	let captureSummary = $state<{
-		subnets: number;
-		otCount: number;
-		itCount: number;
-		topProtocols: { name: string; pct: number }[];
-		criticalFindings: number;
-		highFindings: number;
-	} | null>(null);
-
-	async function buildCaptureSummary() {
-		try {
-			const currentAssets = get(assets);
-			const findings = await getFindings();
-
-			const OT_TYPES = new Set(['plc', 'rtu', 'hmi', 'historian', 'engineering_workstation', 'scada_server']);
-			let otCount = 0;
-			let itCount = 0;
-			const subnetSet = new Set<string>();
-			const protoCounts: Record<string, number> = {};
-
-			for (const a of currentAssets) {
-				if (OT_TYPES.has(a.device_type)) otCount++;
-				else itCount++;
-
-				const parts = a.ip_address.split('.');
-				if (parts.length === 4) subnetSet.add(`${parts[0]}.${parts[1]}.${parts[2]}.0/24`);
-
-				for (const p of a.protocols) {
-					protoCounts[p] = (protoCounts[p] ?? 0) + 1;
-				}
-			}
-
-			const totalAssets = currentAssets.length;
-			const topProtocols = Object.entries(protoCounts)
-				.sort((a, b) => b[1] - a[1])
-				.slice(0, 4)
-				.map(([name, count]) => ({
-					name,
-					pct: totalAssets > 0 ? Math.round(count / totalAssets * 100) : 0
-				}));
-
-			captureSummary = {
-				subnets: subnetSet.size,
-				otCount,
-				itCount,
-				topProtocols,
-				criticalFindings: findings.filter(f => f.severity === 'critical').length,
-				highFindings: findings.filter(f => f.severity === 'high').length,
-			};
-		} catch {
-			captureSummary = null;
-		}
-	}
-
-	// ── External Tool Import State ────────────────────────
+	// ── External Import State ──────────────────────────────────────
 	let ingestStatus = $state<'idle' | 'importing' | 'done' | 'error'>('idle');
 	let ingestMessage = $state('');
 	let lastIngestResult = $state<IngestImportResult | null>(null);
 
-	// Event listener cleanup functions
-	let unlistenStats: (() => void) | null = null;
-	let unlistenError: (() => void) | null = null;
-	let refreshInterval: ReturnType<typeof setInterval> | null = null;
+	const isCapturing = $derived($captureStatus === 'capturing' || $captureStatus === 'paused');
+
+	// ────────────────────────────────────────────────────────────────
+	// EVENT LISTENERS & LIFECYCLE
+	// ────────────────────────────────────────────────────────────────
 
 	onMount(() => {
-		// Set up event listeners for live capture and import progress
 		setupEventListeners();
-		// Load session list
 		refreshSessions();
 	});
 
@@ -150,14 +101,6 @@
 		cleanupRefreshInterval();
 	}
 
-	async function handleCancelImport() {
-		try {
-			await cancelImport();
-		} catch (err) {
-			console.error('Cancel import error:', err);
-		}
-	}
-
 	function cleanupRefreshInterval() {
 		if (refreshInterval) {
 			clearInterval(refreshInterval);
@@ -165,7 +108,6 @@
 		}
 	}
 
-	// Start a periodic data refresh while capturing (every 500ms)
 	function startDataRefresh() {
 		cleanupRefreshInterval();
 		refreshInterval = setInterval(async () => {
@@ -189,10 +131,12 @@
 		}, 500);
 	}
 
-	// ── PCAP Import ──────────────────────────────────────
+	// ────────────────────────────────────────────────────────────────
+	// PCAP IMPORT HANDLERS
+	// ────────────────────────────────────────────────────────────────
+
 	async function runPcapImport(importTask: Promise<import('$lib/types').ImportResult>, fileCount: number) {
 		importStatus = 'importing';
-		captureSummary = null;
 		importProgress = null;
 		importMessage = `Importing ${fileCount} file${fileCount > 1 ? 's' : ''}...`;
 		fileResults = [];
@@ -202,13 +146,6 @@
 		importProgress = null;
 		importStatus = 'done';
 		fileResults = result.per_file;
-		totalStats = {
-			packets: result.packet_count,
-			assets: result.asset_count,
-			connections: result.connection_count,
-			ms: result.duration_ms,
-			files: result.file_count
-		};
 		importMessage = `Imported ${result.packet_count.toLocaleString()} packets from ${result.file_count} file${result.file_count > 1 ? 's' : ''} → ${result.asset_count} assets, ${result.connection_count} connections (${result.duration_ms}ms)`;
 
 		const [assetPage, connPage, newTopology, newStats, counts] = await Promise.all([
@@ -225,7 +162,6 @@
 		protocolStats.set(newStats);
 		assetCount.set(counts.asset_count);
 		connectionCount.set(counts.connection_count);
-		await buildCaptureSummary();
 	}
 
 	function toggleServerPickerPath(path: string, checked: boolean) {
@@ -249,11 +185,7 @@
 		if (resolve) resolve(result);
 	}
 
-	async function openServerImportPicker(
-		kind: HeadlessImportKind,
-		title: string,
-		multiple: boolean
-	): Promise<string[] | null> {
+	async function openServerImportPicker(kind: HeadlessImportKind, title: string, multiple: boolean): Promise<string[] | null> {
 		serverPickerLoading = true;
 		serverPickerError = '';
 		serverPickerFiles = [];
@@ -316,7 +248,18 @@
 		}
 	}
 
-	// ── Live Capture Controls ─────────────────────────────
+	async function handleCancelImport() {
+		try {
+			await cancelImport();
+		} catch (err) {
+			console.error('Cancel import error:', err);
+		}
+	}
+
+	// ────────────────────────────────────────────────────────────────
+	// LIVE CAPTURE HANDLERS
+	// ────────────────────────────────────────────────────────────────
+
 	async function handleStartCapture() {
 		if (!selectedInterface) return;
 		captureError = '';
@@ -363,7 +306,6 @@
 				path: result.pcap_path
 			};
 
-			// Do one final data refresh
 			const [assetPage, connPage, newTopology, newStats, counts] = await Promise.all([
 				getAssets(0, 200),
 				getConnections(0, 500),
@@ -398,23 +340,10 @@
 		}
 	}
 
-	function formatBytes(bytes: number): string {
-		if (bytes < 1024) return `${bytes} B`;
-		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-		if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-		return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
-	}
+	// ────────────────────────────────────────────────────────────────
+	// SESSION HANDLERS
+	// ────────────────────────────────────────────────────────────────
 
-	function formatDuration(seconds: number): string {
-		const h = Math.floor(seconds / 3600);
-		const m = Math.floor((seconds % 3600) / 60);
-		const s = Math.floor(seconds % 60);
-		if (h > 0) return `${h}h ${m}m ${s}s`;
-		if (m > 0) return `${m}m ${s}s`;
-		return `${s}s`;
-	}
-
-	// ── Session Management ──────────────────────────────
 	async function refreshSessions() {
 		try {
 			const list = await listSessions();
@@ -445,7 +374,6 @@
 		try {
 			const info = await loadSession(id);
 			currentSession.set(info);
-			// Refresh all data stores
 			const [assetPage, connPage, newTopology, newStats, counts] = await Promise.all([
 				getAssets(0, 200), getConnections(0, 500), getTopology(), getProtocolStats(), getDataCounts()
 			]);
@@ -520,7 +448,6 @@
 			if (!path) return;
 			const info = await importSessionArchive(path);
 			currentSession.set(info);
-			// Refresh all data stores
 			const [assetPage, connPage, newTopology, newStats, counts] = await Promise.all([
 				getAssets(0, 200), getConnections(0, 500), getTopology(), getProtocolStats(), getDataCounts()
 			]);
@@ -539,7 +466,22 @@
 		}
 	}
 
-	// ── External Tool Import Handlers ────────────────────
+	// ────────────────────────────────────────────────────────────────
+	// EXTERNAL TOOL IMPORT HANDLERS
+	// ────────────────────────────────────────────────────────────────
+
+	async function refreshStores() {
+		const [assetPage, connPage, newTopology, newStats, counts] = await Promise.all([
+			getAssets(0, 200), getConnections(0, 500), getTopology(), getProtocolStats(), getDataCounts()
+		]);
+		assets.set(assetPage.assets);
+		connections.set(connPage.connections);
+		topology.set(newTopology);
+		protocolStats.set(newStats);
+		assetCount.set(counts.asset_count);
+		connectionCount.set(counts.connection_count);
+	}
+
 	async function handleImportZeek() {
 		try {
 			let paths: string[] = [];
@@ -720,7 +662,7 @@
 		}
 	}
 
-	async function handleImportSinemaCsv() {
+	async function handleImportSinema() {
 		try {
 			let path: string | null = null;
 			if (!isTauriRuntime()) {
@@ -756,7 +698,7 @@
 		}
 	}
 
-	async function handleImportTiaXml() {
+	async function handleImportTia() {
 		try {
 			let path: string | null = null;
 			if (!isTauriRuntime()) {
@@ -791,20 +733,6 @@
 			ingestMessage = `TIA Portal import failed: ${err}`;
 		}
 	}
-
-	async function refreshStores() {
-		const [assetPage, connPage, newTopology, newStats, counts] = await Promise.all([
-			getAssets(0, 200), getConnections(0, 500), getTopology(), getProtocolStats(), getDataCounts()
-		]);
-		assets.set(assetPage.assets);
-		connections.set(connPage.connections);
-		topology.set(newTopology);
-		protocolStats.set(newStats);
-		assetCount.set(counts.asset_count);
-		connectionCount.set(counts.connection_count);
-	}
-
-	const isCapturing = $derived($captureStatus === 'capturing' || $captureStatus === 'paused');
 </script>
 
 <div class="capture-container">
@@ -813,641 +741,77 @@
 	</div>
 
 	<div class="capture-content">
-		<!-- PCAP Import Section -->
-		<section class="capture-section">
-			<h3 class="section-title">PCAP Import</h3>
-			<p class="section-desc">
-				Import one or more PCAP/PCAPNG files captured from an OT network. Multiple files can be
-				selected simultaneously — all traffic is merged into a single topology with per-file attribution.
-			</p>
+		<CaptureImportPanel
+			{importStatus}
+			{importMessage}
+			{fileResults}
+			totalStats={{ packets: 0, assets: 0, connections: 0, ms: 0, files: 0 }}
+			{importProgress}
+			{showServerPicker}
+			{serverPickerLoading}
+			{serverPickerError}
+			{serverPickerBaseDir}
+			{serverPickerFiles}
+			{selectedServerPaths}
+			{serverPickerListLimit}
+			{serverPickerTruncated}
+			{serverPickerTitle}
+			{serverPickerAllowMultiple}
+			onImport={handleImportPcap}
+			onCancelImport={handleCancelImport}
+			onToggleServerPath={toggleServerPickerPath}
+			onCloseServerPicker={closeServerPicker}
+		/>
 
-			<button class="action-btn primary" onclick={handleImportPcap} disabled={importStatus === 'importing' || isCapturing}>
-				{importStatus === 'importing' ? 'Importing...' : 'Import PCAP Files'}
-			</button>
+		<LiveCapturePanel
+			{selectedInterface}
+			{bpfFilter}
+			{captureError}
+			captureStatus={$captureStatus}
+			captureStats={$captureStats}
+			{stopResult}
+			interfaces={$interfaces}
+			onInterfaceChange={(iface) => (selectedInterface = iface)}
+			onFilterChange={(filter) => (bpfFilter = filter)}
+			onStartCapture={handleStartCapture}
+			onStopCapture={handleStopCapture}
+			onPauseResume={handlePauseResume}
+		/>
 
-			{#if showServerPicker}
-				<div
-					class="server-picker-overlay"
-					role="button"
-					tabindex="0"
-					onclick={() => {
-						closeServerPicker(null);
-					}}
-					onkeydown={(e) => {
-						if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') {
-							closeServerPicker(null);
-						}
-					}}
-				>
-					<div
-						class="server-picker-dialog"
-						role="dialog"
-						aria-modal="true"
-						tabindex="-1"
-						onclick={(e) => e.stopPropagation()}
-						onkeydown={(e) => e.stopPropagation()}
-					>
-						<div class="server-picker-header">
-							<h4 class="server-picker-title">{serverPickerTitle}</h4>
-							<button
-								class="server-picker-close"
-								onclick={() => {
-									closeServerPicker(null);
-								}}
-							>&times;</button>
-						</div>
-						<div class="server-picker-subtitle">
-							Fixed import directory: <code>{serverPickerBaseDir || '(loading...)'}</code>
-						</div>
-						{#if serverPickerTruncated}
-							<div class="server-picker-warning">
-								Showing first {serverPickerFiles.length} files (limit {serverPickerListLimit}). Narrow
-								<code>KK_HEADLESS_IMPORTS_ROOT</code> or increase
-								<code>KK_HEADLESS_IMPORT_LIST_LIMIT</code> on the server.
-							</div>
-						{/if}
+		<ProtocolStatsPanel stats={$protocolStats} />
 
-						{#if serverPickerLoading}
-							<div class="server-picker-empty">Loading server files...</div>
-						{:else if serverPickerError}
-							<div class="import-result error">{serverPickerError}</div>
-						{:else if serverPickerFiles.length === 0}
-							<div class="server-picker-empty">No importable PCAP files found.</div>
-						{:else}
-							<div class="server-picker-list">
-								{#each serverPickerFiles as file}
-										<label class="server-picker-row">
-											<input
-												type={serverPickerAllowMultiple ? 'checkbox' : 'radio'}
-												name="server-import-file"
-												checked={selectedServerPaths.includes(file.path)}
-												onchange={(e) =>
-													toggleServerPickerPath(file.path, (e.currentTarget as HTMLInputElement).checked)}
-										/>
-										<span class="server-picker-name">{file.name}</span>
-										<span class="server-picker-size">{formatBytes(file.size_bytes)}</span>
-									</label>
-								{/each}
-							</div>
-						{/if}
+		<SessionPanel
+			sessions={$sessions}
+			currentSession={$currentSession}
+			{sessionMessage}
+			{sessionMessageType}
+			{showSaveForm}
+			{sessionName}
+			{sessionDesc}
+			{confirmDeleteId}
+			onToggleSaveForm={() => (showSaveForm = !showSaveForm)}
+			onSaveName={(name) => (sessionName = name)}
+			onSaveDesc={(desc) => (sessionDesc = desc)}
+			onSaveSession={handleSaveSession}
+			onLoadSession={handleLoadSession}
+			onDeleteSession={handleDeleteSession}
+			onExportSession={handleExportSession}
+			onImportArchive={handleImportArchive}
+			onConfirmDelete={(id) => (confirmDeleteId = id)}
+		/>
 
-						<div class="server-picker-actions">
-							<button class="action-btn secondary" onclick={() => { closeServerPicker(null); }}>
-								Cancel
-							</button>
-							<button
-								class="action-btn primary"
-								onclick={() => closeServerPicker([...selectedServerPaths])}
-								disabled={serverPickerLoading || selectedServerPaths.length === 0}
-							>
-								Select ({selectedServerPaths.length})
-							</button>
-						</div>
-					</div>
-				</div>
-			{/if}
-
-			{#if importStatus === 'importing'}
-				<div class="import-progress-card">
-					<div class="import-progress-header">
-						<span class="import-progress-title">Processing PCAP</span>
-						<button class="cancel-import-btn" onclick={handleCancelImport}>Cancel</button>
-					</div>
-					{#if importProgress}
-						<div class="import-progress-file">
-							File {importProgress.file_index + 1} of {importProgress.file_count}:
-							<strong>{importProgress.current_file.split(/[\\/]/).pop()}</strong>
-						</div>
-						<div class="import-progress-bar-track">
-							<div
-								class="import-progress-bar-fill"
-								style="width: {importProgress.progress_percent}%"
-							></div>
-						</div>
-						<div class="import-progress-stats">
-							<span>{importProgress.packets_processed.toLocaleString()} pkts</span>
-							<span>{formatBytes(importProgress.bytes_processed)} / {formatBytes(importProgress.file_size)}</span>
-							<span>{importProgress.progress_percent.toFixed(1)}%</span>
-							<span>{formatDuration(importProgress.elapsed_secs)}</span>
-						</div>
-						{#if importProgress.progress_percent > 5}
-							{@const eta = (importProgress.elapsed_secs / importProgress.progress_percent) * (100 - importProgress.progress_percent)}
-							<div class="import-progress-eta">~{formatDuration(eta)} remaining</div>
-						{/if}
-					{:else}
-						<div class="import-progress-waiting">Starting...</div>
-					{/if}
-				</div>
-			{/if}
-
-			{#if importMessage && importStatus !== 'importing'}
-				<div
-					class="import-result"
-					class:success={importStatus === 'done'}
-					class:error={importStatus === 'error'}
-				>
-					{importMessage}
-				</div>
-			{/if}
-
-			{#if fileResults.length > 1}
-				<div class="file-results">
-					<h4 class="subsection-title">Per-File Results</h4>
-					{#each fileResults as file}
-						<div class="file-result-row" class:file-ok={file.status === 'ok'} class:file-err={file.status !== 'ok'}>
-							<span class="file-name">{file.filename}</span>
-							<span class="file-packets">
-								{#if file.status === 'ok'}
-									{file.packet_count.toLocaleString()} packets
-								{:else}
-									{file.status}
-								{/if}
-							</span>
-						</div>
-					{/each}
-				</div>
-			{/if}
-
-			{#if importStatus === 'done'}
-				<div class="import-stats-grid">
-					<div class="import-stat">
-						<span class="import-stat-value">{totalStats.files}</span>
-						<span class="import-stat-label">Files</span>
-					</div>
-					<div class="import-stat">
-						<span class="import-stat-value">{totalStats.packets.toLocaleString()}</span>
-						<span class="import-stat-label">Packets</span>
-					</div>
-					<div class="import-stat">
-						<span class="import-stat-value">{totalStats.assets}</span>
-						<span class="import-stat-label">Assets</span>
-					</div>
-					<div class="import-stat">
-						<span class="import-stat-value">{totalStats.connections}</span>
-						<span class="import-stat-label">Connections</span>
-					</div>
-				</div>
-			{/if}
-
-			{#if importStatus === 'done' && captureSummary}
-				<div class="capture-summary-card">
-					<h4 class="summary-card-title">Capture Summary</h4>
-					<div class="summary-grid">
-						<div class="summary-item">
-							<span class="summary-val">{totalStats.packets.toLocaleString()}</span>
-							<span class="summary-key">Packets</span>
-						</div>
-						<div class="summary-item">
-							<span class="summary-val">{captureSummary.subnets}</span>
-							<span class="summary-key">Subnets</span>
-						</div>
-						<div class="summary-item">
-							<span class="summary-val">{captureSummary.otCount}</span>
-							<span class="summary-key">OT Devices</span>
-						</div>
-						<div class="summary-item">
-							<span class="summary-val">{captureSummary.itCount}</span>
-							<span class="summary-key">IT Devices</span>
-						</div>
-					</div>
-					{#if captureSummary.topProtocols.length > 0}
-						<div class="summary-protocols">
-							<span class="summary-proto-label">Protocols: </span>
-							{#each captureSummary.topProtocols as p, i}
-								<span class="summary-proto">{p.name} ({p.pct}%)</span>
-								{#if i < captureSummary.topProtocols.length - 1}<span class="proto-sep">, </span>{/if}
-							{/each}
-						</div>
-					{/if}
-					{#if captureSummary.criticalFindings > 0 || captureSummary.highFindings > 0}
-						<div class="summary-findings">
-							{#if captureSummary.criticalFindings > 0}
-								<span class="finding-badge critical">{captureSummary.criticalFindings} Critical</span>
-							{/if}
-							{#if captureSummary.highFindings > 0}
-								<span class="finding-badge high">{captureSummary.highFindings} High</span>
-							{/if}
-						</div>
-					{:else}
-						<div class="summary-findings"><span class="finding-badge ok">No critical findings</span></div>
-					{/if}
-				</div>
-			{/if}
-		</section>
-
-		<!-- Live Capture Section -->
-		<section class="capture-section">
-			<h3 class="section-title">Live Capture</h3>
-			<p class="section-desc">
-				Capture packets in real-time from a network interface. Requires elevated privileges
-				(root/admin or CAP_NET_RAW capability). Operates in passive mode only — never transmits.
-			</p>
-
-			{#if !isCapturing}
-				<!-- Interface Selector -->
-				<div class="capture-form">
-					<div class="form-group">
-						<label class="form-label" for="interface-select">Interface</label>
-						<select
-							id="interface-select"
-							class="form-select"
-							bind:value={selectedInterface}
-							disabled={isCapturing}
-						>
-							<option value="">Select interface...</option>
-							{#each $interfaces as iface}
-								<option value={iface.name}>
-									{iface.name}
-									{#if iface.description}— {iface.description}{/if}
-									{#if iface.addresses.length > 0}({iface.addresses[0].addr}){/if}
-								</option>
-							{/each}
-						</select>
-					</div>
-
-					<div class="form-group">
-						<label class="form-label" for="bpf-filter">BPF Filter (optional)</label>
-						<input
-							id="bpf-filter"
-							class="form-input"
-							type="text"
-							placeholder="e.g., tcp port 502 or host 192.168.1.0/24"
-							bind:value={bpfFilter}
-							disabled={isCapturing}
-						/>
-					</div>
-
-					<button
-						class="action-btn capture-start"
-						onclick={handleStartCapture}
-						disabled={!selectedInterface || isCapturing}
-					>
-						Start Capture
-					</button>
-				</div>
-			{/if}
-
-			{#if isCapturing}
-				<!-- Capture Controls -->
-				<div class="capture-controls">
-					<div class="capture-status-bar">
-						<span class="capture-indicator" class:paused={$captureStatus === 'paused'}>
-							{$captureStatus === 'paused' ? 'PAUSED' : 'CAPTURING'}
-						</span>
-						<span class="capture-interface">{selectedInterface}</span>
-						{#if bpfFilter}
-							<span class="capture-filter">filter: {bpfFilter}</span>
-						{/if}
-					</div>
-
-					<div class="capture-buttons">
-						<button class="action-btn capture-pause" onclick={handlePauseResume}>
-							{$captureStatus === 'paused' ? 'Resume' : 'Pause'}
-						</button>
-						<button class="action-btn capture-stop" onclick={handleStopCapture}>
-							Stop & Save
-						</button>
-					</div>
-				</div>
-
-				<!-- Live Stats -->
-				<div class="stats-grid">
-					<div class="stat-card">
-						<span class="stat-value">{$captureStats.packets_captured.toLocaleString()}</span>
-						<span class="stat-label">Packets</span>
-					</div>
-					<div class="stat-card">
-						<span class="stat-value">{$captureStats.packets_per_second.toLocaleString()}</span>
-						<span class="stat-label">PPS</span>
-					</div>
-					<div class="stat-card">
-						<span class="stat-value">{formatBytes($captureStats.bytes_captured)}</span>
-						<span class="stat-label">Data</span>
-					</div>
-					<div class="stat-card">
-						<span class="stat-value">{$captureStats.active_connections.toLocaleString()}</span>
-						<span class="stat-label">Connections</span>
-					</div>
-					<div class="stat-card">
-						<span class="stat-value">{$captureStats.asset_count.toLocaleString()}</span>
-						<span class="stat-label">Assets</span>
-					</div>
-					<div class="stat-card">
-						<span class="stat-value">{formatDuration($captureStats.elapsed_seconds)}</span>
-						<span class="stat-label">Elapsed</span>
-					</div>
-				</div>
-			{/if}
-
-			<!-- Error Display -->
-			{#if captureError}
-				<div class="capture-error">
-					<strong>Error:</strong>
-					<pre class="error-detail">{captureError}</pre>
-				</div>
-			{/if}
-
-			<!-- Stop Result -->
-			{#if stopResult}
-				<div class="stop-result">
-					<div class="stop-summary">
-						Captured {stopResult.packets.toLocaleString()} packets
-						({formatBytes(stopResult.bytes)}) in {formatDuration(stopResult.elapsed)}
-					</div>
-					{#if stopResult.saved}
-						<div class="stop-saved">Saved to: {stopResult.path}</div>
-					{/if}
-				</div>
-			{/if}
-
-			<!-- Interface List (when not capturing) -->
-			{#if !isCapturing && $interfaces.length > 0}
-				<div class="interface-list">
-					<h4 class="subsection-title">Available Interfaces</h4>
-					{#each $interfaces as iface}
-						<div
-							class="interface-card"
-							class:up={iface.flags.is_up}
-							class:loopback={iface.flags.is_loopback}
-							class:selected={selectedInterface === iface.name}
-							onclick={() => { selectedInterface = iface.name; }}
-							role="button"
-							tabindex="0"
-							onkeydown={(e) => { if (e.key === 'Enter') selectedInterface = iface.name; }}
-						>
-							<div class="iface-name">{iface.name}</div>
-							{#if iface.description}
-								<div class="iface-desc">{iface.description}</div>
-							{/if}
-							<div class="iface-addrs">
-								{#each iface.addresses as addr}
-									<span class="iface-addr">{addr.addr}</span>
-								{/each}
-							</div>
-							<div class="iface-flags">
-								{#if iface.flags.is_up}<span class="flag up">UP</span>{/if}
-								{#if iface.flags.is_loopback}<span class="flag lo">LOOPBACK</span>{/if}
-								{#if iface.flags.is_running}<span class="flag run">RUNNING</span>{/if}
-							</div>
-						</div>
-					{/each}
-				</div>
-			{:else if !isCapturing}
-				<div class="interface-list">
-					<h4 class="subsection-title">Available Interfaces</h4>
-					<div class="no-interfaces">
-						No interfaces detected. This is expected during development in the browser.
-						Interfaces will appear when running as a Tauri desktop app.
-					</div>
-				</div>
-			{/if}
-		</section>
-
-		<!-- External Tool Import Section -->
-		<section class="capture-section">
-			<h3 class="section-title">External Tool Import</h3>
-			<p class="section-desc">
-				Import results from Zeek, Suricata, Nmap, or Masscan. Passive tool data (Zeek, Suricata)
-				is merged naturally. Active scan data (Nmap, Masscan) is tagged — this tool never performs scans.
-			</p>
-
-			<div class="ingest-grid">
-				<div class="ingest-card">
-					<div class="ingest-card-header">
-						<span class="ingest-card-title">Zeek (Bro)</span>
-						<span class="ingest-badge passive">PASSIVE</span>
-					</div>
-					<p class="ingest-card-desc">conn.log, modbus.log, dnp3.log, s7comm.log</p>
-					<button class="action-btn primary" onclick={handleImportZeek} disabled={ingestStatus === 'importing' || isCapturing}>
-						Import Zeek Logs
-					</button>
-				</div>
-
-				<div class="ingest-card">
-					<div class="ingest-card-header">
-						<span class="ingest-card-title">Suricata</span>
-						<span class="ingest-badge passive">PASSIVE</span>
-					</div>
-					<p class="ingest-card-desc">eve.json — flows, alerts, protocol metadata</p>
-					<button class="action-btn primary" onclick={handleImportSuricata} disabled={ingestStatus === 'importing' || isCapturing}>
-						Import eve.json
-					</button>
-				</div>
-
-				<div class="ingest-card">
-					<div class="ingest-card-header">
-						<span class="ingest-card-title">Nmap</span>
-						<span class="ingest-badge active">ACTIVE SCAN</span>
-					</div>
-					<p class="ingest-card-desc">XML output (-oX) — hosts, ports, services, OS</p>
-					<button class="action-btn warning" onclick={handleImportNmap} disabled={ingestStatus === 'importing' || isCapturing}>
-						Import Nmap XML
-					</button>
-				</div>
-
-				<div class="ingest-card">
-					<div class="ingest-card-header">
-						<span class="ingest-card-title">Masscan</span>
-						<span class="ingest-badge active">ACTIVE SCAN</span>
-					</div>
-					<p class="ingest-card-desc">JSON output (-oJ) — IP, ports, banners</p>
-					<button class="action-btn warning" onclick={handleImportMasscan} disabled={ingestStatus === 'importing' || isCapturing}>
-						Import Masscan JSON
-					</button>
-				</div>
-
-				<div class="ingest-card">
-					<div class="ingest-card-header">
-						<span class="ingest-card-title">Wazuh</span>
-						<span class="ingest-badge">SIEM</span>
-					</div>
-					<p class="ingest-card-desc">Alert export (JSON/NDJSON) — correlated IDS/HIDS alerts with IP enrichment</p>
-					<button class="action-btn" onclick={handleImportWazuh} disabled={ingestStatus === 'importing' || isCapturing}>
-						Import Wazuh Alerts
-					</button>
-				</div>
-
-				<div class="ingest-card">
-					<div class="ingest-card-header">
-						<span class="ingest-card-title">SINEMA Server</span>
-						<span class="ingest-badge passive">CONFIG</span>
-					</div>
-					<p class="ingest-card-desc">CSV device inventory export — model, firmware, IP, location enrichment</p>
-					<button class="action-btn primary" onclick={handleImportSinemaCsv} disabled={ingestStatus === 'importing' || isCapturing}>
-						Import SINEMA CSV
-					</button>
-				</div>
-
-				<div class="ingest-card">
-					<div class="ingest-card-header">
-						<span class="ingest-card-title">TIA Portal</span>
-						<span class="ingest-badge passive">CONFIG</span>
-					</div>
-					<p class="ingest-card-desc">XML network configuration export — device names, IPs, hardware models</p>
-					<button class="action-btn primary" onclick={handleImportTiaXml} disabled={ingestStatus === 'importing' || isCapturing}>
-						Import TIA Portal XML
-					</button>
-				</div>
-			</div>
-
-			{#if ingestMessage}
-				<div
-					class="import-result"
-					class:success={ingestStatus === 'done'}
-					class:error={ingestStatus === 'error'}
-					class:loading={ingestStatus === 'importing'}
-				>
-					{ingestMessage}
-				</div>
-			{/if}
-
-			{#if lastIngestResult && ingestStatus === 'done'}
-				<div class="import-stats-grid">
-					<div class="import-stat">
-						<span class="import-stat-value">{lastIngestResult.new_assets}</span>
-						<span class="import-stat-label">New Assets</span>
-					</div>
-					<div class="import-stat">
-						<span class="import-stat-value">{lastIngestResult.updated_assets}</span>
-						<span class="import-stat-label">Updated</span>
-					</div>
-					<div class="import-stat">
-						<span class="import-stat-value">{lastIngestResult.connection_count}</span>
-						<span class="import-stat-label">Connections</span>
-					</div>
-					<div class="import-stat">
-						<span class="import-stat-value">{lastIngestResult.alert_count}</span>
-						<span class="import-stat-label">Alerts</span>
-					</div>
-				</div>
-				{#if lastIngestResult.errors.length > 0}
-					<div class="ingest-errors">
-						<h4 class="subsection-title">Errors</h4>
-						{#each lastIngestResult.errors as err}
-							<div class="ingest-error-row">{err}</div>
-						{/each}
-					</div>
-				{/if}
-			{/if}
-		</section>
-
-		<!-- Session Management Section -->
-		<section class="capture-section">
-			<h3 class="section-title">Sessions</h3>
-			<p class="section-desc">
-				Save and load analysis sessions. Sessions preserve assets, connections, topology, and deep parse data.
-				Export as .kkj archives for sharing or backup.
-			</p>
-
-			{#if $currentSession}
-				<div class="current-session">
-					<span class="session-current-label">Current:</span>
-					<span class="session-current-name">{$currentSession.name}</span>
-					<span class="session-current-stats">
-						{$currentSession.asset_count} assets, {$currentSession.connection_count} connections
-					</span>
-				</div>
-			{/if}
-
-			{#if sessionMessage}
-				<div class="session-message" class:success={sessionMessageType === 'success'} class:error={sessionMessageType === 'error'}>
-					{sessionMessage}
-				</div>
-			{/if}
-
-			<div class="session-actions">
-				{#if !showSaveForm}
-					<button class="action-btn primary" onclick={() => { showSaveForm = true; sessionMessage = ''; }} disabled={isCapturing}>
-						Save Session
-					</button>
-				{/if}
-				<button class="action-btn secondary" onclick={handleImportArchive} disabled={isCapturing}>
-					Import Archive
-				</button>
-			</div>
-
-			{#if showSaveForm}
-				<div class="save-form">
-					<div class="form-group">
-						<label class="form-label" for="session-name">Session Name</label>
-						<input
-							id="session-name"
-							class="form-input"
-							type="text"
-							placeholder="e.g., Plant Floor Assessment 2026-02"
-							bind:value={sessionName}
-						/>
-					</div>
-					<div class="form-group">
-						<label class="form-label" for="session-desc">Description (optional)</label>
-						<input
-							id="session-desc"
-							class="form-input"
-							type="text"
-							placeholder="e.g., Initial baseline of SCADA network"
-							bind:value={sessionDesc}
-						/>
-					</div>
-					<div class="save-form-actions">
-						<button class="action-btn primary" onclick={handleSaveSession} disabled={!sessionName.trim()}>
-							Save
-						</button>
-						<button class="action-btn secondary" onclick={() => { showSaveForm = false; }}>
-							Cancel
-						</button>
-					</div>
-				</div>
-			{/if}
-
-			{#if $sessions.length > 0}
-				<div class="session-list">
-					<h4 class="subsection-title">Saved Sessions</h4>
-					{#each $sessions as session}
-						<div class="session-card" class:active={$currentSession?.id === session.id}>
-							<div class="session-info">
-								<div class="session-name">{session.name}</div>
-								{#if session.description}
-									<div class="session-desc-text">{session.description}</div>
-								{/if}
-								<div class="session-meta">
-									{session.asset_count} assets, {session.connection_count} connections
-									&middot; {new Date(session.created_at).toLocaleDateString()}
-								</div>
-							</div>
-							<div class="session-card-actions">
-								<button
-									class="session-btn load"
-									onclick={() => handleLoadSession(session.id)}
-									disabled={isCapturing}
-									title="Load session"
-								>Load</button>
-								<button
-									class="session-btn export"
-									onclick={() => handleExportSession(session)}
-									title="Export as .kkj archive"
-								>Export</button>
-								{#if confirmDeleteId === session.id}
-									<button
-										class="session-btn confirm-delete"
-										onclick={() => handleDeleteSession(session.id)}
-									>Confirm</button>
-									<button
-										class="session-btn cancel-delete"
-										onclick={() => { confirmDeleteId = null; }}
-									>Cancel</button>
-								{:else}
-									<button
-										class="session-btn delete"
-										onclick={() => { confirmDeleteId = session.id; }}
-										title="Delete session"
-									>Delete</button>
-								{/if}
-							</div>
-						</div>
-					{/each}
-				</div>
-			{/if}
-		</section>
+		<ExternalImportPanel
+			{ingestStatus}
+			{ingestMessage}
+			{lastIngestResult}
+			onImportZeek={handleImportZeek}
+			onImportSuricata={handleImportSuricata}
+			onImportNmap={handleImportNmap}
+			onImportMasscan={handleImportMasscan}
+			onImportWazuh={handleImportWazuh}
+			onImportSinema={handleImportSinema}
+			onImportTia={handleImportTia}
+		/>
 	</div>
 </div>
 
@@ -1456,997 +820,29 @@
 		display: flex;
 		flex-direction: column;
 		height: 100%;
+		background: var(--gm-bg-primary);
 	}
 
 	.capture-toolbar {
-		padding: 10px 16px;
-		border-bottom: 1px solid var(--gm-border);
+		padding: 0.75rem 1rem;
 		background: var(--gm-bg-secondary);
+		border-bottom: 1px solid var(--gm-border);
+		flex-shrink: 0;
 	}
 
 	.view-title {
-		font-size: 13px;
-		font-weight: 600;
-		letter-spacing: 1px;
-		text-transform: uppercase;
-		color: var(--gm-text-primary);
 		margin: 0;
+		font-size: 1.25rem;
+		font-weight: 600;
+		color: var(--gm-text-primary);
 	}
 
 	.capture-content {
 		flex: 1;
 		overflow-y: auto;
-		padding: 20px 24px;
+		padding: 1rem;
 		display: flex;
 		flex-direction: column;
-		gap: 28px;
+		gap: 1rem;
 	}
-
-	.capture-section {
-		background: var(--gm-bg-secondary);
-		border: 1px solid var(--gm-border);
-		border-radius: 8px;
-		padding: 20px;
-	}
-
-	.section-title {
-		font-size: 13px;
-		font-weight: 600;
-		color: var(--gm-text-primary);
-		margin: 0 0 8px 0;
-		letter-spacing: 0.5px;
-	}
-
-	.section-desc {
-		font-size: 11px;
-		color: var(--gm-text-muted);
-		margin: 0 0 16px 0;
-		line-height: 1.6;
-	}
-
-	.action-btn {
-		padding: 10px 20px;
-		border: 1px solid var(--gm-border);
-		border-radius: 6px;
-		font-family: inherit;
-		font-size: 12px;
-		font-weight: 600;
-		cursor: pointer;
-		transition: all 0.15s;
-	}
-
-	.action-btn.primary {
-		background: rgba(16, 185, 129, 0.15);
-		border-color: rgba(16, 185, 129, 0.3);
-		color: #10b981;
-	}
-
-	.action-btn.primary:hover:not(:disabled) {
-		background: rgba(16, 185, 129, 0.25);
-		border-color: #10b981;
-	}
-
-	.action-btn:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
-	.import-result {
-		margin-top: 12px;
-		padding: 10px 14px;
-		border-radius: 6px;
-		font-size: 11px;
-		line-height: 1.5;
-	}
-
-	.import-result.success {
-		background: rgba(16, 185, 129, 0.1);
-		border: 1px solid rgba(16, 185, 129, 0.2);
-		color: #10b981;
-	}
-
-	.import-result.error {
-		background: rgba(239, 68, 68, 0.1);
-		border: 1px solid rgba(239, 68, 68, 0.2);
-		color: #ef4444;
-	}
-
-	.import-result.loading {
-		background: rgba(59, 130, 246, 0.1);
-		border: 1px solid rgba(59, 130, 246, 0.2);
-		color: #3b82f6;
-	}
-
-	.server-picker-overlay {
-		position: fixed;
-		inset: 0;
-		background: rgba(2, 6, 23, 0.68);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		padding: 16px;
-		z-index: 1200;
-	}
-
-	.server-picker-dialog {
-		width: min(760px, 96vw);
-		max-height: 84vh;
-		overflow: hidden;
-		background: var(--gm-bg-secondary);
-		border: 1px solid var(--gm-border);
-		border-radius: 8px;
-		padding: 14px;
-		display: flex;
-		flex-direction: column;
-		gap: 10px;
-	}
-
-	.server-picker-header {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-	}
-
-	.server-picker-title {
-		margin: 0;
-		font-size: 12px;
-		font-weight: 600;
-		color: var(--gm-text-primary);
-	}
-
-	.server-picker-close {
-		background: transparent;
-		border: 1px solid var(--gm-border);
-		color: var(--gm-text-muted);
-		border-radius: 6px;
-		width: 28px;
-		height: 28px;
-		font-size: 18px;
-		line-height: 1;
-		cursor: pointer;
-	}
-
-	.server-picker-subtitle {
-		font-size: 11px;
-		color: var(--gm-text-muted);
-	}
-
-	.server-picker-subtitle code {
-		color: var(--gm-text-primary);
-	}
-
-	.server-picker-warning {
-		font-size: 11px;
-		color: #fbbf24;
-		background: rgba(251, 191, 36, 0.1);
-		border: 1px solid rgba(251, 191, 36, 0.25);
-		border-radius: 6px;
-		padding: 8px 10px;
-		line-height: 1.5;
-	}
-
-	.server-picker-warning code {
-		color: #fde68a;
-	}
-
-	.server-picker-list {
-		border: 1px solid var(--gm-border);
-		border-radius: 6px;
-		background: var(--gm-bg-panel);
-		max-height: 44vh;
-		overflow: auto;
-	}
-
-	.server-picker-row {
-		display: grid;
-		grid-template-columns: 20px 1fr auto;
-		gap: 10px;
-		align-items: center;
-		padding: 8px 10px;
-		border-bottom: 1px solid rgba(148, 163, 184, 0.12);
-		font-size: 11px;
-		cursor: pointer;
-	}
-
-	.server-picker-row:last-child {
-		border-bottom: none;
-	}
-
-	.server-picker-name {
-		color: var(--gm-text-primary);
-		word-break: break-all;
-	}
-
-	.server-picker-size {
-		color: var(--gm-text-muted);
-		white-space: nowrap;
-	}
-
-	.server-picker-empty {
-		font-size: 11px;
-		color: var(--gm-text-muted);
-		padding: 10px;
-		border: 1px dashed var(--gm-border);
-		border-radius: 6px;
-	}
-
-	.server-picker-actions {
-		display: flex;
-		justify-content: flex-end;
-		gap: 8px;
-	}
-
-	/* ── Import progress card ──────────────────────── */
-
-	.import-progress-card {
-		margin-top: 12px;
-		padding: 12px 14px;
-		border-radius: 6px;
-		background: rgba(59, 130, 246, 0.08);
-		border: 1px solid rgba(59, 130, 246, 0.25);
-		font-size: 11px;
-	}
-
-	.import-progress-header {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		margin-bottom: 8px;
-	}
-
-	.import-progress-title {
-		font-weight: 600;
-		color: #3b82f6;
-		font-size: 12px;
-	}
-
-	.cancel-import-btn {
-		padding: 2px 10px;
-		border-radius: 4px;
-		border: 1px solid rgba(239, 68, 68, 0.4);
-		background: rgba(239, 68, 68, 0.1);
-		color: #ef4444;
-		font-size: 11px;
-		cursor: pointer;
-	}
-
-	.cancel-import-btn:hover {
-		background: rgba(239, 68, 68, 0.2);
-	}
-
-	.import-progress-file {
-		margin-bottom: 6px;
-		color: var(--gm-text-secondary, #94a3b8);
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.import-progress-bar-track {
-		height: 6px;
-		border-radius: 3px;
-		background: rgba(255, 255, 255, 0.08);
-		margin-bottom: 6px;
-		overflow: hidden;
-	}
-
-	.import-progress-bar-fill {
-		height: 100%;
-		border-radius: 3px;
-		background: #3b82f6;
-		transition: width 0.4s ease;
-	}
-
-	.import-progress-stats {
-		display: flex;
-		gap: 12px;
-		color: var(--gm-text-secondary, #94a3b8);
-		flex-wrap: wrap;
-	}
-
-	.import-progress-eta {
-		margin-top: 4px;
-		color: var(--gm-text-secondary, #94a3b8);
-	}
-
-	.import-progress-waiting {
-		color: var(--gm-text-secondary, #94a3b8);
-		font-style: italic;
-	}
-
-	/* ── Per-file results ──────────────────────────── */
-
-	.file-results {
-		margin-top: 16px;
-	}
-
-	.file-result-row {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 6px 10px;
-		font-size: 11px;
-		border-radius: 4px;
-		margin-bottom: 3px;
-	}
-
-	.file-result-row.file-ok {
-		background: rgba(16, 185, 129, 0.05);
-		color: var(--gm-text-secondary);
-	}
-
-	.file-result-row.file-err {
-		background: rgba(239, 68, 68, 0.05);
-		color: #ef4444;
-	}
-
-	.file-name {
-		font-weight: 500;
-	}
-
-	.file-packets {
-		font-variant-numeric: tabular-nums;
-		color: var(--gm-text-muted);
-	}
-
-	/* ── Import stats ──────────────────────────────── */
-
-	.import-stats-grid {
-		display: grid;
-		grid-template-columns: repeat(4, 1fr);
-		gap: 10px;
-		margin-top: 16px;
-	}
-
-	.import-stat {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		padding: 10px;
-		background: var(--gm-bg-panel);
-		border-radius: 6px;
-	}
-
-	.import-stat-value {
-		font-size: 16px;
-		font-weight: 700;
-		color: #10b981;
-		font-variant-numeric: tabular-nums;
-	}
-
-	.import-stat-label {
-		font-size: 9px;
-		color: var(--gm-text-muted);
-		text-transform: uppercase;
-		letter-spacing: 1px;
-		margin-top: 2px;
-	}
-
-	/* ── Live Capture Form ─────────────────────────── */
-
-	.capture-form {
-		display: flex;
-		flex-direction: column;
-		gap: 12px;
-	}
-
-	.form-group {
-		display: flex;
-		flex-direction: column;
-		gap: 4px;
-	}
-
-	.form-label {
-		font-size: 10px;
-		font-weight: 600;
-		color: var(--gm-text-secondary);
-		text-transform: uppercase;
-		letter-spacing: 0.5px;
-	}
-
-	.form-select, .form-input {
-		padding: 8px 12px;
-		background: var(--gm-bg-panel);
-		border: 1px solid var(--gm-border);
-		border-radius: 6px;
-		color: var(--gm-text-primary);
-		font-family: inherit;
-		font-size: 12px;
-	}
-
-	.form-select:focus, .form-input:focus {
-		outline: none;
-		border-color: rgba(16, 185, 129, 0.5);
-	}
-
-	.form-input::placeholder {
-		color: var(--gm-text-muted);
-	}
-
-	.action-btn.capture-start {
-		background: rgba(16, 185, 129, 0.15);
-		border-color: rgba(16, 185, 129, 0.3);
-		color: #10b981;
-		align-self: flex-start;
-	}
-
-	.action-btn.capture-start:hover:not(:disabled) {
-		background: rgba(16, 185, 129, 0.25);
-		border-color: #10b981;
-	}
-
-	/* ── Capture Controls ──────────────────────────── */
-
-	.capture-controls {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 16px;
-	}
-
-	.capture-status-bar {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-	}
-
-	.capture-indicator {
-		font-size: 10px;
-		font-weight: 700;
-		letter-spacing: 1px;
-		padding: 3px 8px;
-		border-radius: 4px;
-		background: rgba(16, 185, 129, 0.2);
-		color: #10b981;
-		animation: pulse-glow 2s ease-in-out infinite;
-	}
-
-	.capture-indicator.paused {
-		background: rgba(245, 158, 11, 0.2);
-		color: #f59e0b;
-		animation: none;
-	}
-
-	@keyframes pulse-glow {
-		0%, 100% { opacity: 1; }
-		50% { opacity: 0.6; }
-	}
-
-	.capture-interface {
-		font-size: 11px;
-		color: var(--gm-text-secondary);
-		font-weight: 500;
-	}
-
-	.capture-filter {
-		font-size: 10px;
-		color: var(--gm-text-muted);
-		padding: 2px 6px;
-		background: var(--gm-bg-panel);
-		border-radius: 3px;
-	}
-
-	.capture-buttons {
-		display: flex;
-		gap: 8px;
-	}
-
-	.action-btn.capture-pause {
-		background: rgba(245, 158, 11, 0.15);
-		border-color: rgba(245, 158, 11, 0.3);
-		color: #f59e0b;
-		padding: 6px 14px;
-		font-size: 11px;
-	}
-
-	.action-btn.capture-pause:hover {
-		background: rgba(245, 158, 11, 0.25);
-		border-color: #f59e0b;
-	}
-
-	.action-btn.capture-stop {
-		background: rgba(239, 68, 68, 0.15);
-		border-color: rgba(239, 68, 68, 0.3);
-		color: #ef4444;
-		padding: 6px 14px;
-		font-size: 11px;
-	}
-
-	.action-btn.capture-stop:hover {
-		background: rgba(239, 68, 68, 0.25);
-		border-color: #ef4444;
-	}
-
-	/* ── Error & Result ────────────────────────────── */
-
-	.capture-error {
-		margin-top: 12px;
-		padding: 10px 14px;
-		background: rgba(239, 68, 68, 0.1);
-		border: 1px solid rgba(239, 68, 68, 0.2);
-		border-radius: 6px;
-		color: #ef4444;
-		font-size: 11px;
-	}
-
-	.error-detail {
-		margin: 6px 0 0;
-		font-size: 10px;
-		white-space: pre-wrap;
-		font-family: inherit;
-		line-height: 1.5;
-	}
-
-	.stop-result {
-		margin-top: 12px;
-		padding: 10px 14px;
-		background: rgba(16, 185, 129, 0.1);
-		border: 1px solid rgba(16, 185, 129, 0.2);
-		border-radius: 6px;
-		font-size: 11px;
-		color: #10b981;
-	}
-
-	.stop-summary {
-		font-weight: 500;
-	}
-
-	.stop-saved {
-		margin-top: 4px;
-		font-size: 10px;
-		color: var(--gm-text-secondary);
-	}
-
-	/* ── Interface List ──────────────────────────────── */
-
-	.subsection-title {
-		font-size: 11px;
-		font-weight: 600;
-		color: var(--gm-text-secondary);
-		letter-spacing: 1px;
-		text-transform: uppercase;
-		margin: 0 0 10px 0;
-	}
-
-	.interface-list {
-		margin-top: 16px;
-	}
-
-	.no-interfaces {
-		font-size: 11px;
-		color: var(--gm-text-muted);
-		padding: 12px;
-		background: var(--gm-bg-panel);
-		border-radius: 6px;
-		line-height: 1.5;
-	}
-
-	.interface-card {
-		padding: 10px 14px;
-		background: var(--gm-bg-panel);
-		border: 1px solid var(--gm-border);
-		border-radius: 6px;
-		margin-bottom: 6px;
-		cursor: pointer;
-		transition: border-color 0.15s;
-	}
-
-	.interface-card:hover {
-		border-color: rgba(16, 185, 129, 0.3);
-	}
-
-	.interface-card.selected {
-		border-color: #10b981;
-		background: rgba(16, 185, 129, 0.05);
-	}
-
-	.iface-name {
-		font-size: 12px;
-		font-weight: 600;
-		color: var(--gm-text-primary);
-	}
-
-	.iface-desc {
-		font-size: 10px;
-		color: var(--gm-text-muted);
-		margin-top: 2px;
-	}
-
-	.iface-addrs {
-		display: flex;
-		gap: 8px;
-		margin-top: 6px;
-	}
-
-	.iface-addr {
-		font-size: 10px;
-		color: var(--gm-text-secondary);
-		background: var(--gm-bg-primary);
-		padding: 2px 8px;
-		border-radius: 3px;
-	}
-
-	.iface-flags {
-		display: flex;
-		gap: 6px;
-		margin-top: 6px;
-	}
-
-	.flag {
-		font-size: 9px;
-		font-weight: 600;
-		letter-spacing: 0.5px;
-		padding: 1px 6px;
-		border-radius: 3px;
-	}
-
-	.flag.up { background: rgba(16, 185, 129, 0.15); color: #10b981; }
-	.flag.lo { background: rgba(100, 116, 139, 0.15); color: #94a3b8; }
-	.flag.run { background: rgba(59, 130, 246, 0.15); color: #3b82f6; }
-
-	/* ── Stats Grid ──────────────────────────────────── */
-
-	.stats-grid {
-		display: grid;
-		grid-template-columns: repeat(3, 1fr);
-		gap: 10px;
-	}
-
-	.stat-card {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		padding: 12px;
-		background: var(--gm-bg-panel);
-		border-radius: 6px;
-	}
-
-	.stat-value {
-		font-size: 18px;
-		font-weight: 700;
-		color: #10b981;
-		font-variant-numeric: tabular-nums;
-	}
-
-	.stat-label {
-		font-size: 9px;
-		color: var(--gm-text-muted);
-		text-transform: uppercase;
-		letter-spacing: 1px;
-		margin-top: 4px;
-	}
-
-	/* ── Session Management ──────────────────────────── */
-
-	.current-session {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		padding: 8px 12px;
-		background: rgba(16, 185, 129, 0.08);
-		border: 1px solid rgba(16, 185, 129, 0.2);
-		border-radius: 6px;
-		margin-bottom: 12px;
-		font-size: 11px;
-	}
-
-	.session-current-label {
-		color: var(--gm-text-muted);
-		font-size: 10px;
-		text-transform: uppercase;
-		letter-spacing: 0.5px;
-	}
-
-	.session-current-name {
-		color: #10b981;
-		font-weight: 600;
-	}
-
-	.session-current-stats {
-		color: var(--gm-text-muted);
-		font-size: 10px;
-		margin-left: auto;
-	}
-
-	.session-message {
-		padding: 8px 12px;
-		border-radius: 6px;
-		font-size: 11px;
-		margin-bottom: 12px;
-	}
-
-	.session-message.success {
-		background: rgba(16, 185, 129, 0.1);
-		border: 1px solid rgba(16, 185, 129, 0.2);
-		color: #10b981;
-	}
-
-	.session-message.error {
-		background: rgba(239, 68, 68, 0.1);
-		border: 1px solid rgba(239, 68, 68, 0.2);
-		color: #ef4444;
-	}
-
-	.session-actions {
-		display: flex;
-		gap: 8px;
-		margin-bottom: 16px;
-	}
-
-	.action-btn.secondary {
-		background: rgba(100, 116, 139, 0.15);
-		border-color: rgba(100, 116, 139, 0.3);
-		color: var(--gm-text-secondary);
-	}
-
-	.action-btn.secondary:hover:not(:disabled) {
-		background: rgba(100, 116, 139, 0.25);
-		border-color: var(--gm-text-muted);
-	}
-
-	.save-form {
-		display: flex;
-		flex-direction: column;
-		gap: 10px;
-		padding: 14px;
-		background: var(--gm-bg-panel);
-		border-radius: 6px;
-		margin-bottom: 16px;
-	}
-
-	.save-form-actions {
-		display: flex;
-		gap: 8px;
-	}
-
-	.session-list {
-		margin-top: 4px;
-	}
-
-	.session-card {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 10px 14px;
-		background: var(--gm-bg-panel);
-		border: 1px solid var(--gm-border);
-		border-radius: 6px;
-		margin-bottom: 6px;
-	}
-
-	.session-card.active {
-		border-color: rgba(16, 185, 129, 0.3);
-		background: rgba(16, 185, 129, 0.05);
-	}
-
-	.session-info {
-		flex: 1;
-		min-width: 0;
-	}
-
-	.session-name {
-		font-size: 12px;
-		font-weight: 600;
-		color: var(--gm-text-primary);
-	}
-
-	.session-desc-text {
-		font-size: 10px;
-		color: var(--gm-text-muted);
-		margin-top: 2px;
-	}
-
-	.session-meta {
-		font-size: 10px;
-		color: var(--gm-text-muted);
-		margin-top: 4px;
-	}
-
-	.session-card-actions {
-		display: flex;
-		gap: 4px;
-		flex-shrink: 0;
-		margin-left: 12px;
-	}
-
-	.session-btn {
-		padding: 4px 10px;
-		border: 1px solid var(--gm-border);
-		border-radius: 4px;
-		font-family: inherit;
-		font-size: 10px;
-		font-weight: 500;
-		cursor: pointer;
-		transition: all 0.15s;
-		background: transparent;
-	}
-
-	.session-btn.load {
-		color: #3b82f6;
-		border-color: rgba(59, 130, 246, 0.3);
-	}
-
-	.session-btn.load:hover:not(:disabled) {
-		background: rgba(59, 130, 246, 0.15);
-	}
-
-	.session-btn.export {
-		color: #8b5cf6;
-		border-color: rgba(139, 92, 246, 0.3);
-	}
-
-	.session-btn.export:hover {
-		background: rgba(139, 92, 246, 0.15);
-	}
-
-	.session-btn.delete {
-		color: #ef4444;
-		border-color: rgba(239, 68, 68, 0.3);
-	}
-
-	.session-btn.delete:hover {
-		background: rgba(239, 68, 68, 0.15);
-	}
-
-	.session-btn.confirm-delete {
-		color: #fff;
-		background: #ef4444;
-		border-color: #ef4444;
-	}
-
-	.session-btn.cancel-delete {
-		color: var(--gm-text-muted);
-	}
-
-	.session-btn:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
-	/* ── External Tool Import ─────────────────────── */
-
-	.ingest-grid {
-		display: grid;
-		grid-template-columns: repeat(2, 1fr);
-		gap: 12px;
-		margin-bottom: 12px;
-	}
-
-	.ingest-card {
-		background: var(--gm-bg-panel);
-		border: 1px solid var(--gm-border);
-		border-radius: 6px;
-		padding: 12px;
-	}
-
-	.ingest-card-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 6px;
-	}
-
-	.ingest-card-title {
-		font-size: 12px;
-		font-weight: 600;
-		color: var(--gm-text-primary);
-	}
-
-	.ingest-badge {
-		font-size: 8px;
-		font-weight: 700;
-		letter-spacing: 0.5px;
-		padding: 2px 6px;
-		border-radius: 3px;
-	}
-
-	.ingest-badge.passive {
-		background: rgba(16, 185, 129, 0.15);
-		color: #10b981;
-	}
-
-	.ingest-badge.active {
-		background: rgba(245, 158, 11, 0.15);
-		color: #f59e0b;
-	}
-
-	.ingest-card-desc {
-		font-size: 10px;
-		color: var(--gm-text-muted);
-		margin: 0 0 10px 0;
-		line-height: 1.4;
-	}
-
-	.action-btn.warning {
-		background: rgba(245, 158, 11, 0.15);
-		border-color: rgba(245, 158, 11, 0.3);
-		color: #f59e0b;
-	}
-
-	.action-btn.warning:hover:not(:disabled) {
-		background: rgba(245, 158, 11, 0.25);
-		border-color: #f59e0b;
-	}
-
-	.ingest-errors {
-		margin-top: 12px;
-	}
-
-	.ingest-error-row {
-		font-size: 10px;
-		color: #ef4444;
-		padding: 4px 8px;
-		background: rgba(239, 68, 68, 0.05);
-		border-radius: 4px;
-		margin-bottom: 3px;
-	}
-
-	/* ── Capture Summary Card ───────────────────────────── */
-
-	.capture-summary-card {
-		background: var(--gm-bg-secondary);
-		border: 1px solid var(--gm-border);
-		border-radius: 8px;
-		padding: 16px;
-		margin-top: 16px;
-	}
-
-	.summary-card-title {
-		font-size: 11px;
-		font-weight: 600;
-		color: var(--gm-text-muted);
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		margin: 0 0 12px;
-	}
-
-	.summary-grid {
-		display: grid;
-		grid-template-columns: repeat(4, 1fr);
-		gap: 12px;
-		margin-bottom: 12px;
-	}
-
-	.summary-item {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-	}
-
-	.summary-val {
-		font-size: 1.4rem;
-		font-weight: 700;
-		color: var(--gm-text-primary);
-	}
-
-	.summary-key {
-		font-size: 0.7rem;
-		color: var(--gm-text-muted);
-		text-transform: uppercase;
-	}
-
-	.summary-protocols {
-		font-size: 11px;
-		color: var(--gm-text-muted);
-		margin-bottom: 10px;
-	}
-
-	.summary-proto { color: var(--gm-accent, #38bdf8); }
-
-	.summary-findings {
-		display: flex;
-		gap: 8px;
-		flex-wrap: wrap;
-	}
-
-	.finding-badge {
-		padding: 3px 10px;
-		border-radius: 4px;
-		font-size: 11px;
-		font-weight: 600;
-	}
-
-	.finding-badge.critical { background: rgba(239, 68, 68, 0.13); color: #ef4444; }
-	.finding-badge.high { background: rgba(249, 115, 22, 0.13); color: #f97316; }
-	.finding-badge.ok { background: rgba(16, 185, 129, 0.13); color: #10b981; }
 </style>
