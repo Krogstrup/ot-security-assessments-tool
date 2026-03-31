@@ -5,8 +5,8 @@ use std::collections::{HashMap, HashSet};
 use gm_capture::ParsedPacket;
 use gm_parsers::{CipClass, CipService, DeepParseResult, EnipCommand, EnipRole};
 
-use crate::commands::{DeepParseInfo, EnipDetail};
-use crate::commands::protocol_handler::ProtocolHandler;
+use crate::commands::{EnipDetail};
+use crate::commands::protocol_handler::{ProcessorOutput, ProtocolHandler};
 
 /// Accumulates EtherNet/IP state per IP across all packets.
 #[derive(Default)]
@@ -51,14 +51,14 @@ impl ProtocolHandler for EnipHandler {
         }
     }
 
-    fn finalize(&self, deep_parse: &mut HashMap<String, DeepParseInfo>) {
+    fn finalize(&self, output: &mut ProcessorOutput) {
         for ip in self.roles.keys() {
             let role = self
                 .roles
                 .get(ip)
                 .cloned()
                 .unwrap_or_else(|| "unknown".to_string());
-            deep_parse.entry(ip.clone()).or_default().enip = Some(EnipDetail {
+            output.deep_parse.entry(ip.clone()).or_default().enip = Some(EnipDetail {
                 role,
                 cip_writes_to_assembly: self.cip_writes_to_assembly.contains(ip),
                 cip_file_access: self.cip_file_access.contains(ip),

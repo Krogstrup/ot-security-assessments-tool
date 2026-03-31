@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use gm_capture::ParsedPacket;
 use gm_parsers::{DeepParseResult, S7Function, S7Role};
 
-use crate::commands::{DeepParseInfo, S7Detail};
-use crate::commands::protocol_handler::ProtocolHandler;
+use crate::commands::{S7Detail};
+use crate::commands::protocol_handler::{ProcessorOutput, ProtocolHandler};
 
 /// Accumulates S7comm state per IP across all packets.
 #[derive(Default)]
@@ -53,7 +53,7 @@ impl ProtocolHandler for S7Handler {
         }
     }
 
-    fn finalize(&self, deep_parse: &mut HashMap<String, DeepParseInfo>) {
+    fn finalize(&self, output: &mut ProcessorOutput) {
         for ip in self.roles.keys() {
             let role = self
                 .roles
@@ -66,7 +66,7 @@ impl ProtocolHandler for S7Handler {
                 .map(|s| s.iter().cloned().collect())
                 .unwrap_or_default();
             functions_seen.sort();
-            deep_parse.entry(ip.clone()).or_default().s7 = Some(S7Detail {
+            output.deep_parse.entry(ip.clone()).or_default().s7 = Some(S7Detail {
                 role,
                 functions_seen,
             });

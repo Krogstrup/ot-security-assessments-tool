@@ -5,8 +5,8 @@ use std::collections::{HashMap, HashSet};
 use gm_capture::ParsedPacket;
 use gm_parsers::{dnp3_function_code_name, DeepParseResult, Dnp3Role};
 
-use crate::commands::{DeepParseInfo, Dnp3Detail, Dnp3Relationship, FunctionCodeStat};
-use crate::commands::protocol_handler::ProtocolHandler;
+use crate::commands::{Dnp3Detail, Dnp3Relationship, FunctionCodeStat};
+use crate::commands::protocol_handler::{ProcessorOutput, ProtocolHandler};
 
 /// Accumulates DNP3 state per IP across all packets.
 #[derive(Default)]
@@ -69,7 +69,7 @@ impl ProtocolHandler for Dnp3Handler {
         rel.1 += 1;
     }
 
-    fn finalize(&self, deep_parse: &mut HashMap<String, DeepParseInfo>) {
+    fn finalize(&self, output: &mut ProcessorOutput) {
         let all_ips: HashSet<String> = self
             .fc_counts
             .keys()
@@ -137,7 +137,7 @@ impl ProtocolHandler for Dnp3Handler {
                 })
                 .unwrap_or_default();
 
-            deep_parse.entry(ip.clone()).or_default().dnp3 = Some(Dnp3Detail {
+            output.deep_parse.entry(ip.clone()).or_default().dnp3 = Some(Dnp3Detail {
                 role,
                 addresses,
                 function_codes,

@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use gm_capture::ParsedPacket;
 use gm_parsers::{DeepParseResult, ProfinetRole};
 
-use crate::commands::{DeepParseInfo, ProfinetDcpDetail};
-use crate::commands::protocol_handler::ProtocolHandler;
+use crate::commands::{ProfinetDcpDetail};
+use crate::commands::protocol_handler::{ProcessorOutput, ProtocolHandler};
 
 /// Accumulates PROFINET DCP state per IP across all packets.
 #[derive(Default)]
@@ -45,14 +45,14 @@ impl ProtocolHandler for ProfinetDcpHandler {
         }
     }
 
-    fn finalize(&self, deep_parse: &mut HashMap<String, DeepParseInfo>) {
+    fn finalize(&self, output: &mut ProcessorOutput) {
         for ip in self.roles.keys() {
             let role = self
                 .roles
                 .get(ip)
                 .cloned()
                 .unwrap_or_else(|| "unknown".to_string());
-            deep_parse.entry(ip.clone()).or_default().profinet_dcp = Some(ProfinetDcpDetail {
+            output.deep_parse.entry(ip.clone()).or_default().profinet_dcp = Some(ProfinetDcpDetail {
                 role,
                 device_name: self.device_names.get(ip).cloned(),
             });

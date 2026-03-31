@@ -6,10 +6,10 @@ use gm_capture::ParsedPacket;
 use gm_parsers::{modbus_function_code_name, DeepParseResult, ModbusRole};
 
 use crate::commands::{
-    DeepParseInfo, FunctionCodeStat, ModbusDetail, ModbusDeviceIdInfo, ModbusRelationship,
+    FunctionCodeStat, ModbusDetail, ModbusDeviceIdInfo, ModbusRelationship,
     PollingInterval, RegisterRangeInfo,
 };
-use crate::commands::protocol_handler::ProtocolHandler;
+use crate::commands::protocol_handler::{ProcessorOutput, ProtocolHandler};
 
 /// Accumulates Modbus state per IP across all packets.
 #[derive(Default)]
@@ -98,7 +98,7 @@ impl ProtocolHandler for ModbusHandler {
         }
     }
 
-    fn finalize(&self, deep_parse: &mut HashMap<String, DeepParseInfo>) {
+    fn finalize(&self, output: &mut ProcessorOutput) {
         let all_ips: HashSet<String> = self
             .fc_counts
             .keys()
@@ -228,7 +228,7 @@ impl ProtocolHandler for ModbusHandler {
                 }
             }
 
-            deep_parse.entry(ip.clone()).or_default().modbus = Some(ModbusDetail {
+            output.deep_parse.entry(ip.clone()).or_default().modbus = Some(ModbusDetail {
                 role,
                 unit_ids,
                 function_codes,

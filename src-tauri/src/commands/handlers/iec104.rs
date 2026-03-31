@@ -5,8 +5,8 @@ use std::collections::{HashMap, HashSet};
 use gm_capture::ParsedPacket;
 use gm_parsers::{AsduTypeId, DeepParseResult, Iec104Role};
 
-use crate::commands::{DeepParseInfo, Iec104Detail};
-use crate::commands::protocol_handler::ProtocolHandler;
+use crate::commands::{Iec104Detail};
+use crate::commands::protocol_handler::{ProcessorOutput, ProtocolHandler};
 
 /// Accumulates IEC 60870-5-104 state per IP across all packets.
 #[derive(Default)]
@@ -44,14 +44,14 @@ impl ProtocolHandler for Iec104Handler {
         }
     }
 
-    fn finalize(&self, deep_parse: &mut HashMap<String, DeepParseInfo>) {
+    fn finalize(&self, output: &mut ProcessorOutput) {
         for ip in self.roles.keys() {
             let role = self
                 .roles
                 .get(ip)
                 .cloned()
                 .unwrap_or_else(|| "unknown".to_string());
-            deep_parse.entry(ip.clone()).or_default().iec104 = Some(Iec104Detail {
+            output.deep_parse.entry(ip.clone()).or_default().iec104 = Some(Iec104Detail {
                 role,
                 has_control_commands: self.control_commands.contains(ip),
                 has_reset_process: self.reset_process.contains(ip),

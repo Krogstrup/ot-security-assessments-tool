@@ -5,8 +5,8 @@ use std::collections::{HashMap, HashSet};
 use gm_capture::ParsedPacket;
 use gm_parsers::{BacnetObjectType, BacnetRole, BacnetService, DeepParseResult};
 
-use crate::commands::{BacnetDetail, DeepParseInfo};
-use crate::commands::protocol_handler::ProtocolHandler;
+use crate::commands::BacnetDetail;
+use crate::commands::protocol_handler::{ProcessorOutput, ProtocolHandler};
 
 /// Accumulates BACnet state per IP across all packets.
 #[derive(Default)]
@@ -56,14 +56,14 @@ impl ProtocolHandler for BacnetHandler {
         }
     }
 
-    fn finalize(&self, deep_parse: &mut HashMap<String, DeepParseInfo>) {
+    fn finalize(&self, output: &mut ProcessorOutput) {
         for ip in self.roles.keys() {
             let role = self
                 .roles
                 .get(ip)
                 .cloned()
                 .unwrap_or_else(|| "unknown".to_string());
-            deep_parse.entry(ip.clone()).or_default().bacnet = Some(BacnetDetail {
+            output.deep_parse.entry(ip.clone()).or_default().bacnet = Some(BacnetDetail {
                 role,
                 write_to_output: self.write_to_output.contains(ip),
                 write_to_notification_class: self.write_to_notification_class.contains(ip),
