@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { CorrelatedAlert } from '$lib/types';
+	import type { CorrelatedAlert } from '$lib/types/analysis';
 
 	interface Props {
 		alerts: CorrelatedAlert[];

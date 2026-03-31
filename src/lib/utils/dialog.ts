@@ -1,4 +1,4 @@
-import { isTauriRuntime } from '$lib/utils/tauri';
+import { isTauriRuntime } from '$lib/api';
 
 export interface DialogFilter {
 	name: string;

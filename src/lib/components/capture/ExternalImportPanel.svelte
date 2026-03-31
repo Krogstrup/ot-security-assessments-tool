@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { IngestImportResult } from '$lib/types';
+	import type { IngestImportResult } from '$lib/types/operations';
 
 	interface Props {
 		ingestStatus: 'idle' | 'importing' | 'done' | 'error';

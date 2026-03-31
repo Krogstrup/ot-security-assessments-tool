@@ -1,13 +1,8 @@
 <script lang="ts">
-	interface ProtocolStat {
-		name: string;
-		packet_count: number;
-		byte_count: number;
-		last_seen: string;
-	}
+	import type { ProtocolStats } from '$lib/types/protocols';
 
 	interface Props {
-		stats: ProtocolStat[];
+		stats: ProtocolStats[];
 	}
 
 	let { stats }: Props = $props();
@@ -59,7 +54,7 @@
 			{#each sortedStats as stat}
 				<div class="table-row">
 					<div class="col-name">
-						<span class="proto-badge">{stat.name}</span>
+						<span class="proto-badge">{stat.protocol}</span>
 					</div>
 					<div class="col-packets">{stat.packet_count.toLocaleString()}</div>
 					<div class="col-percent">

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { RedundancyInfo } from '$lib/types';
+	import type { RedundancyInfo } from '$lib/types/deep-parse';
 
 	interface Props {
 		redundancyProtocols: RedundancyInfo[];
@@ -46,7 +46,7 @@
 					{#each redundancyProtocols.filter(r => r.protocol === protocol) as device}
 						<div class="device-card">
 							<div class="card-header">
-								<span class="device-name">{device.bridge_id}</span>
+								<span class="device-name">{device.source_mac}</span>
 								{#if device.is_manager}
 									<span class="manager-badge">Manager</span>
 								{/if}
@@ -55,33 +55,31 @@
 								{/if}
 							</div>
 
-							<div class="card-detail">
-								<span class="detail-label">Priority</span>
-								<span class="detail-value">{device.priority}</span>
-							</div>
-
-							{#if device.root_port}
+							{#if device.role}
 								<div class="card-detail">
-									<span class="detail-label">Root Port</span>
-									<span class="detail-value">{device.root_port}</span>
+									<span class="detail-label">Role</span>
+									<span class="detail-value">{device.role}</span>
 								</div>
 							{/if}
 
-							{#if device.path_cost}
+							{#if device.priority !== null}
 								<div class="card-detail">
-									<span class="detail-label">Path Cost</span>
-									<span class="detail-value">{device.path_cost}</span>
+									<span class="detail-label">Priority</span>
+									<span class="detail-value">{device.priority}</span>
 								</div>
 							{/if}
 
-							{#if device.blocked_ports && device.blocked_ports.length > 0}
+							{#if device.ring_id !== null}
+								<div class="card-detail">
+									<span class="detail-label">Ring/Domain ID</span>
+									<span class="detail-value">{device.ring_id}</span>
+								</div>
+							{/if}
+
+							{#if device.details}
 								<div class="ports-section">
-									<span class="ports-label">Blocked Ports ({device.blocked_ports.length})</span>
-									<div class="ports-list">
-										{#each device.blocked_ports as port}
-											<span class="port-tag">{port}</span>
-										{/each}
-									</div>
+									<span class="ports-label">Details</span>
+									<div class="detail-value">{device.details}</div>
 								</div>
 							{/if}
 						</div>
@@ -247,19 +245,4 @@
 		margin-bottom: 0.35rem;
 	}
 
-	.ports-list {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.35rem;
-	}
-
-	.port-tag {
-		padding: 0.2rem 0.4rem;
-		background: rgba(239, 68, 68, 0.1);
-		color: #ef4444;
-		border-radius: 2px;
-		font-size: 0.7rem;
-		font-family: 'JetBrains Mono', monospace;
-		font-weight: 500;
-	}
 </style>

@@ -2,8 +2,9 @@
  * Session management: save, load, list, delete, export, import.
  */
 
+import type { BaselineDiff } from '$lib/types/analysis';
 import { invokeCompat } from './core';
-import type { SessionInfo, BaselineDiff } from '$lib/types';
+import type { SessionInfo } from '$lib/types';
 
 export async function saveSession(name: string, description?: string): Promise<SessionInfo> {
 	return invokeCompat<SessionInfo>('save_session', { name, description: description ?? null });

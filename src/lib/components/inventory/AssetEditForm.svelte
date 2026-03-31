@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Asset } from '$lib/types';
+	import type { Asset } from '$lib/types/assets';
 	import { DEVICE_TYPE_LABELS, DEVICE_TYPE_OPTIONS, PURDUE_LABELS } from '$lib/constants';
 
 	interface Props {
@@ -102,7 +102,7 @@
 				rows="3"
 				placeholder="Freeform notes about this asset..."
 				onchange={(e) => onFieldChange('notes', (e.target as HTMLTextAreaElement).value)}
-			/>
+			></textarea>
 		</div>
 		<div class="edit-actions">
 			<button class="action-btn primary small" onclick={onSave} disabled={editSaving}>

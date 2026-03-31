@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { activeTab } from '$lib/stores';
 	import { onMount } from 'svelte';
-	import { listInterfaces } from '$lib/utils/tauri';
+	import { listInterfaces } from '$lib/api';
 	import { interfaces, connections, topologyTabs, activeTopologyTabId } from '$lib/stores';
 	import { closeTopologyTab } from '$lib/stores';
 	import LogicalView from '$lib/components/LogicalView.svelte';

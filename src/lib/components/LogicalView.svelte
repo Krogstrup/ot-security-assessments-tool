@@ -1,450 +1,108 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
-	import { topology, selectedAssetId, groupingMode, physicalHighlightIp, activeTab } from '$lib/stores';
-	import { addFilteredView, addWatchTab } from '$lib/stores';
-	import { driftNewIps, driftMissingIps, driftChangedIps } from '$lib/stores';
-	import type { TopologyGraph, TopologyNode, GroupingMode, Asset } from '$lib/types';
-	import { assets } from '$lib/stores';
-	import {
-		DEVICE_COLORS,
-		DEVICE_LABELS,
-		PROTOCOL_COLORS,
-		edgeWidth,
-		getGroupId,
-		getGroupLabel,
-		isOtProtocol
-	} from '$lib/utils/graph';
-	import { openWiresharkForNode, detectWireshark } from '$lib/utils/tauri';
-	import TimelineScrubber from './TimelineScrubber.svelte';
+	import { onDestroy, onMount } from 'svelte';
+	import { openWiresharkForNode } from '$lib/api';
+	import { driftChangedIps, driftNewIps } from '$lib/stores/analysis';
+	import { assets, selectedAssetId, topology } from '$lib/stores/core';
+	import { activeTab } from '$lib/stores/navigation';
+	import { physicalHighlightIp } from '$lib/stores/physical';
+	import { addFilteredView, addWatchTab, groupingMode } from '$lib/stores/topology-tabs';
+	import type { GroupingMode } from '$lib/types/topology';
+	import LargeNetworkBanner from './logical/LargeNetworkBanner.svelte';
+	import LogicalContextMenu from './logical/LogicalContextMenu.svelte';
+	import LogicalEmptyState from './logical/LogicalEmptyState.svelte';
+	import LogicalLegend from './logical/LogicalLegend.svelte';
+	import LogicalToolbar from './logical/LogicalToolbar.svelte';
 	import PurdueOverlay from './PurdueOverlay.svelte';
-	import { PurdueLayout } from '$lib/layouts/purdueLayout';
+	import TimelineScrubber from './TimelineScrubber.svelte';
+	import {
+		closedContextMenu,
+		hideContextMenu as hiddenContextMenu,
+		openCanvasContextMenu,
+		openNodeContextMenu,
+		type LogicalContextMenuState
+	} from './logical/contextMenuState';
+	import { getLogicalLegendEntries, groupingOptions } from './logical/logicalConfig';
+	import {
+		exportLogicalPng,
+		isWiresharkAvailable,
+		type LogicalLayoutMode
+	} from './logical/logicalLayout';
+	import {
+		initLogicalGraph,
+		runLogicalGraphLayoutOnly,
+		updateLogicalGraph
+	} from './logical/logicalGraphRuntime';
 
 	let wiresharkAvailable = $state(false);
-	let layout = $state<'fcose' | 'purdue'>('fcose');
-
-	/** fcose becomes too slow above this node count — show a warning instead. */
-	const FCOSE_NODE_LIMIT = 2000;
-	/** Whether the current graph exceeds the layout limit. */
+	let layout = $state<LogicalLayoutMode>('fcose');
 	let largeNetworkWarning = $state(false);
-	/** User acknowledged and wants layout anyway. */
 	let forceLayout = $state(false);
-
-	// Check if Wireshark is installed on mount
-	async function checkWireshark() {
-		try {
-			const info = await detectWireshark();
-			wiresharkAvailable = info.found;
-		} catch {
-			wiresharkAvailable = false;
-		}
-	}
 
 	let graphContainer: HTMLDivElement;
 	let cy: any = null;
-	let fcoseRegistered = false;
-	let purdueRegistered = false;
 
-	// ── Context Menu State ──────────────────────────────────
-	let ctxMenu = $state<{ x: number; y: number; nodeId: string | null; show: boolean }>({
-		x: 0,
-		y: 0,
-		nodeId: null,
-		show: false
-	});
+	let ctxMenu = $state<LogicalContextMenuState>(closedContextMenu());
 	let groupSubmenu = $state(false);
 
-	function hideContextMenu() {
-		ctxMenu = { ...ctxMenu, show: false };
+	function closeContextMenu() {
+		ctxMenu = hiddenContextMenu();
 		groupSubmenu = false;
 	}
 
+	function runLayout() {
+		if (!cy) return;
+		largeNetworkWarning = runLogicalGraphLayoutOnly(cy, layout, forceLayout);
+	}
+
+	function updateGraph() {
+		if (!cy) return;
+		largeNetworkWarning = updateLogicalGraph(cy, {
+			graph: $topology,
+			mode: $groupingMode,
+			assets: $assets,
+			newIps: $driftNewIps,
+			changedIps: $driftChangedIps,
+			layout,
+			forceLayout
+		});
+	}
+
 	async function initCytoscape() {
-		const cytoscape = (await import('cytoscape')).default;
-
-		// Register fcose layout once
-		if (!fcoseRegistered) {
-			const fcose = (await import('cytoscape-fcose')).default;
-			cytoscape.use(fcose);
-			fcoseRegistered = true;
-		}
-
-		// Register purdue layout once
-		if (!purdueRegistered) {
-			cytoscape('layout', 'purdue', PurdueLayout);
-			purdueRegistered = true;
-		}
-
-		cy = cytoscape({
+		cy = await initLogicalGraph({
 			container: graphContainer,
-			style: [
-				// ── Compound (group) nodes ──
-				{
-					selector: 'node.compound',
-					style: {
-						'background-color': 'rgba(30, 41, 59, 0.4)',
-						'background-opacity': 0.4,
-						'border-color': '#334155',
-						'border-width': 1,
-						'border-style': 'dashed' as any,
-						label: 'data(label)',
-						color: '#64748b',
-						'font-size': '9px',
-						'font-family': 'JetBrains Mono, monospace',
-						'text-valign': 'top',
-						'text-halign': 'center',
-						'text-margin-y': -4,
-						padding: '16px',
-						shape: 'roundrectangle'
-					}
-				},
-				// ── Regular device nodes ──
-				{
-					selector: 'node.device',
-					style: {
-						'background-color': '#1e293b',
-						'border-color': 'data(color)',
-						'border-width': 2,
-						label: 'data(label)',
-						color: '#e2e8f0',
-						'font-size': '10px',
-						'font-family': 'JetBrains Mono, monospace',
-						'text-valign': 'bottom',
-						'text-margin-y': 6,
-						'text-wrap': 'wrap' as any,
-						'text-max-width': '120px',
-						width: 32,
-						height: 32
-					}
-				},
-				// ── OT device highlight ──
-				{
-					selector: 'node.device.ot',
-					style: {
-						'background-color': '#0f1d2e',
-						'border-width': 2.5
-					}
-				},
-				// ── Selected node ──
-				{
-					selector: 'node.device:selected',
-					style: {
-						'border-color': '#3b82f6',
-						'border-width': 3,
-						'background-color': '#1e3a5f'
-					}
-				},
-				// ── Drift highlighting (baseline comparison) ──
-				{
-					selector: 'node.drift-new',
-					style: {
-						'border-color': '#10b981',
-						'border-width': 3,
-						'border-style': 'double' as any
-					}
-				},
-				{
-					selector: 'node.drift-changed',
-					style: {
-						'border-color': '#f59e0b',
-						'border-width': 3,
-						'border-style': 'double' as any
-					}
-				},
-				// ── Edges ──
-				{
-					selector: 'edge',
-					style: {
-						width: 'data(weight)',
-						'line-color': 'data(color)',
-						'target-arrow-color': 'data(color)',
-						'target-arrow-shape': 'triangle',
-						'arrow-scale': 0.8,
-						'curve-style': 'bezier',
-						opacity: 0.7
-					}
-				},
-				// ── Bidirectional edges (arrows on both ends) ──
-				{
-					selector: 'edge.bidirectional',
-					style: {
-						'source-arrow-color': 'data(color)',
-						'source-arrow-shape': 'triangle',
-						'target-arrow-shape': 'triangle'
-					}
-				},
-				// ── Cross-zone edges (Purdue level diff >= 2) ──
-				{
-					selector: 'edge.cross-zone',
-					style: {
-						'line-color': '#ef4444',
-						'target-arrow-color': '#ef4444',
-						'source-arrow-color': '#ef4444',
-						'line-style': 'dashed' as any,
-						width: 2,
-						opacity: 0.85
-					}
-				},
-				// ── Selected edge ──
-				{
-					selector: 'edge:selected',
-					style: {
-						'line-color': '#3b82f6',
-						'target-arrow-color': '#3b82f6',
-						'source-arrow-color': '#3b82f6',
-						opacity: 1
-					}
-				}
-			],
-			layout: { name: 'grid' },
-			minZoom: 0.1,
-			maxZoom: 5,
-			wheelSensitivity: 0.3
-		});
-
-		// ── Node tap → select asset ──
-		cy.on('tap', 'node.device', (event: any) => {
-			selectedAssetId.set(event.target.id());
-		});
-
-		// ── Background tap → deselect ──
-		cy.on('tap', (event: any) => {
-			if (event.target === cy) {
+			onNodeTap: (nodeId) => selectedAssetId.set(nodeId),
+			onBackgroundTap: () => {
 				selectedAssetId.set(null);
-				hideContextMenu();
-			}
-		});
-
-		// ── Right-click context menu ──
-		cy.on('cxttap', 'node.device', (event: any) => {
-			const pos = event.renderedPosition || event.position;
-			const rect = graphContainer.getBoundingClientRect();
-			ctxMenu = {
-				x: pos.x + rect.left,
-				y: pos.y + rect.top,
-				nodeId: event.target.id(),
-				show: true
-			};
-			groupSubmenu = false;
-		});
-
-		cy.on('cxttap', (event: any) => {
-			if (event.target === cy) {
-				const rect = graphContainer.getBoundingClientRect();
-				ctxMenu = {
-					x: event.renderedPosition.x + rect.left,
-					y: event.renderedPosition.y + rect.top,
-					nodeId: null,
-					show: true
-				};
+				closeContextMenu();
+			},
+			onNodeContext: (position, bounds, nodeId) => {
+				ctxMenu = openNodeContextMenu(position, bounds, nodeId);
+				groupSubmenu = false;
+			},
+			onCanvasContext: (position, bounds) => {
+				ctxMenu = openCanvasContextMenu(position, bounds);
 				groupSubmenu = false;
 			}
 		});
 	}
 
-	/** Build a display label for a node, including vendor if available */
-	function nodeLabel(node: TopologyNode, assetMap: Map<string, Asset>): string {
-		const asset = assetMap.get(node.ip_address);
-		const vendor = asset?.vendor ?? node.vendor;
-		if (vendor) {
-			// Shorten long vendor names for the label
-			const shortVendor = vendor.length > 20 ? vendor.substring(0, 18) + '...' : vendor;
-			return `${node.ip_address}\n${shortVendor}`;
-		}
-		return node.ip_address;
+	function handleWindowClick() {
+		if (ctxMenu.show) closeContextMenu();
 	}
-
-	/** Build Cytoscape elements from topology graph with current grouping */
-	function buildElements(graph: TopologyGraph, mode: GroupingMode) {
-		const elements: any[] = [];
-
-		// Build asset map for enrichment
-		let currentAssets: Asset[] = [];
-		assets.subscribe((a) => (currentAssets = a))();
-		const assetMap = new Map(currentAssets.map((a) => [a.ip_address, a]));
-
-		// Build purdue level map (node id → level) for cross-zone edge detection
-		const purdueMap = new Map<string, number | null>();
-		for (const node of graph.nodes) {
-			const asset = assetMap.get(node.ip_address);
-			purdueMap.set(node.id, asset?.purdue_level ?? null);
-		}
-
-		// Get current drift sets for highlighting
-		let newIps = new Set<string>();
-		let changedIps = new Set<string>();
-		driftNewIps.subscribe((s) => (newIps = s))();
-		driftChangedIps.subscribe((s) => (changedIps = s))();
-
-		if (mode !== 'none') {
-			// Collect unique groups
-			const groups = new Set<string>();
-			for (const node of graph.nodes) {
-				const gid = getGroupId(node, mode);
-				if (gid) groups.add(gid);
-			}
-
-			// Add compound parent nodes
-			for (const gid of groups) {
-				elements.push({
-					group: 'nodes',
-					data: { id: gid, label: getGroupLabel(gid, mode) },
-					classes: 'compound'
-				});
-			}
-		}
-
-		// Add device nodes
-		for (const node of graph.nodes) {
-			const hasOt = node.protocols.some((p) => isOtProtocol(p));
-			const color = DEVICE_COLORS[node.device_type] ?? DEVICE_COLORS.unknown;
-			const parentId = mode !== 'none' ? getGroupId(node, mode) : undefined;
-			const asset = assetMap.get(node.ip_address);
-			const confidence = asset?.confidence ?? 0;
-
-			// Determine drift class for baseline highlighting
-			let driftClass = '';
-			if (newIps.has(node.ip_address)) driftClass = ' drift-new';
-			else if (changedIps.has(node.ip_address)) driftClass = ' drift-changed';
-
-			elements.push({
-				group: 'nodes',
-				data: {
-					id: node.id,
-					label: nodeLabel(node, assetMap),
-					deviceType: node.device_type,
-					vendor: asset?.vendor ?? node.vendor,
-					productFamily: asset?.product_family,
-					confidence,
-					subnet: node.subnet,
-					protocols: node.protocols.join(', '),
-					packetCount: node.packet_count,
-					color,
-					purdueLevel: asset?.purdue_level ?? null,
-					...(parentId ? { parent: parentId } : {})
-				},
-				classes: (hasOt ? 'device ot' : 'device') + driftClass
-			});
-		}
-
-		// Add edges
-		for (const edge of graph.edges) {
-			const color = PROTOCOL_COLORS[edge.protocol as string] ?? PROTOCOL_COLORS.unknown;
-			const weight = edgeWidth(edge.packet_count);
-
-			// Detect cross-zone edges (Purdue level difference >= 2)
-			const srcLevel = purdueMap.get(edge.source);
-			const dstLevel = purdueMap.get(edge.target);
-			const isCrossZone =
-				srcLevel !== null &&
-				srcLevel !== undefined &&
-				dstLevel !== null &&
-				dstLevel !== undefined &&
-				Math.abs(srcLevel - dstLevel) >= 2;
-
-			const edgeClasses = [
-				edge.bidirectional ? 'bidirectional' : '',
-				isCrossZone ? 'cross-zone' : ''
-			]
-				.filter(Boolean)
-				.join(' ');
-
-			elements.push({
-				group: 'edges',
-				data: {
-					id: edge.id,
-					source: edge.source,
-					target: edge.target,
-					protocol: edge.protocol,
-					packetCount: edge.packet_count,
-					byteCount: edge.byte_count,
-					color,
-					weight
-				},
-				classes: edgeClasses
-			});
-		}
-
-		return elements;
-	}
-
-	function runLayout() {
-		if (!cy || cy.nodes('.device').length === 0) return;
-
-		const nodeCount = cy.nodes('.device').length;
-
-		if (layout === 'purdue') {
-			// Purdue layout is fast (grid placement) — no node count limit.
-			largeNetworkWarning = false;
-			cy.layout({ name: 'purdue' }).run();
-		} else if (nodeCount > FCOSE_NODE_LIMIT && !forceLayout) {
-			// fcose on large graphs freezes the webview — warn instead of running.
-			largeNetworkWarning = true;
-		} else {
-			largeNetworkWarning = false;
-			cy.layout({
-				name: 'fcose',
-				animate: true,
-				animationDuration: 600,
-				quality: 'default',
-				// Node repulsion — higher = more spread out
-				nodeRepulsion: () => 8000,
-				// Ideal edge length
-				idealEdgeLength: () => 140,
-				// Edge elasticity
-				edgeElasticity: () => 0.45,
-				// Alignment and nesting for compound nodes
-				nestingFactor: 0.1,
-				gravity: 0.25,
-				gravityRange: 3.8,
-				// Packing
-				tile: true,
-				tilingPaddingVertical: 20,
-				tilingPaddingHorizontal: 20,
-				padding: 40,
-				// Compound node handling
-				fit: true,
-				randomize: false
-			}).run();
-		}
-	}
-
-	/** Export the current graph view as a PNG download */
-	function exportPng() {
-		if (!cy) return;
-		const png = cy.png({ scale: 2, full: true, bg: '#0f172a' });
-		const a = document.createElement('a');
-		a.href = png;
-		a.download = 'topology.png';
-		a.click();
-	}
-
-	/** Full graph rebuild when topology or grouping changes */
-	function updateGraph(graph: TopologyGraph, mode: GroupingMode) {
-		if (!cy || graph.nodes.length === 0) return;
-
-		cy.elements().remove();
-		const elements = buildElements(graph, mode);
-		cy.add(elements);
-		runLayout();
-	}
-
-	// ── Context menu actions ──
 
 	function handleGroupBy(mode: GroupingMode) {
 		groupingMode.set(mode);
-		hideContextMenu();
+		closeContextMenu();
 	}
 
 	function handleWatch() {
-		if (ctxMenu.nodeId) {
-			addWatchTab(ctxMenu.nodeId, 2);
-		}
-		hideContextMenu();
+		if (ctxMenu.nodeId) addWatchTab(ctxMenu.nodeId, 2);
+		closeContextMenu();
 	}
 
 	function handleCreateFilteredView() {
 		addFilteredView([]);
-		hideContextMenu();
+		closeContextMenu();
 	}
 
 	function handleShowInPhysical() {
@@ -452,230 +110,104 @@
 			physicalHighlightIp.set(ctxMenu.nodeId);
 			activeTab.set('physical');
 		}
-		hideContextMenu();
+		closeContextMenu();
 	}
 
 	async function handleOpenInWireshark() {
-		if (ctxMenu.nodeId) {
-			try {
-				await openWiresharkForNode(ctxMenu.nodeId);
-			} catch (err) {
-				console.error('Failed to open Wireshark:', err);
-			}
+		if (!ctxMenu.nodeId) return;
+		try {
+			await openWiresharkForNode(ctxMenu.nodeId);
+		} catch (err) {
+			console.error('Failed to open Wireshark:', err);
+		} finally {
+			groupSubmenu = false;
+			closeContextMenu();
 		}
-		hideContextMenu();
 	}
 
-	// ── Store subscriptions ──
-
-	let currentGraph: TopologyGraph = { nodes: [], edges: [] };
-	let currentMode: GroupingMode = 'subnet';
-
-	const unsubTopo = topology.subscribe((g) => {
-		currentGraph = g;
-		updateGraph(currentGraph, currentMode);
+	$effect(() => {
+		updateGraph();
 	});
-
-	const unsubMode = groupingMode.subscribe((m) => {
-		currentMode = m;
-		updateGraph(currentGraph, currentMode);
-	});
-
-	// Rebuild graph when assets update (e.g., after signature matching enriches vendor data)
-	const unsubAssets = assets.subscribe(() => {
-		if (currentGraph.nodes.length > 0) {
-			updateGraph(currentGraph, currentMode);
-		}
-	});
-
-	// Rebuild graph when drift data changes (baseline comparison highlights)
-	const unsubDrift = driftNewIps.subscribe(() => {
-		if (currentGraph.nodes.length > 0) {
-			updateGraph(currentGraph, currentMode);
-		}
-	});
-
-	// Close context menu on any click outside
-	function handleWindowClick() {
-		if (ctxMenu.show) hideContextMenu();
-	}
 
 	onMount(async () => {
 		await initCytoscape();
-		// Render any topology that arrived while Cytoscape was initializing
-		if (currentGraph.nodes.length > 0) {
-			updateGraph(currentGraph, currentMode);
-		}
-		checkWireshark();
+		updateGraph();
+		wiresharkAvailable = await isWiresharkAvailable();
 		window.addEventListener('click', handleWindowClick);
 	});
 
 	onDestroy(() => {
-		unsubTopo();
-		unsubMode();
-		unsubAssets();
-		unsubDrift();
 		window.removeEventListener('click', handleWindowClick);
 		cy?.destroy();
 	});
 
-	// Grouping mode labels for the toolbar dropdown
-	const groupingOptions: { mode: GroupingMode; label: string }[] = [
-		{ mode: 'subnet', label: 'Subnet (/24)' },
-		{ mode: 'protocol', label: 'Protocol' },
-		{ mode: 'device_role', label: 'Device Role' },
-		{ mode: 'vendor', label: 'Vendor' },
-		{ mode: 'none', label: 'None (Flat)' }
-	];
+	const legendEntries = $derived(getLogicalLegendEntries());
 </script>
 
 <div class="topology-container">
-	<!-- Toolbar -->
-	<div class="topology-toolbar">
-		<div class="toolbar-section">
-			<h2 class="view-title">Logical View</h2>
-			<span class="toolbar-sep"></span>
-			<label class="group-label">
-				Layout:
-				<select
-					class="group-select"
-					value={layout}
-					onchange={(e) => {
-						layout = (e.target as HTMLSelectElement).value as 'fcose' | 'purdue';
-						runLayout();
-					}}
-				>
-					<option value="fcose">Force-Directed</option>
-					<option value="purdue">Purdue Layers</option>
-				</select>
-			</label>
-			{#if layout === 'fcose'}
-				<span class="toolbar-sep"></span>
-				<label class="group-label">
-					Group:
-					<select
-						class="group-select"
-						value={$groupingMode}
-						onchange={(e) =>
-							groupingMode.set((e.target as HTMLSelectElement).value as GroupingMode)}
-					>
-						{#each groupingOptions as opt}
-							<option value={opt.mode}>{opt.label}</option>
-						{/each}
-					</select>
-				</label>
-			{/if}
-		</div>
-		<div class="toolbar-section">
-			<button class="tool-btn" onclick={() => cy?.fit(undefined, 40)}>Fit</button>
-			<button class="tool-btn" onclick={() => cy?.center()}>Center</button>
-			<button class="tool-btn" onclick={runLayout}>Relayout</button>
-			<button class="tool-btn" onclick={exportPng}>Export PNG</button>
-		</div>
-	</div>
+	<LogicalToolbar
+		{layout}
+		groupingMode={$groupingMode}
+		{groupingOptions}
+		onLayoutChange={(nextLayout) => {
+			layout = nextLayout;
+			runLayout();
+		}}
+		onGroupingChange={(nextMode) => groupingMode.set(nextMode)}
+		onFit={() => cy?.fit(undefined, 40)}
+		onCenter={() => cy?.center()}
+		onRelayout={runLayout}
+		onExportPng={() => exportLogicalPng(cy)}
+	/>
 
-	<!-- Graph Canvas -->
 	<div class="graph-area">
 		{#if layout === 'purdue' && $topology.nodes.length > 0}
 			<PurdueOverlay />
 		{/if}
 		<div class="cy-canvas" bind:this={graphContainer}></div>
 		{#if $topology.nodes.length === 0}
-			<div class="empty-state">
-				<div class="empty-icon">&#x2B21;</div>
-				<h3>No Topology Data</h3>
-				<p>Import a PCAP file or start a live capture to visualize network topology.</p>
-				<p class="hint">Go to <strong>Capture</strong> &rarr; Import PCAP to get started.</p>
-			</div>
+			<LogicalEmptyState />
 		{/if}
 		{#if largeNetworkWarning}
-			<div class="large-network-banner">
-				<span class="large-net-icon">&#9888;</span>
-				<span class="large-net-msg">
-					Large network ({$topology.nodes.length.toLocaleString()} devices).
-					Force-directed layout may freeze the UI.
-				</span>
-				<button class="large-net-btn" onclick={() => {
+			<LargeNetworkBanner
+				nodeCount={$topology.nodes.length}
+				onForceLayout={() => {
 					forceLayout = true;
 					largeNetworkWarning = false;
 					runLayout();
-				}}>
-					Run Layout Anyway
-				</button>
-				<button class="large-net-btn secondary" onclick={() => {
+				}}
+				onUsePurdue={() => {
 					layout = 'purdue';
 					largeNetworkWarning = false;
 					runLayout();
-				}}>
-					Use Purdue Layout
-				</button>
-				<button class="large-net-dismiss" onclick={() => { largeNetworkWarning = false; }}>
-					&times;
-				</button>
-			</div>
+				}}
+				onDismiss={() => {
+					largeNetworkWarning = false;
+				}}
+			/>
 		{/if}
 		<TimelineScrubber />
 	</div>
 
-	<!-- Context Menu -->
-	{#if ctxMenu.show}
-		<!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
-		<div
-			class="context-menu"
-			style="left: {ctxMenu.x}px; top: {ctxMenu.y}px;"
-			onclick={(e) => e.stopPropagation()}
-			oncontextmenu={(e) => e.preventDefault()}
-		>
-			{#if ctxMenu.nodeId}
-				<button class="ctx-item" onclick={handleWatch}>
-					Watch Node
-				</button>
-				<button class="ctx-item" onclick={handleShowInPhysical}>
-					Show in Physical
-				</button>
-				{#if wiresharkAvailable}
-					<button class="ctx-item" onclick={handleOpenInWireshark}>
-						Open in Wireshark
-					</button>
-				{/if}
-				<div class="ctx-sep"></div>
-			{/if}
-			<button class="ctx-item" onclick={handleCreateFilteredView}>
-				Create Filtered View
-			</button>
-			<div class="ctx-sep"></div>
-			<button
-				class="ctx-item has-sub"
-				onclick={(e) => { e.stopPropagation(); groupSubmenu = !groupSubmenu; }}
-			>
-				Group By &rsaquo;
-			</button>
-			{#if groupSubmenu}
-				<div class="ctx-submenu">
-					{#each groupingOptions as opt}
-						<button
-							class="ctx-item"
-							class:ctx-active={$groupingMode === opt.mode}
-							onclick={() => handleGroupBy(opt.mode)}
-						>
-							{opt.label}
-						</button>
-					{/each}
-				</div>
-			{/if}
-		</div>
-	{/if}
+	<LogicalContextMenu
+		show={ctxMenu.show}
+		x={ctxMenu.x}
+		y={ctxMenu.y}
+		hasNode={Boolean(ctxMenu.nodeId)}
+		{wiresharkAvailable}
+		{groupSubmenu}
+		{groupingOptions}
+		selectedGroupingMode={$groupingMode}
+		onWatch={handleWatch}
+		onShowInPhysical={handleShowInPhysical}
+		onOpenInWireshark={handleOpenInWireshark}
+		onCreateFilteredView={handleCreateFilteredView}
+		onToggleGroupSubmenu={() => (groupSubmenu = !groupSubmenu)}
+		onGroupBy={handleGroupBy}
+		onClose={closeContextMenu}
+	/>
 
-	<!-- Legend -->
-	<div class="topology-legend">
-		<span class="legend-title">DEVICES</span>
-		{#each Object.entries(DEVICE_COLORS) as [type, color]}
-			<span class="legend-item">
-				<span class="legend-dot" style="background: {color}"></span>
-				{DEVICE_LABELS[type] ?? type}
-			</span>
-		{/each}
-	</div>
+	<LogicalLegend entries={legendEntries} />
 </div>
 
 <style>
@@ -684,74 +216,6 @@
 		flex-direction: column;
 		height: 100%;
 		position: relative;
-	}
-
-	.topology-toolbar {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 8px 16px;
-		border-bottom: 1px solid var(--gm-border);
-		background: var(--gm-bg-secondary);
-	}
-
-	.toolbar-section {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-	}
-
-	.toolbar-sep {
-		width: 1px;
-		height: 18px;
-		background: var(--gm-border);
-		margin: 0 4px;
-	}
-
-	.view-title {
-		font-size: 13px;
-		font-weight: 600;
-		letter-spacing: 1px;
-		text-transform: uppercase;
-		color: var(--gm-text-primary);
-		margin: 0;
-	}
-
-	.group-label {
-		font-size: 11px;
-		color: var(--gm-text-secondary);
-		display: flex;
-		align-items: center;
-		gap: 6px;
-	}
-
-	.group-select {
-		background: var(--gm-bg-panel);
-		border: 1px solid var(--gm-border);
-		border-radius: 4px;
-		color: var(--gm-text-primary);
-		font-family: inherit;
-		font-size: 11px;
-		padding: 3px 8px;
-		cursor: pointer;
-	}
-
-	.tool-btn {
-		padding: 5px 12px;
-		background: var(--gm-bg-panel);
-		border: 1px solid var(--gm-border);
-		border-radius: 4px;
-		color: var(--gm-text-secondary);
-		font-family: inherit;
-		font-size: 11px;
-		cursor: pointer;
-		transition: all 0.15s;
-	}
-
-	.tool-btn:hover {
-		background: var(--gm-bg-hover);
-		color: var(--gm-text-primary);
-		border-color: var(--gm-border-active);
 	}
 
 	.graph-area {
@@ -766,204 +230,5 @@
 	.cy-canvas {
 		position: absolute;
 		inset: 0;
-	}
-
-	/* ── Empty State ─────────────────────────────────── */
-
-	.empty-state {
-		position: absolute;
-		top: 50%;
-		left: 50%;
-		transform: translate(-50%, -50%);
-		text-align: center;
-		color: var(--gm-text-muted);
-		z-index: 1;
-	}
-
-	.empty-icon {
-		font-size: 48px;
-		margin-bottom: 12px;
-		opacity: 0.3;
-	}
-
-	.empty-state h3 {
-		font-size: 14px;
-		font-weight: 600;
-		color: var(--gm-text-secondary);
-		margin: 0 0 8px 0;
-	}
-
-	.empty-state p {
-		font-size: 12px;
-		margin: 4px 0;
-		line-height: 1.5;
-	}
-
-	.hint {
-		margin-top: 12px !important;
-		color: var(--gm-text-muted);
-	}
-
-	/* ── Context Menu ────────────────────────────────── */
-
-	.context-menu {
-		position: fixed;
-		z-index: 100;
-		min-width: 180px;
-		background: var(--gm-bg-panel);
-		border: 1px solid var(--gm-border);
-		border-radius: 6px;
-		padding: 4px 0;
-		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-	}
-
-	.ctx-item {
-		display: block;
-		width: 100%;
-		padding: 7px 14px;
-		background: none;
-		border: none;
-		color: var(--gm-text-secondary);
-		font-family: inherit;
-		font-size: 11px;
-		text-align: left;
-		cursor: pointer;
-		transition: background 0.1s;
-	}
-
-	.ctx-item:hover {
-		background: var(--gm-bg-hover);
-		color: var(--gm-text-primary);
-	}
-
-	.ctx-item.has-sub {
-		display: flex;
-		justify-content: space-between;
-	}
-
-	.ctx-item.ctx-active {
-		color: #10b981;
-	}
-
-	.ctx-sep {
-		height: 1px;
-		background: var(--gm-border);
-		margin: 4px 0;
-	}
-
-	.ctx-submenu {
-		border-top: 1px solid var(--gm-border);
-		padding: 2px 0;
-		margin-top: 2px;
-		background: rgba(0, 0, 0, 0.1);
-	}
-
-	/* ── Legend ───────────────────────────────────────── */
-
-	.topology-legend {
-		display: flex;
-		align-items: center;
-		gap: 14px;
-		padding: 8px 16px;
-		border-top: 1px solid var(--gm-border);
-		background: var(--gm-bg-secondary);
-		font-size: 9px;
-		letter-spacing: 0.5px;
-		flex-wrap: wrap;
-	}
-
-	.legend-title {
-		color: var(--gm-text-muted);
-		font-weight: 600;
-		letter-spacing: 1.5px;
-	}
-
-	.legend-item {
-		display: flex;
-		align-items: center;
-		gap: 4px;
-		color: var(--gm-text-secondary);
-	}
-
-	.legend-dot {
-		width: 8px;
-		height: 8px;
-		border-radius: 50%;
-	}
-
-	/* ── Large-network warning banner ──────────── */
-
-	.large-network-banner {
-		position: absolute;
-		top: 16px;
-		left: 50%;
-		transform: translateX(-50%);
-		z-index: 20;
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		padding: 10px 16px;
-		background: var(--gm-bg-panel);
-		border: 1px solid #f59e0b;
-		border-radius: 6px;
-		color: #f59e0b;
-		font-size: 12px;
-		box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-		max-width: 600px;
-		flex-wrap: wrap;
-	}
-
-	.large-net-icon {
-		font-size: 16px;
-		flex-shrink: 0;
-	}
-
-	.large-net-msg {
-		flex: 1;
-		min-width: 200px;
-		color: var(--gm-text-primary);
-	}
-
-	.large-net-btn {
-		padding: 4px 12px;
-		background: #f59e0b;
-		border: none;
-		border-radius: 4px;
-		color: #0f172a;
-		font-family: inherit;
-		font-size: 11px;
-		font-weight: 600;
-		cursor: pointer;
-		white-space: nowrap;
-		flex-shrink: 0;
-	}
-
-	.large-net-btn:hover {
-		background: #fbbf24;
-	}
-
-	.large-net-btn.secondary {
-		background: transparent;
-		border: 1px solid #f59e0b;
-		color: #f59e0b;
-	}
-
-	.large-net-btn.secondary:hover {
-		background: rgba(245, 158, 11, 0.1);
-	}
-
-	.large-net-dismiss {
-		padding: 2px 6px;
-		background: transparent;
-		border: none;
-		color: #64748b;
-		font-size: 16px;
-		cursor: pointer;
-		flex-shrink: 0;
-		line-height: 1;
-	}
-
-	.large-net-dismiss:hover {
-		color: #94a3b8;
 	}
 </style>

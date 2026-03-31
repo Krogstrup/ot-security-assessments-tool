@@ -2,8 +2,9 @@
  * System commands: app info, interfaces, settings, plugins, timeline.
  */
 
+import type { UserSettings, TimelineRange, PluginManifest } from '$lib/types/analysis';
 import { invokeCompat, httpJson, isTauriRuntime } from './core';
-import type { NetworkInterface, UserSettings, TimelineRange, PluginManifest } from '$lib/types';
+import type { NetworkInterface } from '$lib/types';
 
 export async function listInterfaces(): Promise<NetworkInterface[]> {
 	if (!isTauriRuntime()) {
@@ -25,6 +26,15 @@ export async function getSettings(): Promise<UserSettings> {
 
 export async function saveSettings(settings: UserSettings): Promise<void> {
 	return invokeCompat('save_settings', { settings });
+}
+
+// Explicit aliases used during T2 migration.
+export async function getUserSettings(): Promise<UserSettings> {
+	return getSettings();
+}
+
+export async function saveUserSettings(settings: UserSettings): Promise<void> {
+	return saveSettings(settings);
 }
 
 export async function getTimelineRange(): Promise<TimelineRange> {

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Asset } from '$lib/types';
+	import type { Asset } from '$lib/types/assets';
 	import { DEVICE_TYPE_LABELS, PURDUE_LABELS, CONFIDENCE_LABELS, CONFIDENCE_COLORS } from '$lib/constants';
 
 	interface Props {

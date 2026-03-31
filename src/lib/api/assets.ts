@@ -2,8 +2,12 @@
  * Asset discovery, queries, and updates.
  */
 
+import type { Asset } from '$lib/types/assets';
+import type { DeepParseInfo, FunctionCodeStat } from '$lib/types/deep-parse';
+import type { AssetUpdate } from '$lib/types/operations';
+import type { TopologyGraph } from '$lib/types/topology';
 import { invokeCompat, httpJson, isTauriRuntime } from './core';
-import type { AssetPage, AssetUpdate, Asset, DeepParseInfo, FunctionCodeStat, TopologyGraph } from '$lib/types';
+import type { AssetPage } from '$lib/types';
 
 export async function getAssets(page = 0, pageSize = 200, sortBy?: string): Promise<AssetPage> {
 	if (!isTauriRuntime()) {

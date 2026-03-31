@@ -6,7 +6,7 @@
  * without requiring backend round-trips.
  */
 
-import type { TopologyGraph, TopologyNode, TopologyEdge } from '$lib/types';
+import type { TopologyGraph, TopologyNode, TopologyEdge } from '$lib/types/topology';
 
 /**
  * Build an adjacency list from topology edges for efficient traversal.

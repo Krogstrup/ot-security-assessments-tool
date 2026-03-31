@@ -2,8 +2,9 @@
  * External tool imports: Zeek, Suricata, Nmap, Masscan, Wazuh, SINEMA, TIA.
  */
 
+import type { IngestImportResult } from '$lib/types/operations';
 import { invokeCompat } from './core';
-import type { IngestImportResult } from '$lib/types';
+import type { DeviceZeekEvents } from '$lib/types';
 
 export async function importZeekLogs(paths: string[]): Promise<IngestImportResult> {
 	return invokeCompat<IngestImportResult>('import_zeek_logs', { paths });
@@ -31,4 +32,8 @@ export async function importSinemaCsv(path: string): Promise<IngestImportResult>
 
 export async function importTiaXml(path: string): Promise<IngestImportResult> {
 	return invokeCompat('import_tia_xml', { path });
+}
+
+export async function getDeviceZeekEvents(deviceIp: string): Promise<DeviceZeekEvents> {
+	return invokeCompat<DeviceZeekEvents>('get_device_zeek_events', { deviceIp });
 }

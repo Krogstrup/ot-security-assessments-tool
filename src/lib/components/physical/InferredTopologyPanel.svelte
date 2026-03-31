@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { InferredTopology } from '$lib/types';
+	import type { InferredTopology } from '$lib/types/operations';
 
 	interface Props {
 		inferredTopology: InferredTopology | null;
@@ -62,8 +62,8 @@
 								</span>
 							</div>
 							<div class="card-detail">
-								<span class="card-label">Role</span>
-								<span class="card-value">{gw.likely_role}</span>
+								<span class="card-label">Confidence</span>
+								<span class="card-value">{gw.confidence}/3</span>
 							</div>
 						</div>
 					{/each}
@@ -77,8 +77,8 @@
 					{#each inferredTopology.switch_candidates as sw}
 						<div class="inferred-card">
 							<div class="card-header">
-								<span class="card-network">{sw.ip_address}</span>
-								<span class="card-badge">{sw.forwarded_subnets} subnets</span>
+								<span class="card-network">{sw.ip_address ?? sw.mac_address ?? 'unknown'}</span>
+								<span class="card-badge">{sw.connected_ips.length} peers</span>
 							</div>
 							<div class="card-detail">
 								<span class="card-label">Confidence</span>

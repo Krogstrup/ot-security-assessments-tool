@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { DefaultCredential } from '$lib/types';
+	import type { DefaultCredential } from '$lib/types/analysis';
 
 	interface Props {
 		warnings: DefaultCredential[];

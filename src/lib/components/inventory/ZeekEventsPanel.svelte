@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { DeviceZeekEvents } from '$lib/types';
+	import type { DeviceZeekEvents } from '$lib/types/analysis';
 
 	interface Props {
 		zeekEvents: DeviceZeekEvents | null;

@@ -2,8 +2,9 @@
  * Project management: CRUD + active project.
  */
 
+import type { ProjectSummary } from '$lib/types/analysis';
 import { invokeCompat } from './core';
-import type { Project, ProjectSummary } from '$lib/types';
+import type { Project } from '$lib/types';
 
 export async function createProject(
 	name: string,

@@ -2,8 +2,13 @@
  * Network connections, patterns, and statistics.
  */
 
+import type { ConnectionStats, PatternAnomaly } from '$lib/types/analysis';
+import type { PacketSummary } from '$lib/types/connections';
+import type { RedundancyInfo } from '$lib/types/deep-parse';
+import type { DataCounts } from '$lib/types/pagination';
+import type { ProtocolStats } from '$lib/types/protocols';
 import { invokeCompat, httpJson, isTauriRuntime } from './core';
-import type { ConnectionPage, DataCounts, PacketSummary, ProtocolStats, ConnectionStats, PatternAnomaly, RedundancyInfo } from '$lib/types';
+import type { ConnectionPage } from '$lib/types';
 
 export async function getConnections(page = 0, pageSize = 500, sortBy?: string): Promise<ConnectionPage> {
 	if (!isTauriRuntime()) {

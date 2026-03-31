@@ -1,31 +1,18 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
-	import { topology, selectedAssetId, topologyTabs } from '$lib/stores';
-	import { updateWatchDepth } from '$lib/stores';
-	import type { TopologyGraph, WatchViewConfig } from '$lib/types';
-	import {
-		DEVICE_COLORS,
-		PROTOCOL_COLORS,
-		edgeWidth,
-		isOtProtocol,
-		getNeighborSubgraph
-	} from '$lib/utils/graph';
+	import { onDestroy, onMount } from 'svelte';
+	import { selectedAssetId, topology } from '$lib/stores/core';
+	import { topologyTabs, updateWatchDepth } from '$lib/stores/topology-tabs';
+	import type { TopologyGraph, WatchViewConfig } from '$lib/types/topology';
+	import WatchToolbar from './watch/WatchToolbar.svelte';
+	import { createWatchElements, runWatchLayout, watchCytoscapeStyle } from './watch/watchGraph';
 
-	/** The tab ID for this watch tab — set by the parent */
 	let { tabId }: { tabId: string } = $props();
 
 	let graphContainer: HTMLDivElement;
 	let cy: any = null;
 	let fcoseRegistered = false;
 
-	// Read config from tabs store
-	let config = $derived.by(() => {
-		let tabs: any[];
-		const unsub = topologyTabs.subscribe((t) => (tabs = t));
-		unsub();
-		return tabs!.find((t) => t.id === tabId) as WatchViewConfig | undefined;
-	});
-
+	let config = $derived($topologyTabs.find((tab) => tab.id === tabId) as WatchViewConfig | undefined);
 	let targetNodeId = $derived(config?.targetNodeId ?? '');
 	let depth = $derived(config?.depth ?? 2);
 
@@ -39,77 +26,7 @@
 
 		cy = cytoscape({
 			container: graphContainer,
-			style: [
-				{
-					selector: 'node',
-					style: {
-						'background-color': '#1e293b',
-						'border-color': 'data(color)',
-						'border-width': 2,
-						label: 'data(label)',
-						color: '#e2e8f0',
-						'font-size': '10px',
-						'font-family': 'JetBrains Mono, monospace',
-						'text-valign': 'bottom',
-						'text-margin-y': 6,
-						width: 32,
-						height: 32
-					}
-				},
-				// The watched/target node gets a special highlight
-				{
-					selector: 'node.target',
-					style: {
-						'border-color': '#10b981',
-						'border-width': 4,
-						'background-color': '#0f2d1f',
-						width: 42,
-						height: 42,
-						'font-size': '11px',
-						'font-weight': 700 as any
-					}
-				},
-				{
-					selector: 'node.ot',
-					style: { 'background-color': '#0f1d2e', 'border-width': 2.5 }
-				},
-				{
-					selector: 'node:selected',
-					style: {
-						'border-color': '#3b82f6',
-						'border-width': 3,
-						'background-color': '#1e3a5f'
-					}
-				},
-				{
-					selector: 'edge',
-					style: {
-						width: 'data(weight)',
-						'line-color': 'data(color)',
-						'target-arrow-color': 'data(color)',
-						'target-arrow-shape': 'triangle',
-						'arrow-scale': 0.8,
-						'curve-style': 'bezier',
-						opacity: 0.7
-					}
-				},
-				{
-					selector: 'edge.bidirectional',
-					style: {
-						'source-arrow-color': 'data(color)',
-						'source-arrow-shape': 'triangle'
-					}
-				},
-				{
-					selector: 'edge:selected',
-					style: {
-						'line-color': '#3b82f6',
-						'target-arrow-color': '#3b82f6',
-						'source-arrow-color': '#3b82f6',
-						opacity: 1
-					}
-				}
-			],
+			style: watchCytoscapeStyle,
 			layout: { name: 'grid' },
 			minZoom: 0.1,
 			maxZoom: 5,
@@ -126,68 +43,26 @@
 	}
 
 	function updateGraph(graph: TopologyGraph, nodeId: string, hops: number) {
-		if (!cy || graph.nodes.length === 0 || !nodeId) return;
+		if (!cy) return;
 
-		const subgraph = getNeighborSubgraph(graph, nodeId, hops);
 		cy.elements().remove();
+		const elements = createWatchElements(graph, nodeId, hops);
+		if (elements.length === 0) return;
 
-		if (subgraph.nodes.length === 0) return;
-
-		for (const node of subgraph.nodes) {
-			const hasOt = node.protocols.some((p) => isOtProtocol(p));
-			const color = DEVICE_COLORS[node.device_type] ?? DEVICE_COLORS.unknown;
-			const isTarget = node.id === nodeId;
-			const classes = [
-				'device',
-				hasOt ? 'ot' : '',
-				isTarget ? 'target' : ''
-			].filter(Boolean).join(' ');
-
-			cy.add({
-				group: 'nodes',
-				data: { id: node.id, label: node.ip_address, color },
-				classes
-			});
-		}
-
-		for (const edge of subgraph.edges) {
-			const color = PROTOCOL_COLORS[edge.protocol as string] ?? PROTOCOL_COLORS.unknown;
-			cy.add({
-				group: 'edges',
-				data: {
-					id: edge.id,
-					source: edge.source,
-					target: edge.target,
-					color,
-					weight: edgeWidth(edge.packet_count)
-				},
-				classes: edge.bidirectional ? 'bidirectional' : ''
-			});
-		}
-
-		// Use concentric layout with target in center
-		cy.layout({
-			name: 'concentric',
-			animate: true,
-			animationDuration: 500,
-			concentric: (node: any) => (node.id() === nodeId ? 10 : 1),
-			levelWidth: () => 1,
-			padding: 40,
-			minNodeSpacing: 60
-		}).run();
+		cy.add(elements);
+		runWatchLayout(cy, nodeId);
 	}
 
-	// React to topology, target node, and depth changes
+	function handleDepthChange(nextDepth: number) {
+		updateWatchDepth(tabId, nextDepth);
+	}
+
 	$effect(() => {
-		const _graph = $topology;
-		const _target = targetNodeId;
-		const _depth = depth;
-		updateGraph(_graph, _target, _depth);
+		const graph = $topology;
+		const nodeId = targetNodeId;
+		const hops = depth;
+		updateGraph(graph, nodeId, hops);
 	});
-
-	function handleDepthChange(newDepth: number) {
-		updateWatchDepth(tabId, newDepth);
-	}
 
 	onMount(() => {
 		initCytoscape();
@@ -199,34 +74,15 @@
 </script>
 
 <div class="watch-container">
-	<div class="watch-toolbar">
-		<div class="toolbar-section">
-			<h2 class="view-title">Watch: {targetNodeId}</h2>
-			<span class="toolbar-sep"></span>
-			<label class="depth-label">
-				Depth:
-				<input
-					type="range"
-					class="depth-slider"
-					min="1"
-					max="5"
-					value={depth}
-					oninput={(e) => handleDepthChange(parseInt((e.target as HTMLInputElement).value))}
-				/>
-				<span class="depth-value">{depth} hop{depth !== 1 ? 's' : ''}</span>
-			</label>
-		</div>
-		<div class="toolbar-section">
-			<button class="tool-btn" onclick={() => cy?.fit(undefined, 40)}>Fit</button>
-			<button class="tool-btn" onclick={() => {
-				cy?.layout({
-					name: 'concentric', animate: true, animationDuration: 500,
-					concentric: (node: any) => (node.id() === targetNodeId ? 10 : 1),
-					levelWidth: () => 1, padding: 40, minNodeSpacing: 60
-				}).run();
-			}}>Relayout</button>
-		</div>
-	</div>
+	<WatchToolbar
+		{targetNodeId}
+		{depth}
+		onDepthChange={handleDepthChange}
+		onFit={() => cy?.fit(undefined, 40)}
+		onRelayout={() => {
+			if (cy && targetNodeId) runWatchLayout(cy, targetNodeId);
+		}}
+	/>
 
 	<div class="graph-area" bind:this={graphContainer}>
 		{#if !targetNodeId}
@@ -246,74 +102,6 @@
 		display: flex;
 		flex-direction: column;
 		height: 100%;
-	}
-
-	.watch-toolbar {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 8px 16px;
-		border-bottom: 1px solid var(--gm-border);
-		background: var(--gm-bg-secondary);
-	}
-
-	.toolbar-section {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-	}
-
-	.toolbar-sep {
-		width: 1px;
-		height: 18px;
-		background: var(--gm-border);
-		margin: 0 4px;
-	}
-
-	.view-title {
-		font-size: 13px;
-		font-weight: 600;
-		letter-spacing: 1px;
-		text-transform: uppercase;
-		color: var(--gm-text-primary);
-		margin: 0;
-	}
-
-	.depth-label {
-		font-size: 11px;
-		color: var(--gm-text-secondary);
-		display: flex;
-		align-items: center;
-		gap: 6px;
-	}
-
-	.depth-slider {
-		width: 80px;
-		accent-color: #10b981;
-	}
-
-	.depth-value {
-		font-weight: 600;
-		color: #10b981;
-		min-width: 50px;
-	}
-
-	.tool-btn {
-		padding: 5px 12px;
-		background: var(--gm-bg-panel);
-		border: 1px solid var(--gm-border);
-		border-radius: 4px;
-		color: var(--gm-text-secondary);
-		font-family: inherit;
-		font-size: 11px;
-		cursor: pointer;
-		transition: all 0.15s;
-	}
-
-	.tool-btn:hover {
-		background: var(--gm-bg-hover);
-		color: var(--gm-text-primary);
-		border-color: var(--gm-border-active);
 	}
 
 	.graph-area {

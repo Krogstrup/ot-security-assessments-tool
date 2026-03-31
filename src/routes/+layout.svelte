@@ -1,13 +1,14 @@
 <script lang="ts">
 	import '../app.css';
+	import type { LiveAttackAlert } from '$lib/types/analysis';
 	import { activeTab, themeMode, activeProject } from '$lib/stores';
 	import type { ViewTab } from '$lib/stores';
-	import { clearActiveProject, onLiveAttackAlert } from '$lib/utils/tauri';
+	import { clearActiveProject, onLiveAttackAlert } from '$lib/api';
 	import { assetCount, connectionCount, captureStatus } from '$lib/stores';
-	import { getSettings, saveSettings } from '$lib/utils/tauri';
+	import { getSettings, saveSettings } from '$lib/api';
 	import { onMount, onDestroy } from 'svelte';
 	import { get } from 'svelte/store';
-	import type { ThemeMode, LiveAttackAlert } from '$lib/types';
+	import type { ThemeMode } from '$lib/types';
 
 	// ── Live ATT&CK Toast Notifications ──────────────────
 	interface Toast {
@@ -130,10 +131,10 @@
 	<!-- Sidebar Navigation -->
 	<nav class="sidebar">
 		<div class="sidebar-brand">
-			<div class="brand-icon">KK</div>
+			<div class="brand-icon">OT</div>
 			<div class="brand-text">
-				<span class="brand-name">KUSANAGI</span>
-				<span class="brand-sub">KAJIKI</span>
+				<span class="brand-name">OT Security</span>
+				<span class="brand-sub">Assessments</span>
 			</div>
 		</div>
 

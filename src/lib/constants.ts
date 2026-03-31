@@ -6,7 +6,7 @@
  * const objects in individual components.
  */
 
-import type { DeviceType } from '$lib/types';
+import type { DeviceType } from '$lib/types/assets';
 
 // ── Device type display ───────────────────────────────────────────────────────
 

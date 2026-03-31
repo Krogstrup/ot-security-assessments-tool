@@ -15,7 +15,9 @@
 
 	let { selectedCount, bulkDeviceType, bulkPurdueLevel, bulkTag, bulkNotes, bulkSaving, onApply, onClear, onFieldChange }: Props = $props();
 
-	const canApply = !bulkSaving && (bulkDeviceType || bulkPurdueLevel || bulkTag.trim() || bulkNotes.trim());
+	const canApply = $derived(
+		!bulkSaving && !!(bulkDeviceType || bulkPurdueLevel || bulkTag.trim() || bulkNotes.trim())
+	);
 </script>
 
 <div class="bulk-bar">

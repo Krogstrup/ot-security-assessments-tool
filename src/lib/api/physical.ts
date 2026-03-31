@@ -2,8 +2,9 @@
  * Physical topology: device config, MAC tables, neighbor discovery, inference.
  */
 
+import type { InferredTopology } from '$lib/types/operations';
 import { invokeCompat } from './core';
-import type { PhysicalTopology, InferredTopology } from '$lib/types';
+import type { PhysicalTopology } from '$lib/types';
 
 export async function importCiscoConfig(path: string): Promise<PhysicalTopology> {
 	return invokeCompat<PhysicalTopology>('import_cisco_config', { path });

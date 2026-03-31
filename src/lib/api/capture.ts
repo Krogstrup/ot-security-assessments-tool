@@ -2,10 +2,12 @@
  * PCAP import and live capture commands.
  */
 
+import type { CaptureStatusInfo, StopCaptureResult, PacketEvent, CaptureStatsEvent } from '$lib/types/capture';
 import { invokeCompat, httpJson, isTauriRuntime } from './core';
 import { listen } from '@tauri-apps/api/event';
-import type { ImportResult, CaptureStatusInfo, StopCaptureResult, PacketEvent, CaptureStatsEvent } from '$lib/types';
+import type { ImportResult } from '$lib/types/capture';
 import type { HeadlessImportKind, HeadlessImportPcapList } from './system';
+import { getProtocolStats as getProtocolStatsFromConnections } from './connections';
 
 export async function importPcap(paths: string[]): Promise<ImportResult> {
 	if (!isTauriRuntime()) {
@@ -51,6 +53,10 @@ export async function startCapture(interfaceName: string, bpfFilter?: string): P
 
 export async function stopCapture(savePath?: string): Promise<StopCaptureResult> {
 	return invokeCompat<StopCaptureResult>('stop_capture', { savePath: savePath ?? null });
+}
+
+export async function getProtocolStats() {
+	return getProtocolStatsFromConnections();
 }
 
 export async function pauseCapture(): Promise<void> {

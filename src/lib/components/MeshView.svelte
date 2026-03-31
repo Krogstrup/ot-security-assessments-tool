@@ -1,91 +1,29 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
-	import { topology, selectedAssetId } from '$lib/stores';
-	import type { TopologyGraph, IcsProtocol } from '$lib/types';
-	import { PROTOCOL_COLORS, DEVICE_COLORS, edgeWidth, isOtProtocol } from '$lib/utils/graph';
+	import { onDestroy, onMount } from 'svelte';
+	import { selectedAssetId, topology } from '$lib/stores/core';
+	import type { TopologyGraph } from '$lib/types/topology';
+	import MeshToolbar from './mesh/MeshToolbar.svelte';
+	import {
+		createMeshElements,
+		getAvailableProtocols,
+		meshCytoscapeStyle,
+		runMeshLayout
+	} from './mesh/meshGraph';
 
 	let graphContainer: HTMLDivElement;
 	let cy: any = null;
 
-	// ── Filters ──
 	let filterProtocol = $state<string>('all');
 	let filterMinPackets = $state(0);
 
-	// Collect unique protocols from current topology for the filter dropdown
-	let availableProtocols = $derived.by(() => {
-		const protos = new Set<string>();
-		for (const edge of $topology.edges) {
-			protos.add(edge.protocol as string);
-		}
-		return Array.from(protos).sort();
-	});
+	let availableProtocols = $derived(getAvailableProtocols($topology));
 
 	async function initCytoscape() {
 		const cytoscape = (await import('cytoscape')).default;
 
 		cy = cytoscape({
 			container: graphContainer,
-			style: [
-				{
-					selector: 'node',
-					style: {
-						'background-color': '#1e293b',
-						'border-color': 'data(color)',
-						'border-width': 2,
-						label: 'data(label)',
-						color: '#e2e8f0',
-						'font-size': '10px',
-						'font-family': 'JetBrains Mono, monospace',
-						'text-valign': 'bottom',
-						'text-margin-y': 6,
-						width: 28,
-						height: 28
-					}
-				},
-				{
-					selector: 'node.ot',
-					style: {
-						'background-color': '#0f1d2e',
-						'border-width': 2.5
-					}
-				},
-				{
-					selector: 'node:selected',
-					style: {
-						'border-color': '#3b82f6',
-						'border-width': 3,
-						'background-color': '#1e3a5f'
-					}
-				},
-				{
-					selector: 'edge',
-					style: {
-						width: 'data(weight)',
-						'line-color': 'data(color)',
-						'target-arrow-color': 'data(color)',
-						'target-arrow-shape': 'triangle',
-						'arrow-scale': 0.7,
-						'curve-style': 'bezier',
-						opacity: 0.6
-					}
-				},
-				{
-					selector: 'edge.bidirectional',
-					style: {
-						'source-arrow-color': 'data(color)',
-						'source-arrow-shape': 'triangle'
-					}
-				},
-				{
-					selector: 'edge:selected',
-					style: {
-						'line-color': '#3b82f6',
-						'target-arrow-color': '#3b82f6',
-						'source-arrow-color': '#3b82f6',
-						opacity: 1
-					}
-				}
-			],
+			style: meshCytoscapeStyle,
 			layout: { name: 'grid' },
 			minZoom: 0.1,
 			maxZoom: 5,
@@ -101,134 +39,54 @@
 		});
 	}
 
-	/** Apply filters and rebuild mesh */
-	function updateMesh(graph: TopologyGraph) {
-		if (!cy || graph.nodes.length === 0) return;
-
-		// Filter edges
-		let filteredEdges = graph.edges;
-		if (filterProtocol !== 'all') {
-			filteredEdges = filteredEdges.filter((e) => (e.protocol as string) === filterProtocol);
-		}
-		if (filterMinPackets > 0) {
-			filteredEdges = filteredEdges.filter((e) => e.packet_count >= filterMinPackets);
-		}
-
-		// Only include nodes that have edges after filtering
-		const connectedNodes = new Set<string>();
-		for (const e of filteredEdges) {
-			connectedNodes.add(e.source);
-			connectedNodes.add(e.target);
-		}
-		const filteredNodes = graph.nodes.filter((n) => connectedNodes.has(n.id));
+	function updateMesh(graph: TopologyGraph, protocol: string, minPackets: number) {
+		if (!cy) return;
 
 		cy.elements().remove();
+		const elements = createMeshElements(graph, {
+			filterProtocol: protocol,
+			filterMinPackets: minPackets
+		});
+		if (elements.length === 0) return;
 
-		// Add nodes — flat, no compound parents
-		for (const node of filteredNodes) {
-			const hasOt = node.protocols.some((p) => isOtProtocol(p));
-			const color = DEVICE_COLORS[node.device_type] ?? DEVICE_COLORS.unknown;
-			cy.add({
-				group: 'nodes',
-				data: {
-					id: node.id,
-					label: node.ip_address,
-					color
-				},
-				classes: hasOt ? 'ot' : ''
-			});
-		}
-
-		// Add edges
-		for (const edge of filteredEdges) {
-			const color = PROTOCOL_COLORS[edge.protocol as string] ?? PROTOCOL_COLORS.unknown;
-			cy.add({
-				group: 'edges',
-				data: {
-					id: edge.id,
-					source: edge.source,
-					target: edge.target,
-					color,
-					weight: edgeWidth(edge.packet_count)
-				},
-				classes: edge.bidirectional ? 'bidirectional' : ''
-			});
-		}
-
-		// Circle layout for mesh view — shows all-to-all relationships
-		cy.layout({
-			name: 'circle',
-			animate: true,
-			animationDuration: 500,
-			padding: 40
-		}).run();
+		cy.add(elements);
+		runMeshLayout(cy);
 	}
 
-	// Re-render when topology or filters change
 	$effect(() => {
-		// Touch reactive dependencies so this effect re-runs on filter changes
-		const _proto = filterProtocol;
-		const _min = filterMinPackets;
-		const _graph = $topology;
-		updateMesh(_graph);
+		const graph = $topology;
+		updateMesh(graph, filterProtocol, filterMinPackets);
 	});
-
-	const unsubTopo = topology.subscribe(() => {});
 
 	onMount(async () => {
 		await initCytoscape();
-		// Render any topology that arrived while Cytoscape was initializing
-		const topo = $topology;
-		if (topo.nodes.length > 0) {
-			updateMesh(topo);
+		if ($topology.nodes.length > 0) {
+			updateMesh($topology, filterProtocol, filterMinPackets);
 		}
 	});
 
 	onDestroy(() => {
-		unsubTopo();
 		cy?.destroy();
 	});
 </script>
 
 <div class="mesh-container">
-	<!-- Toolbar -->
-	<div class="mesh-toolbar">
-		<div class="toolbar-section">
-			<h2 class="view-title">Mesh View</h2>
-			<span class="toolbar-sep"></span>
-			<label class="filter-label">
-				Protocol:
-				<select class="filter-select" bind:value={filterProtocol}>
-					<option value="all">All</option>
-					{#each availableProtocols as proto}
-						<option value={proto}>{proto}</option>
-					{/each}
-				</select>
-			</label>
-			<label class="filter-label">
-				Min packets:
-				<input
-					type="number"
-					class="filter-input"
-					bind:value={filterMinPackets}
-					min="0"
-					step="10"
-				/>
-			</label>
-		</div>
-		<div class="toolbar-section">
-			<button class="tool-btn" onclick={() => cy?.fit(undefined, 40)}>Fit</button>
-			<button
-				class="tool-btn"
-				onclick={() =>
-					cy?.layout({ name: 'circle', animate: true, animationDuration: 500, padding: 40 }).run()}
-			>
-				Relayout
-			</button>
-		</div>
-	</div>
+	<MeshToolbar
+		{availableProtocols}
+		{filterProtocol}
+		{filterMinPackets}
+		onProtocolChange={(value) => {
+			filterProtocol = value;
+		}}
+		onMinPacketsChange={(value) => {
+			filterMinPackets = value;
+		}}
+		onFit={() => cy?.fit(undefined, 40)}
+		onRelayout={() => {
+			if (cy) runMeshLayout(cy);
+		}}
+	/>
 
-	<!-- Graph Canvas -->
 	<div class="graph-area" bind:this={graphContainer}>
 		{#if $topology.nodes.length === 0}
 			<div class="empty-state">
@@ -246,78 +104,6 @@
 		flex-direction: column;
 		height: 100%;
 		position: relative;
-	}
-
-	.mesh-toolbar {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 8px 16px;
-		border-bottom: 1px solid var(--gm-border);
-		background: var(--gm-bg-secondary);
-	}
-
-	.toolbar-section {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-	}
-
-	.toolbar-sep {
-		width: 1px;
-		height: 18px;
-		background: var(--gm-border);
-		margin: 0 4px;
-	}
-
-	.view-title {
-		font-size: 13px;
-		font-weight: 600;
-		letter-spacing: 1px;
-		text-transform: uppercase;
-		color: var(--gm-text-primary);
-		margin: 0;
-	}
-
-	.filter-label {
-		font-size: 11px;
-		color: var(--gm-text-secondary);
-		display: flex;
-		align-items: center;
-		gap: 6px;
-	}
-
-	.filter-select,
-	.filter-input {
-		background: var(--gm-bg-panel);
-		border: 1px solid var(--gm-border);
-		border-radius: 4px;
-		color: var(--gm-text-primary);
-		font-family: inherit;
-		font-size: 11px;
-		padding: 3px 8px;
-	}
-
-	.filter-input {
-		width: 70px;
-	}
-
-	.tool-btn {
-		padding: 5px 12px;
-		background: var(--gm-bg-panel);
-		border: 1px solid var(--gm-border);
-		border-radius: 4px;
-		color: var(--gm-text-secondary);
-		font-family: inherit;
-		font-size: 11px;
-		cursor: pointer;
-		transition: all 0.15s;
-	}
-
-	.tool-btn:hover {
-		background: var(--gm-bg-hover);
-		color: var(--gm-text-primary);
-		border-color: var(--gm-border-active);
 	}
 
 	.graph-area {

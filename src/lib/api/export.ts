@@ -2,8 +2,10 @@
  * Export: CSV, JSON, PDF, SBOM, STIX, PCAP, firewall rules.
  */
 
+import type { FilteredPcapResult, AllowlistEntry } from '$lib/types/analysis';
+import type { EnforcementFormat, SegmentationReport } from '$lib/types/segmentation';
 import { invokeCompat } from './core';
-import type { ReportConfig, FilteredPcapResult, AllowlistEntry, EnforcementFormat, SegmentationReport } from '$lib/types';
+import type { ReportConfig } from '$lib/types';
 
 export async function exportAssetsCsv(outputPath: string): Promise<string> {
 	return invokeCompat<string>('export_assets_csv', { outputPath });

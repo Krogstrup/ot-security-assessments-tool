@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { CveMatch } from '$lib/types';
+	import type { CveMatch } from '$lib/types/analysis';
 
 	interface Props {
 		cveWarnings: CveMatch[];

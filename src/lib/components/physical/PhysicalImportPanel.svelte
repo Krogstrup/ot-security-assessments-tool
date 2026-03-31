@@ -1,4 +1,9 @@
 <script lang="ts">
+	import CiscoImportForm from './CiscoImportForm.svelte';
+	import MacTableImportForm from './MacTableImportForm.svelte';
+	import CdpImportForm from './CdpImportForm.svelte';
+	import ArpImportForm from './ArpImportForm.svelte';
+
 	interface Props {
 		importType: 'config' | 'mac' | 'cdp' | 'arp';
 		switchHostname: string;
@@ -13,7 +18,6 @@
 	}
 
 	let {
-		importType,
 		switchHostname,
 		switchOptions,
 		importError,
@@ -24,59 +28,36 @@
 		onImport,
 		onClear
 	}: Props = $props();
+
+	async function runImport(type: 'config' | 'mac' | 'cdp' | 'arp') {
+		onTypeChange(type);
+		await onImport();
+	}
 </script>
 
 <div class="import-panel">
 	<h3 class="panel-title">Import Network Data</h3>
 
-	<div class="import-form">
-		<label class="import-label">
-			Import Type:
-			<select
-				class="import-select"
-				value={importType}
-				onchange={(e) => onTypeChange(e.currentTarget.value as any)}
-			>
-				<option value="config">Running Config (auto-detect vendor)</option>
-				<option value="mac">MAC Address Table</option>
-				<option value="cdp">CDP / LLDP Neighbors</option>
-				<option value="arp">ARP Table</option>
-			</select>
-		</label>
-
-		{#if importType === 'mac' || importType === 'cdp'}
-			<label class="import-label">
-				Switch:
-				{#if switchOptions.length > 0}
-					<select
-						class="import-select"
-						value={switchHostname}
-						onchange={(e) => onSwitchChange((e.target as HTMLSelectElement).value)}
-					>
-						<option value="">Select switch...</option>
-						{#each switchOptions as hostname}
-							<option value={hostname}>{hostname}</option>
-						{/each}
-					</select>
-				{:else}
-					<input
-						class="import-input"
-						type="text"
-						placeholder="Import a config first"
-						value={switchHostname}
-						onchange={(e) => onSwitchChange((e.target as HTMLInputElement).value)}
-					/>
-				{/if}
-			</label>
-		{/if}
-
-		<button class="import-btn" onclick={onImport} disabled={importing}>
-			{importing ? 'Importing...' : 'Import File'}
-		</button>
-		<button class="import-btn secondary" onclick={onClear} disabled={importing}>
-			Clear Topology
-		</button>
+	<div class="forms-grid">
+		<CiscoImportForm importing={importing} onImport={() => runImport('config')} />
+		<MacTableImportForm
+			importing={importing}
+			{switchHostname}
+			{switchOptions}
+			onSwitchChange={onSwitchChange}
+			onImport={() => runImport('mac')}
+		/>
+		<CdpImportForm
+			importing={importing}
+			{switchHostname}
+			{switchOptions}
+			onSwitchChange={onSwitchChange}
+			onImport={() => runImport('cdp')}
+		/>
+		<ArpImportForm importing={importing} onImport={() => runImport('arp')} />
 	</div>
+
+	<button class="clear-btn" onclick={onClear} disabled={importing}>Clear Topology</button>
 
 	{#if importError}
 		<div class="msg error">{importError}</div>
@@ -88,24 +69,24 @@
 	<div class="import-help">
 		<h4>Import Order</h4>
 		<ol>
-			<li><strong>Running Config</strong> — creates the switch &amp; ports</li>
+			<li><strong>Running Config</strong> — creates switches and ports</li>
 			<li><strong>MAC Address Table</strong> — maps MACs to ports</li>
 			<li><strong>ARP Table</strong> — maps IPs to MACs</li>
-			<li><strong>CDP Neighbors</strong> — discovers switch links</li>
+			<li><strong>CDP/LLDP</strong> — discovers switch links</li>
 		</ol>
 	</div>
 </div>
 
 <style>
 	.import-panel {
-		flex: 0 0 280px;
+		flex: 0 0 300px;
 		background: var(--gm-bg-secondary);
 		border-right: 1px solid var(--gm-border);
 		padding: 1rem;
 		overflow-y: auto;
 		display: flex;
 		flex-direction: column;
-		gap: 1rem;
+		gap: 0.9rem;
 	}
 
 	.panel-title {
@@ -115,65 +96,25 @@
 		font-weight: 600;
 	}
 
-	.import-form {
+	.forms-grid {
 		display: flex;
 		flex-direction: column;
-		gap: 0.75rem;
+		gap: 0.65rem;
 	}
 
-	.import-label {
-		display: flex;
-		flex-direction: column;
-		gap: 0.35rem;
-		font-size: 0.75rem;
-		font-weight: 600;
-		color: var(--gm-text-secondary);
-	}
-
-	.import-select,
-	.import-input {
+	.clear-btn {
 		padding: 0.5rem;
 		border: 1px solid var(--gm-border);
 		border-radius: 4px;
 		background: var(--gm-bg-tertiary);
 		color: var(--gm-text-primary);
-		font-size: 0.8125rem;
-	}
-
-	.import-select:focus,
-	.import-input:focus {
-		outline: none;
-		border-color: #6366f1;
-	}
-
-	.import-btn {
-		padding: 0.5rem;
-		border: none;
-		border-radius: 4px;
-		background: #6366f1;
-		color: white;
-		font-size: 0.8125rem;
+		font-size: 0.8rem;
 		font-weight: 600;
 		cursor: pointer;
-		transition: all 0.2s;
 	}
 
-	.import-btn:hover:not(:disabled) {
-		background: #4f46e5;
-	}
-
-	.import-btn.secondary {
-		background: var(--gm-bg-tertiary);
-		color: var(--gm-text-primary);
-		border: 1px solid var(--gm-border);
-	}
-
-	.import-btn.secondary:hover:not(:disabled) {
-		background: rgba(255, 255, 255, 0.05);
-	}
-
-	.import-btn:disabled {
-		opacity: 0.5;
+	.clear-btn:disabled {
+		opacity: 0.55;
 		cursor: not-allowed;
 	}
 

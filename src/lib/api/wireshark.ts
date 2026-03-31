@@ -2,8 +2,9 @@
  * Wireshark integration: detection, opening, frame export.
  */
 
+import type { FrameRow } from '$lib/types/operations';
 import { invokeCompat } from './core';
-import type { WiresharkInfo, FrameRow } from '$lib/types';
+import type { WiresharkInfo } from '$lib/types';
 
 export async function detectWireshark(): Promise<WiresharkInfo> {
 	return invokeCompat<WiresharkInfo>('detect_wireshark');

@@ -2,8 +2,10 @@
  * Security analysis: ATT&CK, Purdue, anomalies, malware, compliance, CVE.
  */
 
+import type { Finding, PurdueAssignment, AnomalyScore, DefaultCredential, CriticalityAssessment, NamingSuggestion, MalwareFinding, ComplianceMapping, CveMatch } from '$lib/types/analysis';
+import type { SwitchSecurityFinding } from '$lib/types/deep-parse';
 import { invokeCompat } from './core';
-import type { AnalysisResult, Finding, PurdueAssignment, AnomalyScore, DefaultCredential, CriticalityAssessment, NamingSuggestion, MalwareFinding, ComplianceMapping, CveMatch, SwitchSecurityFinding } from '$lib/types';
+import type { AnalysisResult } from '$lib/types';
 
 export async function runAnalysis(): Promise<AnalysisResult> {
 	return invokeCompat<AnalysisResult>('run_analysis');
