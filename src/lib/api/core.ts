@@ -5,7 +5,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import type { AppError } from '/types';
+import type { AppError } from '$lib/types';
 
 function isBrowserRuntime(): boolean {
 	return typeof window !== 'undefined';

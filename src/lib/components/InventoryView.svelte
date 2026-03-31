@@ -87,7 +87,6 @@
 	// Zeek per-device events for selected asset
 	let zeekEvents = $state<DeviceZeekEvents | null>(null);
 	let loadingZeek = $state(false);
-	let zeekEventsExpanded = $state(false);
 
 	// IDS/SIEM alerts for selected asset
 	let assetAlerts = $state<CorrelatedAlert[]>([]);
@@ -529,7 +528,7 @@
 					<CveWarningsPanel cveWarnings={cveWarnings} />
 
 					<!-- Zeek Events -->
-					<ZeekEventsPanel zeekEvents={zeekEvents} bind:expanded={zeekEventsExpanded} />
+					<ZeekEventsPanel zeekEvents={zeekEvents} />
 
 					<!-- IDS/SIEM Alerts -->
 					<AlertsPanel alerts={assetAlerts} />

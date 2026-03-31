@@ -3,10 +3,11 @@
 
 	interface Props {
 		zeekEvents: DeviceZeekEvents | null;
-		expanded?: boolean;
 	}
 
-	let { zeekEvents, expanded = false }: Props = $props();
+	let { zeekEvents }: Props = $props();
+
+	let expanded = $state(false);
 
 	function toggleExpand() {
 		expanded = !expanded;
