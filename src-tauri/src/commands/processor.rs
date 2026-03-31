@@ -9,57 +9,41 @@ use uuid::Uuid;
 
 use gm_analysis::{ConnectionStats, PatternAnalyzer, PatternAnomaly};
 use gm_capture::ParsedPacket;
+use gm_constants::is_ot_server_port;
 use gm_db::{GeoIpLookup, OuiLookup};
 use gm_parsers::{
-    deep_parse, dnp3_function_code_name, identify_protocol, modbus_function_code_name, parse_lldp,
-    parse_redundancy, parse_snmp_response, AsduTypeId, BacnetObjectType, BacnetRole, BacnetService,
-    CipClass, CipService, DeepParseResult, Dnp3Role, EnipCommand, EnipRole, IcsProtocol,
-    Iec104Role, LldpInfo, ModbusDeviceId, ModbusRole, ProfinetRole, RedundancyInfo, S7Function,
-    S7Role, SnmpDeviceInfo,
+    deep_parse, identify_protocol, parse_lldp, parse_redundancy, parse_snmp_response,
+    DeepParseResult, IcsProtocol, LldpInfo, RedundancyInfo, SnmpDeviceInfo,
 };
 use gm_signatures::{PacketData, SignatureEngine};
 use gm_topology::TopologyBuilder;
 
 use super::{
-    infer_device_type, AssetInfo, AssetSignatureMatch, BacnetDetail, ConnectionInfo, DeepParseInfo,
-    Dnp3Detail, Dnp3Relationship, EnipDetail, FunctionCodeStat, Iec104Detail, LldpDetail,
-    ModbusDetail, ModbusDeviceIdInfo, ModbusRelationship, PacketSummary, PollingInterval,
-    ProfinetDcpDetail, RegisterRangeInfo, S7Detail, SnmpDetail,
+    handlers::{
+        bacnet::BacnetHandler, dnp3::Dnp3Handler, enip::EnipHandler, iec104::Iec104Handler,
+        modbus::ModbusHandler, profinet::ProfinetDcpHandler, s7::S7Handler,
+    },
+    infer_device_type, AssetInfo, AssetSignatureMatch, ConnectionInfo, DeepParseInfo, LldpDetail,
+    PacketSummary, SnmpDetail,
 };
+use super::protocol_handler::ProtocolHandler;
 
-/// Well-known OT/ICS service ports — if a device listens on one of these,
-/// it's considered a "server" (PLC/RTU/etc.) for classification purposes.
-fn is_server_port(port: u16) -> bool {
-    matches!(
-        port,
-        102 | 502
-            | 1089
-            | 1090
-            | 1091
-            | 1883
-            | 2222
-            | 2404
-            | 4840
-            | 5007
-            | 5094
-            | 8883
-            | 18245
-            | 18246
-            | 20000
-            | 34962
-            | 34963
-            | 34964
-            | 44818
-            | 47808
-    )
-}
 
 /// Processes packets through the full pipeline:
 /// protocol identification → deep parse → connection tracking → topology building.
 ///
+/// Protocol-specific accumulation is delegated to [`ProtocolHandler`] impls in
+/// `handlers/`. To add a new protocol: implement `ProtocolHandler`, register the
+/// handler in `PacketProcessor::new()`, and add a `DeepParseResult` arm if needed.
+///
 /// Used by both PCAP import and live capture.
 pub struct PacketProcessor {
     pub topo_builder: TopologyBuilder,
+
+    /// Per-protocol accumulators. Each handler is called for every packet.
+    handlers: Vec<Box<dyn ProtocolHandler>>,
+
+    // ── Core per-IP / per-connection accumulators ──────────────────────────
     connections: HashMap<String, ConnectionInfo>,
     packet_summaries: HashMap<String, Vec<PacketSummary>>,
     asset_protocols: HashMap<String, HashSet<IcsProtocol>>,
@@ -71,53 +55,7 @@ pub struct PacketProcessor {
     all_protocols: HashSet<String>,
     conn_origin_files: HashMap<String, HashSet<String>>,
 
-    // Deep parse accumulators
-    modbus_fc_counts: HashMap<String, HashMap<u8, u64>>,
-    modbus_unit_ids: HashMap<String, HashSet<u8>>,
-    #[allow(clippy::type_complexity)]
-    modbus_register_ranges: HashMap<String, HashMap<(u16, u16, String), u64>>,
-    modbus_roles: HashMap<String, HashSet<String>>,
-    modbus_device_ids: HashMap<String, ModbusDeviceId>,
-    #[allow(clippy::type_complexity)]
-    modbus_relationships: HashMap<String, HashMap<String, (String, HashSet<u8>, u64)>>,
-    modbus_polling_timestamps: HashMap<(String, String, u8, u8), Vec<f64>>,
-
-    dnp3_fc_counts: HashMap<String, HashMap<u8, u64>>,
-    dnp3_addresses: HashMap<String, HashSet<u16>>,
-    dnp3_roles: HashMap<String, HashSet<String>>,
-    dnp3_unsolicited: HashMap<String, bool>,
-    dnp3_relationships: HashMap<String, HashMap<String, (String, u64)>>,
-
-    // EtherNet/IP accumulators
-    enip_roles: HashMap<String, String>,
-    enip_cip_writes_to_assembly: HashSet<String>,
-    enip_cip_file_access: HashSet<String>,
-    enip_list_identity: HashSet<String>,
-
-    // S7comm accumulators
-    s7_roles: HashMap<String, String>,
-    s7_functions_seen: HashMap<String, HashSet<String>>,
-
-    // BACnet accumulators
-    bacnet_roles: HashMap<String, String>,
-    bacnet_write_to_output: HashSet<String>,
-    bacnet_write_to_notification_class: HashSet<String>,
-    bacnet_reinitialize: HashSet<String>,
-    bacnet_device_comm_ctrl: HashSet<String>,
-
-    // IEC 60870-5-104 accumulators
-    iec104_roles: HashMap<String, String>,
-    iec104_control_commands: HashSet<String>,
-    iec104_reset_process: HashSet<String>,
-    iec104_interrogation: HashSet<String>,
-
-    // PROFINET DCP accumulators
-    profinet_roles: HashMap<String, String>,
-    profinet_device_names: HashMap<String, String>,
-
-    // Signature matching data — accumulated per-IP
-    ip_packets: HashMap<String, Vec<PacketData>>,
-
+    // ── Non-IP-layer protocol accumulators ────────────────────────────────
     /// LLDP info keyed by the sender MAC address (e.g. "aa:bb:cc:dd:ee:ff").
     /// Multiple LLDP frames from the same device are merged (last-write-wins).
     lldp_by_mac: HashMap<String, LldpInfo>,
@@ -130,6 +68,9 @@ pub struct PacketProcessor {
     /// Keyed by the responding device's IP (src_ip when src_port == 161).
     snmp_device_info: HashMap<String, SnmpDeviceInfo>,
 
+    // ── Signature matching ────────────────────────────────────────────────
+    ip_packets: HashMap<String, Vec<PacketData>>,
+
     /// Communication pattern analyzer — collects timestamps per connection pair
     pattern_analyzer: PatternAnalyzer,
 
@@ -138,8 +79,18 @@ pub struct PacketProcessor {
 
 impl PacketProcessor {
     pub fn new() -> Self {
+        let handlers: Vec<Box<dyn ProtocolHandler>> = vec![
+            Box::new(ModbusHandler::default()),
+            Box::new(Dnp3Handler::default()),
+            Box::new(EnipHandler::default()),
+            Box::new(S7Handler::default()),
+            Box::new(BacnetHandler::default()),
+            Box::new(Iec104Handler::default()),
+            Box::new(ProfinetDcpHandler::default()),
+        ];
         Self {
             topo_builder: TopologyBuilder::new(),
+            handlers,
             connections: HashMap::new(),
             packet_summaries: HashMap::new(),
             asset_protocols: HashMap::new(),
@@ -150,39 +101,10 @@ impl PacketProcessor {
             server_ips: HashSet::new(),
             all_protocols: HashSet::new(),
             conn_origin_files: HashMap::new(),
-            modbus_fc_counts: HashMap::new(),
-            modbus_unit_ids: HashMap::new(),
-            modbus_register_ranges: HashMap::new(),
-            modbus_roles: HashMap::new(),
-            modbus_device_ids: HashMap::new(),
-            modbus_relationships: HashMap::new(),
-            modbus_polling_timestamps: HashMap::new(),
-            dnp3_fc_counts: HashMap::new(),
-            dnp3_addresses: HashMap::new(),
-            dnp3_roles: HashMap::new(),
-            dnp3_unsolicited: HashMap::new(),
-            dnp3_relationships: HashMap::new(),
-            enip_roles: HashMap::new(),
-            enip_cip_writes_to_assembly: HashSet::new(),
-            enip_cip_file_access: HashSet::new(),
-            enip_list_identity: HashSet::new(),
-            s7_roles: HashMap::new(),
-            s7_functions_seen: HashMap::new(),
-            bacnet_roles: HashMap::new(),
-            bacnet_write_to_output: HashSet::new(),
-            bacnet_write_to_notification_class: HashSet::new(),
-            bacnet_reinitialize: HashSet::new(),
-            bacnet_device_comm_ctrl: HashSet::new(),
-            iec104_roles: HashMap::new(),
-            iec104_control_commands: HashSet::new(),
-            iec104_reset_process: HashSet::new(),
-            iec104_interrogation: HashSet::new(),
-            profinet_roles: HashMap::new(),
-            profinet_device_names: HashMap::new(),
-            ip_packets: HashMap::new(),
             lldp_by_mac: HashMap::new(),
             redundancy_by_mac: HashMap::new(),
             snmp_device_info: HashMap::new(),
+            ip_packets: HashMap::new(),
             pattern_analyzer: PatternAnalyzer::new(),
             total_packets: 0,
         }
@@ -264,10 +186,10 @@ impl PacketProcessor {
             .insert(packet.dst_ip.clone(), timestamp.clone());
 
         // Detect servers using well-known OT service ports
-        if is_server_port(packet.dst_port) {
+        if is_ot_server_port(packet.dst_port) {
             self.server_ips.insert(packet.dst_ip.clone());
         }
-        if is_server_port(packet.src_port) {
+        if is_ot_server_port(packet.src_port) {
             self.server_ips.insert(packet.src_ip.clone());
         }
 
@@ -323,35 +245,13 @@ impl PacketProcessor {
         }
 
         // ── Deep Protocol Parsing ────────────────────────────────
+        // LLDP is handled by the early-return above; deep_parse() never returns
+        // Lldp since it's not an IP-layer protocol.
         if let Some(deep_result) = deep_parse(packet, protocol) {
-            let ts_epoch = packet.timestamp.timestamp() as f64
-                + packet.timestamp.timestamp_subsec_millis() as f64 / 1000.0;
-
-            match deep_result {
-                DeepParseResult::Modbus(ref info) => {
-                    self.process_modbus(packet, info, ts_epoch);
+            if !matches!(deep_result, DeepParseResult::Lldp(_)) {
+                for handler in &mut self.handlers {
+                    handler.process(packet, &deep_result);
                 }
-                DeepParseResult::Dnp3(ref info) => {
-                    self.process_dnp3(packet, info);
-                }
-                DeepParseResult::Enip(ref info) => {
-                    self.process_enip(packet, info);
-                }
-                DeepParseResult::S7(ref info) => {
-                    self.process_s7(packet, info);
-                }
-                DeepParseResult::Bacnet(ref info) => {
-                    self.process_bacnet(packet, info);
-                }
-                DeepParseResult::Iec104(ref info) => {
-                    self.process_iec104(packet, info);
-                }
-                DeepParseResult::ProfinetDcp(ref info) => {
-                    self.process_profinet_dcp(packet, info);
-                }
-                // LLDP is handled by the early-return above; deep_parse()
-                // never returns Lldp since it's not an IP-layer protocol.
-                DeepParseResult::Lldp(_) => {}
             }
         }
 
@@ -413,586 +313,18 @@ impl PacketProcessor {
         }
     }
 
-    /// Process Modbus deep parse result for a packet.
-    fn process_modbus(
-        &mut self,
-        packet: &ParsedPacket,
-        info: &gm_parsers::ModbusInfo,
-        ts_epoch: f64,
-    ) {
-        let ip_for_fc = match info.role {
-            ModbusRole::Master | ModbusRole::Slave | ModbusRole::Unknown => &packet.src_ip,
-        };
-
-        *self
-            .modbus_fc_counts
-            .entry(ip_for_fc.clone())
-            .or_default()
-            .entry(info.function_code)
-            .or_insert(0) += 1;
-
-        self.modbus_unit_ids
-            .entry(ip_for_fc.clone())
-            .or_default()
-            .insert(info.unit_id);
-
-        let role_str = match info.role {
-            ModbusRole::Master => "master",
-            ModbusRole::Slave => "slave",
-            ModbusRole::Unknown => "unknown",
-        };
-        self.modbus_roles
-            .entry(ip_for_fc.clone())
-            .or_default()
-            .insert(role_str.to_string());
-
-        if let Some(ref range) = info.register_range {
-            let reg_type = format!("{:?}", range.register_type).to_lowercase();
-            *self
-                .modbus_register_ranges
-                .entry(ip_for_fc.clone())
-                .or_default()
-                .entry((range.start, range.count, reg_type))
-                .or_insert(0) += 1;
-        }
-
-        if let Some(ref dev_id) = info.device_id {
-            self.modbus_device_ids
-                .insert(packet.src_ip.clone(), dev_id.clone());
-        }
-
-        let (local_ip, remote_ip, remote_role) = match info.role {
-            ModbusRole::Master => (&packet.src_ip, &packet.dst_ip, "slave"),
-            ModbusRole::Slave => (&packet.src_ip, &packet.dst_ip, "master"),
-            ModbusRole::Unknown => (&packet.src_ip, &packet.dst_ip, "unknown"),
-        };
-        let rel = self
-            .modbus_relationships
-            .entry(local_ip.clone())
-            .or_default()
-            .entry(remote_ip.clone())
-            .or_insert_with(|| (remote_role.to_string(), HashSet::new(), 0));
-        rel.1.insert(info.unit_id);
-        rel.2 += 1;
-
-        if info.role == ModbusRole::Master && !info.is_exception {
-            let key = (
-                packet.src_ip.clone(),
-                packet.dst_ip.clone(),
-                info.function_code,
-                info.unit_id,
-            );
-            self.modbus_polling_timestamps
-                .entry(key)
-                .or_default()
-                .push(ts_epoch);
-        }
-    }
-
-    /// Process DNP3 deep parse result for a packet.
-    fn process_dnp3(&mut self, packet: &ParsedPacket, info: &gm_parsers::Dnp3Info) {
-        let ip_for_fc = &packet.src_ip;
-
-        if let Some(fc) = info.function_code {
-            *self
-                .dnp3_fc_counts
-                .entry(ip_for_fc.clone())
-                .or_default()
-                .entry(fc)
-                .or_insert(0) += 1;
-        }
-
-        self.dnp3_addresses
-            .entry(ip_for_fc.clone())
-            .or_default()
-            .insert(info.source_address);
-
-        let role_str = match info.role {
-            Dnp3Role::Master => "master",
-            Dnp3Role::Outstation => "outstation",
-            Dnp3Role::Unknown => "unknown",
-        };
-        self.dnp3_roles
-            .entry(ip_for_fc.clone())
-            .or_default()
-            .insert(role_str.to_string());
-
-        if info.is_unsolicited {
-            self.dnp3_unsolicited.insert(ip_for_fc.clone(), true);
-        }
-
-        let remote_role = match info.role {
-            Dnp3Role::Master => "outstation",
-            Dnp3Role::Outstation => "master",
-            Dnp3Role::Unknown => "unknown",
-        };
-        let rel = self
-            .dnp3_relationships
-            .entry(ip_for_fc.clone())
-            .or_default()
-            .entry(packet.dst_ip.clone())
-            .or_insert_with(|| (remote_role.to_string(), 0));
-        rel.1 += 1;
-    }
-
-    /// Process EtherNet/IP deep parse result for a packet.
-    fn process_enip(&mut self, packet: &ParsedPacket, info: &gm_parsers::EnipInfo) {
-        let ip = &packet.src_ip;
-
-        let role_str = match info.role {
-            EnipRole::Scanner => "scanner",
-            EnipRole::Adapter => "adapter",
-            EnipRole::Unknown => "unknown",
-        };
-        self.enip_roles.insert(ip.clone(), role_str.to_string());
-
-        // ListIdentity request (not a response) — network discovery
-        if matches!(info.command, EnipCommand::ListIdentity) && !info.is_response {
-            self.enip_list_identity.insert(ip.clone());
-        }
-
-        // CIP Write or ReadModifyWrite to Assembly object — I/O control
-        let is_write = matches!(
-            info.cip_service,
-            Some(CipService::Write) | Some(CipService::ReadModifyWrite)
-        );
-        let is_assembly = matches!(info.cip_class, Some(CipClass::Assembly));
-        if is_write && is_assembly {
-            self.enip_cip_writes_to_assembly.insert(ip.clone());
-        }
-
-        // CIP File class access — firmware/program operations
-        if matches!(info.cip_class, Some(CipClass::File)) {
-            self.enip_cip_file_access.insert(ip.clone());
-        }
-    }
-
-    /// Process S7comm deep parse result for a packet.
-    fn process_s7(&mut self, packet: &ParsedPacket, info: &gm_parsers::S7Info) {
-        let ip = &packet.src_ip;
-
-        let role_str = match info.role {
-            S7Role::Client => "client",
-            S7Role::Server => "server",
-            S7Role::Unknown => "unknown",
-        };
-        self.s7_roles.insert(ip.clone(), role_str.to_string());
-
-        if let Some(ref function) = info.s7_function {
-            let fn_name = match function {
-                S7Function::SetupCommunication => "setup_communication",
-                S7Function::ReadVar => "read_var",
-                S7Function::WriteVar => "write_var",
-                S7Function::UploadStart => "upload_start",
-                S7Function::Upload => "upload",
-                S7Function::UploadEnd => "upload_end",
-                S7Function::DownloadStart => "download_start",
-                S7Function::Download => "download",
-                S7Function::DownloadEnd => "download_end",
-                S7Function::PlcStop => "plc_stop",
-                S7Function::PiService => "pi_service",
-                S7Function::Unknown(_) => "unknown",
-            };
-            self.s7_functions_seen
-                .entry(ip.clone())
-                .or_default()
-                .insert(fn_name.to_string());
-        }
-    }
-
-    /// Process BACnet deep parse result for a packet.
-    fn process_bacnet(&mut self, packet: &ParsedPacket, info: &gm_parsers::BacnetInfo) {
-        let ip = &packet.src_ip;
-
-        let role_str = match info.role {
-            BacnetRole::Client => "client",
-            BacnetRole::Server => "server",
-            BacnetRole::Unknown => "unknown",
-        };
-        self.bacnet_roles.insert(ip.clone(), role_str.to_string());
-
-        match info.service {
-            Some(BacnetService::WriteProperty) | Some(BacnetService::WritePropertyMultiple) => {
-                match info.object_type {
-                    Some(BacnetObjectType::AnalogOutput) | Some(BacnetObjectType::BinaryOutput) => {
-                        self.bacnet_write_to_output.insert(ip.clone());
-                    }
-                    Some(BacnetObjectType::NotificationClass) => {
-                        self.bacnet_write_to_notification_class.insert(ip.clone());
-                    }
-                    _ => {}
-                }
-            }
-            Some(BacnetService::ReinitializeDevice) => {
-                self.bacnet_reinitialize.insert(ip.clone());
-            }
-            Some(BacnetService::DeviceCommunicationControl) => {
-                self.bacnet_device_comm_ctrl.insert(ip.clone());
-            }
-            _ => {}
-        }
-    }
-
-    /// Process IEC 60870-5-104 deep parse result for a packet.
-    fn process_iec104(&mut self, packet: &ParsedPacket, info: &gm_parsers::Iec104Info) {
-        let ip = &packet.src_ip;
-
-        let role_str = match info.role {
-            Iec104Role::Master => "master",
-            Iec104Role::Outstation => "outstation",
-            Iec104Role::Unknown => "unknown",
-        };
-        self.iec104_roles.insert(ip.clone(), role_str.to_string());
-
-        if info.is_command {
-            self.iec104_control_commands.insert(ip.clone());
-        }
-        if matches!(info.type_id, Some(AsduTypeId::ResetProcess)) {
-            self.iec104_reset_process.insert(ip.clone());
-        }
-        if matches!(info.type_id, Some(AsduTypeId::Interrogation)) {
-            self.iec104_interrogation.insert(ip.clone());
-        }
-    }
-
-    /// Process PROFINET DCP deep parse result for a packet.
-    fn process_profinet_dcp(&mut self, packet: &ParsedPacket, info: &gm_parsers::ProfinetDcpInfo) {
-        let ip = &packet.src_ip;
-
-        let role_str = match info.role {
-            ProfinetRole::IoDevice => "io_device",
-            ProfinetRole::IoController => "io_controller",
-            ProfinetRole::IoSupervisor => "io_supervisor",
-            ProfinetRole::Unknown => "unknown",
-        };
-        // Only update if we have a meaningful role (responses carry the role block)
-        if role_str != "unknown" {
-            self.profinet_roles.insert(ip.clone(), role_str.to_string());
-        } else {
-            // Record the device even without a role so we know it speaks PROFINET
-            self.profinet_roles
-                .entry(ip.clone())
-                .or_insert_with(|| "unknown".to_string());
-        }
-
-        if let Some(ref name) = info.device_info.name_of_station {
-            if !name.is_empty() {
-                self.profinet_device_names.insert(ip.clone(), name.clone());
-            }
-        }
-    }
-
-    /// Build deep parse info from accumulated data.
+    /// Build deep parse info by delegating to each registered handler, then
+    /// appending LLDP and SNMP data (which are not routed through ProtocolHandler
+    /// because they arrive on non-IP-layer frames).
     pub fn build_deep_parse_info(&self) -> HashMap<String, DeepParseInfo> {
         let mut deep_parse_info: HashMap<String, DeepParseInfo> = HashMap::new();
 
-        // Aggregate Modbus data
-        let all_modbus_ips: HashSet<String> = self
-            .modbus_fc_counts
-            .keys()
-            .chain(self.modbus_roles.keys())
-            .cloned()
-            .collect();
-
-        for ip in &all_modbus_ips {
-            let role = self
-                .modbus_roles
-                .get(ip)
-                .map(|roles| {
-                    if roles.contains("master") && roles.contains("slave") {
-                        "both".to_string()
-                    } else if roles.contains("master") {
-                        "master".to_string()
-                    } else if roles.contains("slave") {
-                        "slave".to_string()
-                    } else {
-                        "unknown".to_string()
-                    }
-                })
-                .unwrap_or_else(|| "unknown".to_string());
-
-            let mut unit_ids: Vec<u8> = self
-                .modbus_unit_ids
-                .get(ip)
-                .map(|s| s.iter().copied().collect())
-                .unwrap_or_default();
-            unit_ids.sort();
-
-            let function_codes: Vec<FunctionCodeStat> = self
-                .modbus_fc_counts
-                .get(ip)
-                .map(|fc_map| {
-                    let mut fcs: Vec<FunctionCodeStat> = fc_map
-                        .iter()
-                        .map(|(&code, &count)| FunctionCodeStat {
-                            code,
-                            name: modbus_function_code_name(code).to_string(),
-                            count,
-                            is_write: matches!(code, 5 | 6 | 15 | 16 | 22 | 23),
-                        })
-                        .collect();
-                    fcs.sort_by(|a, b| b.count.cmp(&a.count));
-                    fcs
-                })
-                .unwrap_or_default();
-
-            let register_ranges: Vec<RegisterRangeInfo> = self
-                .modbus_register_ranges
-                .get(ip)
-                .map(|range_map| {
-                    let mut ranges: Vec<RegisterRangeInfo> = range_map
-                        .iter()
-                        .map(
-                            |((start, count, reg_type), &access_count)| RegisterRangeInfo {
-                                start: *start,
-                                count: *count,
-                                register_type: reg_type.clone(),
-                                access_count,
-                            },
-                        )
-                        .collect();
-                    ranges.sort_by(|a, b| a.start.cmp(&b.start));
-                    ranges
-                })
-                .unwrap_or_default();
-
-            let device_id = self.modbus_device_ids.get(ip).map(|d| ModbusDeviceIdInfo {
-                vendor_name: d.vendor_name.clone(),
-                product_code: d.product_code.clone(),
-                revision: d.revision.clone(),
-                vendor_url: d.vendor_url.clone(),
-                product_name: d.product_name.clone(),
-                model_name: d.model_name.clone(),
-            });
-
-            let relationships: Vec<ModbusRelationship> = self
-                .modbus_relationships
-                .get(ip)
-                .map(|rel_map| {
-                    rel_map
-                        .iter()
-                        .map(|(remote_ip, (remote_role, unit_id_set, pkt_count))| {
-                            let mut uids: Vec<u8> = unit_id_set.iter().copied().collect();
-                            uids.sort();
-                            ModbusRelationship {
-                                remote_ip: remote_ip.clone(),
-                                remote_role: remote_role.clone(),
-                                unit_ids: uids,
-                                packet_count: *pkt_count,
-                            }
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            // Compute polling intervals from timestamps
-            let mut polling_intervals: Vec<PollingInterval> = Vec::new();
-            for ((src, dst, fc, uid), timestamps) in &self.modbus_polling_timestamps {
-                if src == ip && timestamps.len() >= 3 {
-                    let mut sorted_ts = timestamps.clone();
-                    sorted_ts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-
-                    let intervals: Vec<f64> = sorted_ts
-                        .windows(2)
-                        .map(|w| (w[1] - w[0]) * 1000.0)
-                        .filter(|&i| i > 0.0 && i < 60_000.0)
-                        .collect();
-
-                    if intervals.len() >= 2 {
-                        let sum: f64 = intervals.iter().sum();
-                        let avg = sum / intervals.len() as f64;
-                        let min = intervals.iter().cloned().fold(f64::MAX, f64::min);
-                        let max = intervals.iter().cloned().fold(f64::MIN, f64::max);
-
-                        polling_intervals.push(PollingInterval {
-                            remote_ip: dst.clone(),
-                            unit_id: Some(*uid),
-                            function_code: *fc,
-                            avg_interval_ms: (avg * 10.0).round() / 10.0,
-                            min_interval_ms: (min * 10.0).round() / 10.0,
-                            max_interval_ms: (max * 10.0).round() / 10.0,
-                            sample_count: intervals.len() as u64,
-                        });
-                    }
-                }
-            }
-
-            let modbus_detail = ModbusDetail {
-                role,
-                unit_ids,
-                function_codes,
-                register_ranges,
-                device_id,
-                relationships,
-                polling_intervals,
-            };
-
-            deep_parse_info.entry(ip.clone()).or_default().modbus = Some(modbus_detail);
+        // Each handler populates its protocol-specific field.
+        for handler in &self.handlers {
+            handler.finalize(&mut deep_parse_info);
         }
 
-        // Aggregate DNP3 data
-        let all_dnp3_ips: HashSet<String> = self
-            .dnp3_fc_counts
-            .keys()
-            .chain(self.dnp3_roles.keys())
-            .cloned()
-            .collect();
-
-        for ip in &all_dnp3_ips {
-            let role = self
-                .dnp3_roles
-                .get(ip)
-                .map(|roles| {
-                    if roles.contains("master") && roles.contains("outstation") {
-                        "both".to_string()
-                    } else if roles.contains("master") {
-                        "master".to_string()
-                    } else if roles.contains("outstation") {
-                        "outstation".to_string()
-                    } else {
-                        "unknown".to_string()
-                    }
-                })
-                .unwrap_or_else(|| "unknown".to_string());
-
-            let mut addresses: Vec<u16> = self
-                .dnp3_addresses
-                .get(ip)
-                .map(|s| s.iter().copied().collect())
-                .unwrap_or_default();
-            addresses.sort();
-
-            let function_codes: Vec<FunctionCodeStat> = self
-                .dnp3_fc_counts
-                .get(ip)
-                .map(|fc_map| {
-                    let mut fcs: Vec<FunctionCodeStat> = fc_map
-                        .iter()
-                        .map(|(&code, &count)| FunctionCodeStat {
-                            code,
-                            name: dnp3_function_code_name(code).to_string(),
-                            count,
-                            is_write: matches!(code, 2..=6),
-                        })
-                        .collect();
-                    fcs.sort_by(|a, b| b.count.cmp(&a.count));
-                    fcs
-                })
-                .unwrap_or_default();
-
-            let has_unsolicited = self.dnp3_unsolicited.get(ip).copied().unwrap_or(false);
-
-            let relationships: Vec<Dnp3Relationship> = self
-                .dnp3_relationships
-                .get(ip)
-                .map(|rel_map| {
-                    rel_map
-                        .iter()
-                        .map(|(remote_ip, (remote_role, pkt_count))| Dnp3Relationship {
-                            remote_ip: remote_ip.clone(),
-                            remote_role: remote_role.clone(),
-                            packet_count: *pkt_count,
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            let dnp3_detail = Dnp3Detail {
-                role,
-                addresses,
-                function_codes,
-                has_unsolicited,
-                relationships,
-            };
-
-            deep_parse_info.entry(ip.clone()).or_default().dnp3 = Some(dnp3_detail);
-        }
-
-        // Aggregate EtherNet/IP data
-        for ip in self.enip_roles.keys() {
-            let role = self
-                .enip_roles
-                .get(ip)
-                .cloned()
-                .unwrap_or_else(|| "unknown".to_string());
-            let enip_detail = EnipDetail {
-                role,
-                cip_writes_to_assembly: self.enip_cip_writes_to_assembly.contains(ip),
-                cip_file_access: self.enip_cip_file_access.contains(ip),
-                list_identity_requests: self.enip_list_identity.contains(ip),
-            };
-            deep_parse_info.entry(ip.clone()).or_default().enip = Some(enip_detail);
-        }
-
-        // Aggregate S7comm data
-        for ip in self.s7_roles.keys() {
-            let role = self
-                .s7_roles
-                .get(ip)
-                .cloned()
-                .unwrap_or_else(|| "unknown".to_string());
-            let mut functions_seen: Vec<String> = self
-                .s7_functions_seen
-                .get(ip)
-                .map(|s| s.iter().cloned().collect())
-                .unwrap_or_default();
-            functions_seen.sort();
-            let s7_detail = S7Detail {
-                role,
-                functions_seen,
-            };
-            deep_parse_info.entry(ip.clone()).or_default().s7 = Some(s7_detail);
-        }
-
-        // Aggregate BACnet data
-        for ip in self.bacnet_roles.keys() {
-            let role = self
-                .bacnet_roles
-                .get(ip)
-                .cloned()
-                .unwrap_or_else(|| "unknown".to_string());
-            let bacnet_detail = BacnetDetail {
-                role,
-                write_to_output: self.bacnet_write_to_output.contains(ip),
-                write_to_notification_class: self.bacnet_write_to_notification_class.contains(ip),
-                reinitialize_device: self.bacnet_reinitialize.contains(ip),
-                device_communication_control: self.bacnet_device_comm_ctrl.contains(ip),
-            };
-            deep_parse_info.entry(ip.clone()).or_default().bacnet = Some(bacnet_detail);
-        }
-
-        // Aggregate PROFINET DCP data
-        for ip in self.profinet_roles.keys() {
-            let role = self
-                .profinet_roles
-                .get(ip)
-                .cloned()
-                .unwrap_or_else(|| "unknown".to_string());
-            let profinet_detail = ProfinetDcpDetail {
-                role,
-                device_name: self.profinet_device_names.get(ip).cloned(),
-            };
-            deep_parse_info.entry(ip.clone()).or_default().profinet_dcp = Some(profinet_detail);
-        }
-
-        // Aggregate IEC 104 data
-        for ip in self.iec104_roles.keys() {
-            let role = self
-                .iec104_roles
-                .get(ip)
-                .cloned()
-                .unwrap_or_else(|| "unknown".to_string());
-            let iec104_detail = Iec104Detail {
-                role,
-                has_control_commands: self.iec104_control_commands.contains(ip),
-                has_reset_process: self.iec104_reset_process.contains(ip),
-                has_interrogation: self.iec104_interrogation.contains(ip),
-            };
-            deep_parse_info.entry(ip.clone()).or_default().iec104 = Some(iec104_detail);
-        }
-
-        // Aggregate LLDP data: match by MAC address
-        // asset_macs maps IP → MAC; we need the reverse to look up by MAC
+        // LLDP: match by MAC address (asset_macs maps IP → MAC).
         for (ip, mac) in &self.asset_macs {
             if let Some(lldp_info) = self.lldp_by_mac.get(mac) {
                 let mgmt_addrs: Vec<String> = lldp_info
@@ -1016,7 +348,7 @@ impl PacketProcessor {
             }
         }
 
-        // Aggregate SNMP device identity (keyed directly by IP)
+        // SNMP: keyed directly by IP.
         for (ip, snmp_info) in &self.snmp_device_info {
             let snmp_detail = SnmpDetail {
                 sys_descr: snmp_info.sys_descr.clone(),

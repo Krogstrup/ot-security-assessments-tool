@@ -1,19 +1,25 @@
 pub mod analysis;
 pub mod baseline;
 pub mod capture;
+pub mod error;
 pub mod correlation;
 pub mod data;
 pub mod export;
+pub mod handlers;
 pub mod ingest;
 pub mod patterns;
 pub mod physical;
 pub mod processor;
 pub mod projects;
+pub mod protocol_handler;
 pub mod segmentation;
 pub mod session;
 pub mod signatures;
 pub mod system;
 pub mod wireshark;
+
+#[cfg(test)]
+use ts_rs::TS;
 
 use gm_analysis::{AnomalyScore, ConnectionStats, Finding, PatternAnomaly, PurdueAssignment};
 use gm_capture::LiveCaptureHandle;
@@ -102,6 +108,8 @@ pub struct AppStateInner {
 ///
 /// Flattened from IngestedAlert for direct serialization.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(TS))]
+#[cfg_attr(test, ts(export, export_to = "gen/types/"))]
 pub struct StoredAlert {
     /// RFC 3339 timestamp of the alert
     pub timestamp: String,
@@ -123,6 +131,8 @@ pub struct StoredAlert {
 
 /// A single Zeek-observed event summarised for display.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(TS))]
+#[cfg_attr(test, ts(export, export_to = "gen/types/"))]
 pub struct ZeekEventSummary {
     /// RFC 3339 timestamp (connection first_seen)
     pub timestamp: String,
@@ -138,6 +148,8 @@ pub struct ZeekEventSummary {
 ///
 /// Built from connections that have "[Zeek]" in their origin_files.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(test, derive(TS))]
+#[cfg_attr(test, ts(export, export_to = "gen/types/"))]
 pub struct DeviceZeekEvents {
     pub device_ip: String,
     /// Total conn.log-type entries for this device
@@ -156,6 +168,8 @@ pub struct DeviceZeekEvents {
 
 /// Asset information stored in application state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(TS))]
+#[cfg_attr(test, ts(export, export_to = "gen/types/"))]
 pub struct AssetInfo {
     pub id: String,
     pub ip_address: String,
@@ -189,6 +203,8 @@ pub struct AssetInfo {
 
 /// A signature match result attached to an asset.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(TS))]
+#[cfg_attr(test, ts(export, export_to = "gen/types/"))]
 pub struct AssetSignatureMatch {
     pub signature_name: String,
     pub confidence: u8,
@@ -200,6 +216,8 @@ pub struct AssetSignatureMatch {
 
 /// Connection information stored in application state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(TS))]
+#[cfg_attr(test, ts(export, export_to = "gen/types/"))]
 pub struct ConnectionInfo {
     pub id: String,
     pub src_ip: String,
@@ -221,6 +239,8 @@ pub struct ConnectionInfo {
 /// Lightweight packet summary for the connection tree detail view.
 /// Full payload is not included — this is for display only.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(TS))]
+#[cfg_attr(test, ts(export, export_to = "gen/types/"))]
 pub struct PacketSummary {
     pub timestamp: String,
     pub src_ip: String,
@@ -234,6 +254,8 @@ pub struct PacketSummary {
 
 /// Protocol statistics.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(TS))]
+#[cfg_attr(test, ts(export, export_to = "gen/types/"))]
 pub struct ProtocolStatInfo {
     pub protocol: String,
     pub packet_count: u64,
@@ -248,6 +270,8 @@ pub struct ProtocolStatInfo {
 /// every packet for a given IP, including function codes, roles, and
 /// security-relevant flags for ATT&CK detection.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(test, derive(TS))]
+#[cfg_attr(test, ts(export, export_to = "gen/types/"))]
 pub struct DeepParseInfo {
     /// Modbus-specific details (present if device speaks Modbus)
     pub modbus: Option<ModbusDetail>,
@@ -271,6 +295,8 @@ pub struct DeepParseInfo {
 
 /// EtherNet/IP aggregated details for a device.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(TS))]
+#[cfg_attr(test, ts(export, export_to = "gen/types/"))]
 pub struct EnipDetail {
     /// Detected role: "scanner" (client) or "adapter" (server)
     pub role: String,
@@ -284,6 +310,8 @@ pub struct EnipDetail {
 
 /// S7comm aggregated details for a device.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(TS))]
+#[cfg_attr(test, ts(export, export_to = "gen/types/"))]
 pub struct S7Detail {
     /// Detected role: "client" or "server"
     pub role: String,
@@ -293,6 +321,8 @@ pub struct S7Detail {
 
 /// BACnet aggregated details for a device.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(TS))]
+#[cfg_attr(test, ts(export, export_to = "gen/types/"))]
 pub struct BacnetDetail {
     /// Detected role: "client" or "server"
     pub role: String,
@@ -308,6 +338,8 @@ pub struct BacnetDetail {
 
 /// PROFINET DCP aggregated details for a device.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(TS))]
+#[cfg_attr(test, ts(export, export_to = "gen/types/"))]
 pub struct ProfinetDcpDetail {
     /// Detected role: "io_device", "io_controller", "io_supervisor", or "unknown"
     pub role: String,
@@ -317,6 +349,8 @@ pub struct ProfinetDcpDetail {
 
 /// LLDP (Link Layer Discovery Protocol) details for a device.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(TS))]
+#[cfg_attr(test, ts(export, export_to = "gen/types/"))]
 pub struct LldpDetail {
     /// System name (hostname) from LLDP Type 5
     pub system_name: Option<String>,
@@ -342,6 +376,8 @@ pub struct LldpDetail {
 
 /// SNMP device identity extracted from GET-Response packets.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(TS))]
+#[cfg_attr(test, ts(export, export_to = "gen/types/"))]
 pub struct SnmpDetail {
     /// sysDescr — free-text description of the device
     pub sys_descr: Option<String>,
@@ -361,6 +397,8 @@ pub struct SnmpDetail {
 
 /// IEC 60870-5-104 aggregated details for a device.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(TS))]
+#[cfg_attr(test, ts(export, export_to = "gen/types/"))]
 pub struct Iec104Detail {
     /// Detected role: "master" or "outstation"
     pub role: String,
@@ -374,6 +412,8 @@ pub struct Iec104Detail {
 
 /// Aggregated Modbus details for a device.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(TS))]
+#[cfg_attr(test, ts(export, export_to = "gen/types/"))]
 pub struct ModbusDetail {
     /// Detected role: "master", "slave", or "both"
     pub role: String,
@@ -393,6 +433,8 @@ pub struct ModbusDetail {
 
 /// DNP3 aggregated details for a device.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(TS))]
+#[cfg_attr(test, ts(export, export_to = "gen/types/"))]
 pub struct Dnp3Detail {
     /// Detected role: "master", "outstation", or "both"
     pub role: String,
@@ -408,6 +450,8 @@ pub struct Dnp3Detail {
 
 /// Function code usage statistics.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(TS))]
+#[cfg_attr(test, ts(export, export_to = "gen/types/"))]
 pub struct FunctionCodeStat {
     pub code: u8,
     pub name: String,
@@ -418,6 +462,8 @@ pub struct FunctionCodeStat {
 
 /// Register range accessed by a Modbus device.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(TS))]
+#[cfg_attr(test, ts(export, export_to = "gen/types/"))]
 pub struct RegisterRangeInfo {
     pub start: u16,
     pub count: u16,
@@ -428,6 +474,8 @@ pub struct RegisterRangeInfo {
 
 /// Modbus device identification from FC 43/14.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(TS))]
+#[cfg_attr(test, ts(export, export_to = "gen/types/"))]
 pub struct ModbusDeviceIdInfo {
     pub vendor_name: Option<String>,
     pub product_code: Option<String>,
@@ -439,6 +487,8 @@ pub struct ModbusDeviceIdInfo {
 
 /// A relationship between Modbus master/slave.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(TS))]
+#[cfg_attr(test, ts(export, export_to = "gen/types/"))]
 pub struct ModbusRelationship {
     pub remote_ip: String,
     /// "master" or "slave" — what the REMOTE device is
@@ -449,6 +499,8 @@ pub struct ModbusRelationship {
 
 /// A relationship between DNP3 master/outstation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(TS))]
+#[cfg_attr(test, ts(export, export_to = "gen/types/"))]
 pub struct Dnp3Relationship {
     pub remote_ip: String,
     /// "master" or "outstation"
@@ -458,6 +510,8 @@ pub struct Dnp3Relationship {
 
 /// Detected polling interval for a master→slave relationship.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(TS))]
+#[cfg_attr(test, ts(export, export_to = "gen/types/"))]
 pub struct PollingInterval {
     pub remote_ip: String,
     pub unit_id: Option<u8>,
