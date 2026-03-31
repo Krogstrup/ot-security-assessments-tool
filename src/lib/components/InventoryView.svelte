@@ -4,6 +4,16 @@
 	import type { DeviceType, IcsProtocol, DeepParseInfo, AssetUpdate, Asset, EnipDetail, S7Detail, BacnetDetail, Iec104Detail, ProfinetDcpDetail, LldpDetail, DefaultCredential, CorrelatedAlert, CveMatch, DeviceZeekEvents } from '$lib/types';
 	import { DEVICE_TYPE_LABELS as deviceTypeLabels, DEVICE_TYPE_COLORS as deviceTypeColors, DEVICE_TYPE_OPTIONS as deviceTypeOptions, PURDUE_LABELS as purdueLabels, CONFIDENCE_LABELS as confidenceLabels, CONFIDENCE_COLORS as confidenceColors } from '$lib/constants';
 
+	// Sub-components
+	import CredentialWarningsPanel from './inventory/CredentialWarningsPanel.svelte';
+	import CveWarningsPanel from './inventory/CveWarningsPanel.svelte';
+	import ZeekEventsPanel from './inventory/ZeekEventsPanel.svelte';
+	import AlertsPanel from './inventory/AlertsPanel.svelte';
+	import AssetWiresharkFiltersPanel from './inventory/AssetWiresharkFiltersPanel.svelte';
+	import AssetBasicInfoSection from './inventory/AssetBasicInfoSection.svelte';
+	import AssetEditForm from './inventory/AssetEditForm.svelte';
+	import AssetBulkEditPanel from './inventory/AssetBulkEditPanel.svelte';
+
 	const protocols: IcsProtocol[] = ['modbus', 'dnp3', 'ethernet_ip', 'bacnet', 's7comm', 'opc_ua'];
 
 	// Country code → flag emoji mapping
@@ -426,29 +436,22 @@
 
 	<!-- Bulk Operations Bar -->
 	{#if showBulkPanel}
-		<div class="bulk-bar">
-			<span class="bulk-count">{selectedIds.size} selected</span>
-			<select class="bulk-select" bind:value={bulkDeviceType}>
-				<option value="">Set Type...</option>
-				{#each deviceTypeOptions as dt}
-					<option value={dt}>{deviceTypeLabels[dt]}</option>
-				{/each}
-			</select>
-			<select class="bulk-select" bind:value={bulkPurdueLevel}>
-				<option value="">Set Purdue...</option>
-				{#each [0,1,2,3,4,5] as level}
-					<option value={level.toString()}>{purdueLabels[level]}</option>
-				{/each}
-			</select>
-			<input class="bulk-input" type="text" placeholder="Add tag..." bind:value={bulkTag} />
-			<input class="bulk-input" type="text" placeholder="Set notes..." bind:value={bulkNotes} />
-			<button class="bulk-apply" onclick={applyBulkUpdate} disabled={bulkSaving || (!bulkDeviceType && !bulkPurdueLevel && !bulkTag.trim() && !bulkNotes.trim())}>
-				Apply
-			</button>
-			<button class="bulk-cancel" onclick={() => { selectedIds = new Set(); showBulkPanel = false; }}>
-				Clear
-			</button>
-		</div>
+		<AssetBulkEditPanel
+			selectedCount={selectedIds.size}
+			{bulkDeviceType}
+			{bulkPurdueLevel}
+			{bulkTag}
+			{bulkNotes}
+			{bulkSaving}
+			onApply={applyBulkUpdate}
+			onClear={() => { selectedIds = new Set(); showBulkPanel = false; }}
+			onFieldChange={(field, value) => {
+				if (field === 'deviceType') bulkDeviceType = value;
+				else if (field === 'purdueLevel') bulkPurdueLevel = value;
+				else if (field === 'tag') bulkTag = value;
+				else if (field === 'notes') bulkNotes = value;
+			}}
+		/>
 	{/if}
 
 	<div class="inventory-body">
@@ -660,279 +663,49 @@
 				</div>
 
 				<div class="detail-body">
-					{#if editMessage}
-						<div class="edit-message" class:success={editMessage === 'Saved'} class:error={editMessage.startsWith('Error')}>
-							{editMessage}
-						</div>
-					{/if}
+					<!-- Edit Form -->
+					<AssetEditForm
+						{isEditing}
+						asset={$selectedAsset}
+						{editDeviceType}
+						{editHostname}
+						{editNotes}
+						{editPurdueLevel}
+						{editTags}
+						{editSaving}
+						{editMessage}
+						onSave={saveEdits}
+						onCancel={() => { isEditing = false; editMessage = ''; }}
+						onFieldChange={(field, value) => {
+							if (field === 'deviceType') editDeviceType = value as string;
+							else if (field === 'hostname') editHostname = value as string;
+							else if (field === 'purdueLevel') editPurdueLevel = value as (number | null);
+							else if (field === 'tags') editTags = value as string;
+							else if (field === 'notes') editNotes = value as string;
+						}}
+					/>
 
-					<!-- Editable fields -->
-					{#if isEditing}
-						<div class="detail-section edit-section">
-							<h4 class="section-title">Edit Asset</h4>
-							<div class="edit-group">
-								<label class="edit-label" for="edit-device-type">Device Type</label>
-								<select id="edit-device-type" class="edit-select" bind:value={editDeviceType}>
-									{#each deviceTypeOptions as dt}
-										<option value={dt}>{deviceTypeLabels[dt]}</option>
-									{/each}
-								</select>
-							</div>
-							<div class="edit-group">
-								<label class="edit-label" for="edit-hostname">Hostname</label>
-								<input id="edit-hostname" class="edit-input" type="text" bind:value={editHostname} placeholder="e.g., PLC-BOILER-01" />
-							</div>
-							<div class="edit-group">
-								<label class="edit-label" for="edit-purdue">Purdue Level</label>
-								<select id="edit-purdue" class="edit-select" bind:value={editPurdueLevel}>
-									<option value={null}>Not set</option>
-									{#each [0,1,2,3,4,5] as level}
-										<option value={level}>{purdueLabels[level]}</option>
-									{/each}
-								</select>
-							</div>
-							<div class="edit-group">
-								<label class="edit-label" for="edit-tags">Tags (comma separated)</label>
-								<input id="edit-tags" class="edit-input" type="text" bind:value={editTags} placeholder="e.g., critical, zone-a" />
-							</div>
-							<div class="edit-group">
-								<label class="edit-label" for="edit-notes">Notes</label>
-								<textarea id="edit-notes" class="edit-textarea" bind:value={editNotes} rows="3" placeholder="Freeform notes about this asset..."></textarea>
-							</div>
-							<div class="edit-actions">
-								<button class="action-btn primary small" onclick={saveEdits} disabled={editSaving}>
-									{editSaving ? 'Saving...' : 'Save'}
-								</button>
-								<button class="action-btn secondary small" onclick={() => { isEditing = false; editMessage = ''; }}>
-									Cancel
-								</button>
-							</div>
-						</div>
-					{:else}
-						<!-- Read-only basic info -->
-						<div class="detail-section">
-							<div class="detail-row">
-								<span class="detail-label">Type</span>
-								<span class="detail-value">{deviceTypeLabels[$selectedAsset.device_type] ?? $selectedAsset.device_type}</span>
-							</div>
-							{#if $selectedAsset.hostname}
-								<div class="detail-row">
-									<span class="detail-label">Hostname</span>
-									<span class="detail-value">{$selectedAsset.hostname}</span>
-								</div>
-							{/if}
-							{#if $selectedAsset.vendor}
-								<div class="detail-row">
-									<span class="detail-label">Vendor</span>
-									<span class="detail-value">{$selectedAsset.vendor}</span>
-								</div>
-							{/if}
-							{#if $selectedAsset.oui_vendor}
-								<div class="detail-row">
-									<span class="detail-label">OUI Vendor</span>
-									<span class="detail-value">{$selectedAsset.oui_vendor}</span>
-								</div>
-							{/if}
-							{#if $selectedAsset.product_family}
-								<div class="detail-row">
-									<span class="detail-label">Product</span>
-									<span class="detail-value">{$selectedAsset.product_family}</span>
-								</div>
-							{/if}
-							<div class="detail-row">
-								<span class="detail-label">Confidence</span>
-								<span class="detail-value">
-									{#if $selectedAsset.confidence > 0}
-										<span
-											class="confidence-badge"
-											style="color: {confidenceColors[$selectedAsset.confidence] ?? '#64748b'};
-											       background: {(confidenceColors[$selectedAsset.confidence] ?? '#64748b')}18"
-										>
-											{$selectedAsset.confidence}/5 ({confidenceLabels[$selectedAsset.confidence]})
-										</span>
-									{:else}
-										—
-									{/if}
-								</span>
-							</div>
-							{#if $selectedAsset.purdue_level != null}
-								<div class="detail-row">
-									<span class="detail-label">Purdue</span>
-									<span class="detail-value">{purdueLabels[$selectedAsset.purdue_level] ?? `L${$selectedAsset.purdue_level}`}</span>
-								</div>
-							{/if}
-							{#if $selectedAsset.country}
-								<div class="detail-row">
-									<span class="detail-label">Country</span>
-									<span class="detail-value">{countryFlag($selectedAsset.country)} {$selectedAsset.country}</span>
-								</div>
-							{/if}
-							{#if $selectedAsset.is_public_ip}
-								<div class="detail-row">
-									<span class="detail-label">Public IP</span>
-									<span class="detail-value finding">Yes — unexpected for OT</span>
-								</div>
-							{/if}
-							{#if $selectedAsset.tags.length > 0}
-								<div class="detail-row">
-									<span class="detail-label">Tags</span>
-									<span class="detail-value">
-										{#each $selectedAsset.tags as tag}
-											<span class="tag-badge">{tag}</span>
-										{/each}
-									</span>
-								</div>
-							{/if}
-							{#if $selectedAsset.notes}
-								<div class="detail-row notes-row">
-									<span class="detail-label">Notes</span>
-									<span class="detail-value notes-text">{$selectedAsset.notes}</span>
-								</div>
-							{/if}
-
-							<!-- Confidence Breakdown -->
-							{#if $selectedAsset.signature_matches.length > 0}
-								<div class="detail-subsection">
-									<h5 class="subsection-title">Confidence Breakdown</h5>
-									{#each $selectedAsset.signature_matches as match}
-										<div class="confidence-row">
-											<span
-												class="confidence-badge small"
-												style="color: {confidenceColors[match.confidence] ?? '#64748b'};
-												       background: {(confidenceColors[match.confidence] ?? '#64748b')}18"
-											>{match.confidence}</span>
-											<span class="match-name">{match.signature_name}</span>
-											{#if match.vendor}
-												<span class="match-vendor">{match.vendor}</span>
-											{/if}
-										</div>
-									{/each}
-								</div>
-							{/if}
-						</div>
+					<!-- Read-only basic info -->
+					{#if !isEditing && $selectedAsset}
+						<AssetBasicInfoSection asset={$selectedAsset} />
 					{/if}
 
 					<!-- Wireshark Filters -->
-					<div class="detail-section">
-						<h4 class="section-title">Wireshark Filters</h4>
-						<div class="filter-row">
-							<code class="filter-code">ip.addr == {$selectedAsset.ip_address}</code>
-							<button class="copy-btn" onclick={() => copyWiresharkFilter(`ip.addr == ${$selectedAsset!.ip_address}`)}>
-								Copy
-							</button>
-						</div>
-						{#if getOtPort($selectedAsset.protocols) !== null}
-							{@const port = getOtPort($selectedAsset.protocols)}
-							<div class="filter-row">
-								<code class="filter-code">ip.addr == {$selectedAsset.ip_address} && tcp.port == {port}</code>
-								<button class="copy-btn" onclick={() => copyWiresharkFilter(`ip.addr == ${$selectedAsset!.ip_address} && tcp.port == ${port}`)}>
-									Copy
-								</button>
-							</div>
-						{/if}
-					</div>
-
-					<!-- Default Credential Warnings -->
-					{#if credWarnings.length > 0}
-						<div class="detail-section cred-warning-section">
-							<h4 class="section-title warning-title">⚠ Default Credentials Detected</h4>
-							{#each credWarnings as cw}
-								<div class="cred-warning-card">
-									<div class="cred-row"><span class="cred-label">Protocol:</span> <span>{cw.protocol.toUpperCase()}</span></div>
-									{#if cw.username}<div class="cred-row"><span class="cred-label">Username:</span> <code>{cw.username}</code></div>{/if}
-									{#if cw.password}<div class="cred-row"><span class="cred-label">Password:</span> <code>{cw.password}</code></div>{/if}
-									<div class="cred-row cred-source"><span class="cred-label">Source:</span> <span>{cw.source}</span></div>
-									<button class="copy-btn cred-copy" onclick={() => navigator.clipboard.writeText(`${cw.username}:${cw.password}`)}>
-										Copy Credentials
-									</button>
-								</div>
-							{/each}
-						</div>
+					{#if $selectedAsset}
+						<AssetWiresharkFiltersPanel asset={$selectedAsset} />
 					{/if}
+
+					<!-- Credential Warnings -->
+					<CredentialWarningsPanel warnings={credWarnings} />
 
 					<!-- CVE Warnings -->
-					{#if cveWarnings.length > 0}
-						<div class="detail-section cve-warning-section">
-							<h4 class="section-title cve-title">&#128308; Known Vulnerabilities ({cveWarnings.length})</h4>
-							{#each cveWarnings as cve}
-								<div class="cve-card">
-									<div class="cve-header-row">
-										<span class="cve-id">{cve.cve_id}</span>
-										<span class="cve-cvss-badge sev-{cve.severity_label.toLowerCase()}">{cve.severity_label} {cve.cvss.toFixed(1)}</span>
-										<span class="cve-conf conf-{cve.confidence}">{cve.confidence}</span>
-									</div>
-									<div class="cve-desc">{cve.description}</div>
-									{#if cve.advisory}
-										<div class="cve-row"><span class="cve-label">Advisory:</span> <span>{cve.advisory}</span></div>
-									{/if}
-									<div class="cve-row cve-remediation"><span class="cve-label">Fix:</span> <span>{cve.remediation}</span></div>
-									<button class="copy-btn cve-copy" onclick={() => navigator.clipboard.writeText(cve.cve_id)}>
-										Copy CVE ID
-									</button>
-								</div>
-							{/each}
-						</div>
-					{/if}
+					<CveWarningsPanel cveWarnings={cveWarnings} />
 
-					<!-- Zeek Per-Device Events -->
-					{#if zeekEvents}
-						<div class="detail-section zeek-section">
-							<div class="zeek-header">
-								<h4 class="section-title zeek-title">&#128269; Zeek Events</h4>
-								<button class="zeek-expand-btn" onclick={() => { zeekEventsExpanded = !zeekEventsExpanded; }}>
-									{zeekEventsExpanded ? 'Hide' : 'Show'} samples
-								</button>
-							</div>
-							<div class="zeek-badges">
-								{#if zeekEvents.conn_log_entries > 0}
-									<span class="zeek-badge">conn: {zeekEvents.conn_log_entries}</span>
-								{/if}
-								{#if zeekEvents.modbus_events > 0}
-									<span class="zeek-badge zeek-ot">modbus: {zeekEvents.modbus_events}</span>
-								{/if}
-								{#if zeekEvents.dnp3_events > 0}
-									<span class="zeek-badge zeek-ot">dnp3: {zeekEvents.dnp3_events}</span>
-								{/if}
-								{#if zeekEvents.dns_queries > 0}
-									<span class="zeek-badge">dns: {zeekEvents.dns_queries}</span>
-								{/if}
-								{#if zeekEvents.http_requests > 0}
-									<span class="zeek-badge">http: {zeekEvents.http_requests}</span>
-								{/if}
-								<span class="zeek-badge zeek-peers">peers: {zeekEvents.unique_peers}</span>
-								{#if zeekEvents.alert_count > 0}
-									<span class="zeek-badge zeek-alert">alerts: {zeekEvents.alert_count}</span>
-								{/if}
-							</div>
-							{#if zeekEventsExpanded && zeekEvents.sample_events.length > 0}
-								<div class="zeek-events-list">
-									{#each zeekEvents.sample_events as ev}
-										<div class="zeek-event-row">
-											<span class="zeek-ev-time">{ev.timestamp.slice(0, 19).replace('T', ' ')}</span>
-											<span class="zeek-ev-type tag-{ev.log_type}">{ev.log_type}</span>
-											<span class="zeek-ev-summary">{ev.summary}</span>
-										</div>
-									{/each}
-								</div>
-							{/if}
-						</div>
-					{/if}
+					<!-- Zeek Events -->
+					<ZeekEventsPanel zeekEvents={zeekEvents} bind:expanded={zeekEventsExpanded} />
 
-					<!-- IDS/SIEM Alerts for this device -->
-					{#if assetAlerts.length > 0}
-						<div class="detail-section alert-section">
-							<h4 class="section-title alert-title">&#128680; External Alerts ({assetAlerts.length})</h4>
-							{#each assetAlerts as alert}
-								<div class="asset-alert-row">
-									<span class="alert-sev-badge sev-{alert.severity === 1 ? 'high' : alert.severity === 2 ? 'medium' : 'low'}">
-										{alert.severity === 1 ? 'HIGH' : alert.severity === 2 ? 'MED' : 'LOW'}
-									</span>
-									<span class="alert-source-tag">{alert.source}</span>
-									<span class="alert-sig-text">{alert.signature}</span>
-								</div>
-							{/each}
-						</div>
-					{/if}
+					<!-- IDS/SIEM Alerts -->
+					<AlertsPanel alerts={assetAlerts} />
 
 					{#if loadingDeepParse}
 						<div class="detail-loading">Loading deep parse data...</div>
