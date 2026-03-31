@@ -13,6 +13,8 @@
 	import AssetBasicInfoSection from './inventory/AssetBasicInfoSection.svelte';
 	import AssetEditForm from './inventory/AssetEditForm.svelte';
 	import AssetBulkEditPanel from './inventory/AssetBulkEditPanel.svelte';
+	import AssetListPanel from './inventory/AssetListPanel.svelte';
+	import DeepParsePanel from './inventory/DeepParsePanel.svelte';
 
 	const protocols: IcsProtocol[] = ['modbus', 'dnp3', 'ethernet_ip', 'bacnet', 's7comm', 'opc_ua'];
 
@@ -455,13 +457,30 @@
 	{/if}
 
 	<div class="inventory-body">
-		<div class="table-container">
-			{#if $filteredAssets.length === 0}
-				<div class="empty-state">
-					<p>No assets discovered yet. Import a PCAP file to get started.</p>
-				</div>
-			{:else}
-				<table class="asset-table">
+		<!-- Asset List -->
+		<AssetListPanel
+			assets={pagedAssets}
+			filteredCount={$filteredAssets.length}
+			selectedAssetId={$selectedAssetId}
+			{selectedIds}
+			{sortColumn}
+			{sortDirection}
+			{visibleColumns}
+			{showColumnPicker}
+			onSelectAsset={(id) => selectedAssetId.set(id)}
+			onToggleSelect={(id) => toggleSelect(id, new MouseEvent('click'))}
+			onSelectAll={selectAll}
+			onSort={(key) => toggleSort(key)}
+			onToggleColumnVisibility={(key) => toggleColumnVisibility(key)}
+			onToggleColumnPicker={() => { showColumnPicker = !showColumnPicker; }}
+			onPageChange={(page) => { invPage = page; }}
+		/>
+
+		<!-- Detail Panel -->
+		{#if $selectedAsset}
+			<div class="detail-panel" style="display: none">
+				<!-- OLD TABLE CODE REMOVED - NOW USING AssetListPanel COMPONENT -->
+				<table class="asset-table" style="display: none">
 					<thead>
 						<tr>
 							<th class="th-check">
