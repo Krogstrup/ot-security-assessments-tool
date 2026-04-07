@@ -12,6 +12,7 @@ rust-version = "1.77"
 members = [
     ".",
     "crates/gm-constants",
+    "crates/gm-models",
     "crates/gm-capture",
     "crates/gm-parsers",
     "crates/gm-signatures",
@@ -32,6 +33,7 @@ tauri-plugin-shell = "2"
 
 # Workspace crates
 gm-constants = { path = "crates/gm-constants" }
+gm-models = { path = "crates/gm-models" }
 gm-capture = { path = "crates/gm-capture" }
 gm-parsers = { path = "crates/gm-parsers" }
 gm-topology = { path = "crates/gm-topology" }
