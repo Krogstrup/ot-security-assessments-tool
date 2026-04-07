@@ -1,5 +1,8 @@
 import type { DeviceType } from './assets';
 
+// PacketSummary crosses the IPC boundary — re-export from generated binding.
+export type { PacketSummary } from '../../../src-tauri/bindings/gen/types/PacketSummary';
+
 export interface Connection {
 	id: string;
 	src_ip: string;
@@ -15,18 +18,6 @@ export interface Connection {
 	first_seen: string;
 	last_seen: string;
 	origin_files: string[];
-}
-
-/** Packet summary row for connection drilldown. */
-export interface PacketSummary {
-	timestamp: string;
-	src_ip: string;
-	dst_ip: string;
-	src_port: number;
-	dst_port: number;
-	protocol: string;
-	length: number;
-	origin_file: string;
 }
 
 /** Connection tree node grouped by source IP. */

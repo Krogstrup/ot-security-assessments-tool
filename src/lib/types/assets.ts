@@ -1,5 +1,9 @@
 import type { IcsProtocol } from './protocols';
 
+// AssetSignatureMatch crosses the IPC boundary — re-export from generated binding.
+import type { AssetSignatureMatch } from '../../../src-tauri/bindings/gen/types/AssetSignatureMatch';
+export type { AssetSignatureMatch };
+
 export type DeviceType =
 	| 'plc'
 	| 'rtu'
@@ -40,12 +44,3 @@ export interface Asset {
 	is_public_ip: boolean;
 }
 
-/** Signature match result attached to an asset. */
-export interface AssetSignatureMatch {
-	signature_name: string;
-	confidence: number;
-	vendor: string | null;
-	product_family: string | null;
-	device_type: string | null;
-	role: string | null;
-}
