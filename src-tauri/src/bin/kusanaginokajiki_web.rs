@@ -197,7 +197,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let frontend_dist = resolve_frontend_dist(cli.frontend_dist);
     let index_path = frontend_dist.join("index.html");
 
-    let state: SharedState = Arc::new(AppState::new());
+    let state: SharedState = Arc::new(AppState::new(commands::resource_paths::ResourcePaths::from_env()));
 
     let api = Router::new()
         .route("/health", get(health))

@@ -31,8 +31,14 @@ fn main() {
         .setup(move |app| {
             log::info!("Kusanagi Kajiki v{} starting", env!("CARGO_PKG_VERSION"));
 
-            // Initialize application state
-            app.manage(commands::AppState::new());
+            // Initialize application state with Tauri-resolved resource paths
+            let resource_dir = app
+                .path()
+                .resource_dir()
+                .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
+            let paths =
+                commands::resource_paths::ResourcePaths::from_resource_dir(resource_dir);
+            app.manage(commands::AppState::new(paths));
 
             // Store CLI args for deferred processing after window is ready
             app.manage(CliArgs(Mutex::new(cli)));

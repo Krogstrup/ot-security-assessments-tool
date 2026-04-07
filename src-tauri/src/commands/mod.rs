@@ -12,6 +12,7 @@ pub mod physical;
 pub mod processor;
 pub mod projects;
 pub mod protocol_handler;
+pub mod resource_paths;
 pub mod segmentation;
 pub mod session;
 pub mod signatures;
@@ -527,73 +528,47 @@ pub struct PollingInterval {
 }
 
 impl AppState {
-    pub fn new() -> Self {
+    pub fn new(paths: resource_paths::ResourcePaths) -> Self {
         let mut engine = SignatureEngine::new();
 
-        // Load default signatures from the bundled signatures/ directory.
-        // Try multiple paths: relative to binary (production) and relative to src-tauri/ (dev).
-        let signature_dirs = [
-            std::path::PathBuf::from("signatures"),
-            std::path::PathBuf::from("../src-tauri/signatures"),
-            // When running via `cargo tauri dev`, CWD is the project root
-            std::path::PathBuf::from("src-tauri/signatures"),
-        ];
-
-        for dir in &signature_dirs {
-            if dir.exists() {
-                match engine.load_directory(dir) {
-                    Ok(count) => {
-                        log::info!("Loaded {} signatures from {}", count, dir.display());
-                        break;
-                    }
-                    Err(e) => {
-                        log::warn!("Failed to load signatures from {}: {}", dir.display(), e);
-                    }
-                }
+        // Load signatures from the resolved directory.
+        if paths.signatures_dir.exists() {
+            match engine.load_directory(&paths.signatures_dir) {
+                Ok(count) => log::info!(
+                    "Loaded {} signatures from {}",
+                    count,
+                    paths.signatures_dir.display()
+                ),
+                Err(e) => log::warn!(
+                    "Failed to load signatures from {}: {}",
+                    paths.signatures_dir.display(),
+                    e
+                ),
             }
+        } else {
+            log::warn!(
+                "Signatures directory not found: {}",
+                paths.signatures_dir.display()
+            );
         }
 
         // Load OUI database
-        let oui_paths = [
-            std::path::PathBuf::from("data/oui.tsv"),
-            std::path::PathBuf::from("../src-tauri/data/oui.tsv"),
-            std::path::PathBuf::from("src-tauri/data/oui.tsv"),
-        ];
-        let mut oui_lookup = OuiLookup::empty();
-        for path in &oui_paths {
-            if path.exists() {
-                match OuiLookup::load_from_file(path) {
-                    Ok(lookup) => {
-                        oui_lookup = lookup;
-                        break;
-                    }
-                    Err(e) => {
-                        log::warn!("Failed to load OUI from {}: {}", path.display(), e);
-                    }
-                }
-            }
-        }
+        let oui_lookup = OuiLookup::load_from_file(&paths.oui_path)
+            .unwrap_or_else(|e| {
+                log::warn!("Failed to load OUI from {}: {}", paths.oui_path.display(), e);
+                OuiLookup::empty()
+            });
 
         // Load GeoIP database
-        let geoip_paths = [
-            std::path::PathBuf::from("data/dbip-country-lite.mmdb"),
-            std::path::PathBuf::from("../src-tauri/data/dbip-country-lite.mmdb"),
-            std::path::PathBuf::from("src-tauri/data/dbip-country-lite.mmdb"),
-        ];
-        let mut geoip_lookup = GeoIpLookup::empty();
-        for path in &geoip_paths {
-            if path.exists() {
-                match GeoIpLookup::load_from_file(path) {
-                    Ok(lookup) => {
-                        geoip_lookup = lookup;
-                        break;
-                    }
-                    Err(e) => {
-                        log::warn!("Failed to load GeoIP from {}: {}", path.display(), e);
-                    }
-                }
-            }
-        }
+        let geoip_lookup = GeoIpLookup::load_from_file(&paths.geoip_path)
+            .unwrap_or_else(|e| {
+                log::warn!(
+                    "Failed to load GeoIP from {}: {}",
+                    paths.geoip_path.display(),
+                    e
+                );
+                GeoIpLookup::empty()
+            });
 
         // Open SQLite database at ~/.kusanaginokajiki/data.db
         let db = match dirs::home_dir() {
