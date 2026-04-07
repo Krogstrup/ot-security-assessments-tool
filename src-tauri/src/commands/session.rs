@@ -50,46 +50,51 @@ pub async fn save_session(
     description: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<SessionInfo, String> {
-    let inner = state.inner.lock().map_err(|e| e.to_string())?;
+    // Snapshot capture + inventory data before locking the DB (lock order: capture → inventory)
+    let (connections_snap, assets_snap, deep_parse_snap, imported_files_snap) = {
+        let cap = state.capture.read().map_err(|e| e.to_string())?;
+        let inv = state.inventory.read().map_err(|e| e.to_string())?;
+        (
+            cap.connections.clone(),
+            inv.assets.clone(),
+            inv.deep_parse_info.clone(),
+            cap.imported_files.clone(),
+        )
+    };
 
-    let db = inner.db.as_ref().ok_or("Database not available")?;
     let session_id = uuid::Uuid::new_v4().to_string();
     let desc = description.unwrap_or_default();
-
-    // Serialize metadata (deep parse info + imported files)
     let metadata = SessionMetadata {
-        deep_parse_info: inner.deep_parse_info.clone(),
-        imported_files: inner.imported_files.clone(),
+        deep_parse_info: deep_parse_snap,
+        imported_files: imported_files_snap,
     };
     let metadata_json = serde_json::to_string(&metadata).map_err(|e| e.to_string())?;
 
-    // Create session record
+    let sess = state.session.lock().map_err(|e| e.to_string())?;
+    let db = sess.db.as_ref().ok_or("Database not available")?;
+
     let session_row = db
         .create_session(&session_id, &name, &desc, &metadata_json)
         .map_err(|e| e.to_string())?;
 
-    // Insert all assets
-    for asset in &inner.assets {
+    for asset in &assets_snap {
         let row = asset_info_to_row(asset, &session_id);
         db.insert_asset(&row).map_err(|e| e.to_string())?;
     }
 
-    // Insert all connections
-    for conn in &inner.connections {
+    for conn in &connections_snap {
         let row = connection_info_to_row(conn, &session_id);
         db.insert_connection(&row).map_err(|e| e.to_string())?;
     }
 
-    // Update counts
     db.update_session_counts(
         &session_id,
-        inner.assets.len() as i64,
-        inner.connections.len() as i64,
+        assets_snap.len() as i64,
+        connections_snap.len() as i64,
     )
     .map_err(|e| e.to_string())?;
 
-    // Scope to active project if one is set
-    if let Some(project_id) = inner.current_project_id {
+    if let Some(project_id) = sess.current_project_id {
         db.assign_session_to_project(&session_id, project_id)
             .map_err(|e| e.to_string())?;
     }
@@ -98,8 +103,8 @@ pub async fn save_session(
         "Saved session '{}' ({}) with {} assets, {} connections",
         name,
         session_id,
-        inner.assets.len(),
-        inner.connections.len()
+        assets_snap.len(),
+        connections_snap.len()
     );
 
     Ok(SessionInfo {
@@ -108,8 +113,8 @@ pub async fn save_session(
         description: session_row.description,
         created_at: session_row.created_at,
         updated_at: session_row.updated_at,
-        asset_count: inner.assets.len() as i64,
-        connection_count: inner.connections.len() as i64,
+        asset_count: assets_snap.len() as i64,
+        connection_count: connections_snap.len() as i64,
     })
 }
 
@@ -119,32 +124,33 @@ pub async fn load_session(
     session_id: String,
     state: State<'_, AppState>,
 ) -> Result<SessionInfo, String> {
-    let mut inner = state.inner.lock().map_err(|e| e.to_string())?;
+    // Step 1: load all data from DB (session domain only)
+    let (session_row, metadata, assets, connections) = {
+        let sess = state.session.lock().map_err(|e| e.to_string())?;
+        let db = sess.db.as_ref().ok_or("Database not available")?;
 
-    let db = inner.db.as_ref().ok_or("Database not available")?;
+        let session_row = db.get_session(&session_id).map_err(|e| e.to_string())?;
+        let metadata: SessionMetadata =
+            serde_json::from_str(&session_row.metadata).unwrap_or(SessionMetadata {
+                deep_parse_info: HashMap::new(),
+                imported_files: Vec::new(),
+            });
+        let assets: Vec<AssetInfo> = db
+            .list_assets(&session_id)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(row_to_asset_info)
+            .collect();
+        let connections: Vec<ConnectionInfo> = db
+            .list_connections(&session_id)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(row_to_connection_info)
+            .collect();
+        (session_row, metadata, assets, connections)
+    };
 
-    // Load session record
-    let session_row = db.get_session(&session_id).map_err(|e| e.to_string())?;
-
-    // Parse metadata
-    let metadata: SessionMetadata =
-        serde_json::from_str(&session_row.metadata).unwrap_or(SessionMetadata {
-            deep_parse_info: HashMap::new(),
-            imported_files: Vec::new(),
-        });
-
-    // Load assets from DB
-    let asset_rows = db.list_assets(&session_id).map_err(|e| e.to_string())?;
-    let assets: Vec<AssetInfo> = asset_rows.into_iter().map(row_to_asset_info).collect();
-
-    // Load connections from DB
-    let conn_rows = db
-        .list_connections(&session_id)
-        .map_err(|e| e.to_string())?;
-    let connections: Vec<ConnectionInfo> =
-        conn_rows.into_iter().map(row_to_connection_info).collect();
-
-    // Rebuild topology from loaded connections
+    // Step 2: rebuild topology (no state access needed)
     let mut topo_builder = TopologyBuilder::new();
     for conn in &connections {
         let protocol = gm_parsers::IcsProtocol::from_name(&conn.protocol);
@@ -159,15 +165,24 @@ pub async fn load_session(
     }
     let topology = topo_builder.snapshot();
 
-    // Replace state (preserve signature_engine, oui_lookup, geoip_lookup, db)
-    inner.topology = topology;
-    inner.assets = assets;
-    inner.connections = connections;
-    inner.packet_summaries = HashMap::new(); // Not persisted (too large)
-    inner.imported_files = metadata.imported_files;
-    inner.deep_parse_info = metadata.deep_parse_info;
-    inner.current_session_id = Some(session_id.clone());
-    inner.current_session_name = Some(session_row.name.clone());
+    // Step 3: write to each domain (capture → inventory → session)
+    {
+        let mut cap = state.capture.write().map_err(|e| e.to_string())?;
+        cap.topology = topology;
+        cap.connections = connections;
+        cap.packet_summaries = HashMap::new(); // Not persisted (too large)
+        cap.imported_files = metadata.imported_files;
+    }
+    {
+        let mut inv = state.inventory.write().map_err(|e| e.to_string())?;
+        inv.assets = assets;
+        inv.deep_parse_info = metadata.deep_parse_info;
+    }
+    {
+        let mut sess = state.session.lock().map_err(|e| e.to_string())?;
+        sess.current_session_id = Some(session_id.clone());
+        sess.current_session_name = Some(session_row.name.clone());
+    }
 
     log::info!("Loaded session '{}' ({})", session_row.name, session_id);
 
@@ -185,10 +200,10 @@ pub async fn load_session(
 /// List saved sessions. When a project is active, returns only that project's sessions.
 #[tauri::command]
 pub async fn list_sessions(state: State<'_, AppState>) -> Result<Vec<SessionInfo>, String> {
-    let inner = state.inner.lock().map_err(|e| e.to_string())?;
-    let db = inner.db.as_ref().ok_or("Database not available")?;
+    let sess = state.session.lock().map_err(|e| e.to_string())?;
+    let db = sess.db.as_ref().ok_or("Database not available")?;
 
-    let rows = match inner.current_project_id {
+    let rows = match sess.current_project_id {
         Some(project_id) => db
             .list_sessions_for_project(project_id)
             .map_err(|e| e.to_string())?,
@@ -212,8 +227,8 @@ pub async fn list_sessions(state: State<'_, AppState>) -> Result<Vec<SessionInfo
 /// Delete a session by ID.
 #[tauri::command]
 pub async fn delete_session(session_id: String, state: State<'_, AppState>) -> Result<(), String> {
-    let inner = state.inner.lock().map_err(|e| e.to_string())?;
-    let db = inner.db.as_ref().ok_or("Database not available")?;
+    let sess = state.session.lock().map_err(|e| e.to_string())?;
+    let db = sess.db.as_ref().ok_or("Database not available")?;
     db.delete_session(&session_id).map_err(|e| e.to_string())?;
     log::info!("Deleted session {}", session_id);
     Ok(())
@@ -228,39 +243,40 @@ pub async fn update_asset(
     updates: AssetUpdate,
     state: State<'_, AppState>,
 ) -> Result<AssetInfo, String> {
-    let mut inner = state.inner.lock().map_err(|e| e.to_string())?;
+    // Step 1: update asset in inventory domain
+    let updated = {
+        let mut inv = state.inventory.write().map_err(|e| e.to_string())?;
+        let asset = inv
+            .assets
+            .iter_mut()
+            .find(|a| a.id == asset_id)
+            .ok_or_else(|| format!("Asset {} not found", asset_id))?;
 
-    // Find and update the asset in memory
-    let asset = inner
-        .assets
-        .iter_mut()
-        .find(|a| a.id == asset_id)
-        .ok_or_else(|| format!("Asset {} not found", asset_id))?;
+        if let Some(ref dt) = updates.device_type {
+            asset.device_type = dt.clone();
+        }
+        if let Some(ref hostname) = updates.hostname {
+            asset.hostname = if hostname.is_empty() {
+                None
+            } else {
+                Some(hostname.clone())
+            };
+        }
+        if let Some(ref notes) = updates.notes {
+            asset.notes = notes.clone();
+        }
+        if let Some(level) = updates.purdue_level {
+            asset.purdue_level = if level > 5 { None } else { Some(level) };
+        }
+        if let Some(ref tags) = updates.tags {
+            asset.tags = tags.clone();
+        }
+        asset.clone()
+    };
 
-    if let Some(ref dt) = updates.device_type {
-        asset.device_type = dt.clone();
-    }
-    if let Some(ref hostname) = updates.hostname {
-        asset.hostname = if hostname.is_empty() {
-            None
-        } else {
-            Some(hostname.clone())
-        };
-    }
-    if let Some(ref notes) = updates.notes {
-        asset.notes = notes.clone();
-    }
-    if let Some(level) = updates.purdue_level {
-        asset.purdue_level = if level > 5 { None } else { Some(level) };
-    }
-    if let Some(ref tags) = updates.tags {
-        asset.tags = tags.clone();
-    }
-
-    let updated = asset.clone();
-
-    // Persist to DB if a session is loaded
-    if let (Some(ref db), Some(ref _session_id)) = (&inner.db, &inner.current_session_id) {
+    // Step 2: persist to DB if a session is loaded (session domain)
+    let sess = state.session.lock().map_err(|e| e.to_string())?;
+    if let (Some(ref db), Some(ref _session_id)) = (&sess.db, &sess.current_session_id) {
         if let Some(ref dt) = updates.device_type {
             let _ = db.update_asset_field(&asset_id, "device_type", dt);
         }
@@ -289,36 +305,40 @@ pub async fn bulk_update_assets(
     updates: AssetUpdate,
     state: State<'_, AppState>,
 ) -> Result<usize, String> {
-    let mut inner = state.inner.lock().map_err(|e| e.to_string())?;
-
-    let mut count = 0;
-    for asset in &mut inner.assets {
-        if asset_ids.contains(&asset.id) {
-            if let Some(ref dt) = updates.device_type {
-                asset.device_type = dt.clone();
+    // Step 1: update assets in inventory domain
+    let count = {
+        let mut inv = state.inventory.write().map_err(|e| e.to_string())?;
+        let mut count = 0;
+        for asset in &mut inv.assets {
+            if asset_ids.contains(&asset.id) {
+                if let Some(ref dt) = updates.device_type {
+                    asset.device_type = dt.clone();
+                }
+                if let Some(ref hostname) = updates.hostname {
+                    asset.hostname = if hostname.is_empty() {
+                        None
+                    } else {
+                        Some(hostname.clone())
+                    };
+                }
+                if let Some(ref notes) = updates.notes {
+                    asset.notes = notes.clone();
+                }
+                if let Some(level) = updates.purdue_level {
+                    asset.purdue_level = if level > 5 { None } else { Some(level) };
+                }
+                if let Some(ref tags) = updates.tags {
+                    asset.tags = tags.clone();
+                }
+                count += 1;
             }
-            if let Some(ref hostname) = updates.hostname {
-                asset.hostname = if hostname.is_empty() {
-                    None
-                } else {
-                    Some(hostname.clone())
-                };
-            }
-            if let Some(ref notes) = updates.notes {
-                asset.notes = notes.clone();
-            }
-            if let Some(level) = updates.purdue_level {
-                asset.purdue_level = if level > 5 { None } else { Some(level) };
-            }
-            if let Some(ref tags) = updates.tags {
-                asset.tags = tags.clone();
-            }
-            count += 1;
         }
-    }
+        count
+    };
 
-    // Persist to DB if session is loaded
-    if let (Some(ref db), Some(ref _session_id)) = (&inner.db, &inner.current_session_id) {
+    // Step 2: persist to DB if session is loaded (session domain)
+    let sess = state.session.lock().map_err(|e| e.to_string())?;
+    if let (Some(ref db), Some(ref _session_id)) = (&sess.db, &sess.current_session_id) {
         if let Some(ref dt) = updates.device_type {
             let _ = db.bulk_update_asset_field(&asset_ids, "device_type", dt);
         }
@@ -339,8 +359,8 @@ pub async fn export_session_archive(
     output_path: String,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let inner = state.inner.lock().map_err(|e| e.to_string())?;
-    let db = inner.db.as_ref().ok_or("Database not available")?;
+    let sess = state.session.lock().map_err(|e| e.to_string())?;
+    let db = sess.db.as_ref().ok_or("Database not available")?;
 
     // Load session data from DB
     let session = db.get_session(&session_id).map_err(|e| e.to_string())?;
@@ -441,56 +461,49 @@ pub async fn import_session_archive(
     let connections: Vec<ConnectionRow> =
         serde_json::from_value(session_json["connections"].clone()).unwrap_or_default();
 
-    // Save to database with a new session ID
-    let mut inner = state.inner.lock().map_err(|e| e.to_string())?;
-    let db = inner.db.as_ref().ok_or("Database not available")?;
+    // Save to database and load data back (session domain only)
+    let (new_session_id, session_row, asset_count, conn_count, metadata, assets_vec, conns_vec) = {
+        let sess = state.session.lock().map_err(|e| e.to_string())?;
+        let db = sess.db.as_ref().ok_or("Database not available")?;
 
-    let new_session_id = uuid::Uuid::new_v4().to_string();
-    db.create_session(&new_session_id, &session_name, &session_desc, &metadata_str)
-        .map_err(|e| e.to_string())?;
+        let new_session_id = uuid::Uuid::new_v4().to_string();
+        db.create_session(&new_session_id, &session_name, &session_desc, &metadata_str)
+            .map_err(|e| e.to_string())?;
 
-    for mut asset in assets {
-        asset.session_id = new_session_id.clone();
-        db.insert_asset(&asset).map_err(|e| e.to_string())?;
-    }
+        for mut asset in assets {
+            asset.session_id = new_session_id.clone();
+            db.insert_asset(&asset).map_err(|e| e.to_string())?;
+        }
 
-    for mut conn in connections {
-        conn.session_id = new_session_id.clone();
-        db.insert_connection(&conn).map_err(|e| e.to_string())?;
-    }
+        for mut conn in connections {
+            conn.session_id = new_session_id.clone();
+            db.insert_connection(&conn).map_err(|e| e.to_string())?;
+        }
 
-    let session = db.get_session(&new_session_id).map_err(|e| e.to_string())?;
-    let asset_count = db
-        .list_assets(&new_session_id)
-        .map_err(|e| e.to_string())?
-        .len() as i64;
-    let conn_count = db
-        .list_connections(&new_session_id)
-        .map_err(|e| e.to_string())?
-        .len() as i64;
+        let session_row = db.get_session(&new_session_id).map_err(|e| e.to_string())?;
+        let loaded_assets = db.list_assets(&new_session_id).map_err(|e| e.to_string())?;
+        let loaded_conns = db
+            .list_connections(&new_session_id)
+            .map_err(|e| e.to_string())?;
+        let asset_count = loaded_assets.len() as i64;
+        let conn_count = loaded_conns.len() as i64;
 
-    db.update_session_counts(&new_session_id, asset_count, conn_count)
-        .map_err(|e| e.to_string())?;
+        db.update_session_counts(&new_session_id, asset_count, conn_count)
+            .map_err(|e| e.to_string())?;
 
-    // Also load the imported session into current state
-    let metadata: SessionMetadata =
-        serde_json::from_str(&metadata_str).unwrap_or(SessionMetadata {
-            deep_parse_info: HashMap::new(),
-            imported_files: Vec::new(),
-        });
+        let metadata: SessionMetadata =
+            serde_json::from_str(&metadata_str).unwrap_or(SessionMetadata {
+                deep_parse_info: HashMap::new(),
+                imported_files: Vec::new(),
+            });
+        let assets_vec: Vec<AssetInfo> =
+            loaded_assets.into_iter().map(row_to_asset_info).collect();
+        let conns_vec: Vec<ConnectionInfo> =
+            loaded_conns.into_iter().map(row_to_connection_info).collect();
+        (new_session_id, session_row, asset_count, conn_count, metadata, assets_vec, conns_vec)
+    };
 
-    let loaded_assets = db.list_assets(&new_session_id).map_err(|e| e.to_string())?;
-    let loaded_conns = db
-        .list_connections(&new_session_id)
-        .map_err(|e| e.to_string())?;
-
-    let assets_vec: Vec<AssetInfo> = loaded_assets.into_iter().map(row_to_asset_info).collect();
-    let conns_vec: Vec<ConnectionInfo> = loaded_conns
-        .into_iter()
-        .map(row_to_connection_info)
-        .collect();
-
-    // Rebuild topology
+    // Rebuild topology (no state access)
     let mut topo_builder = TopologyBuilder::new();
     for conn in &conns_vec {
         let protocol = gm_parsers::IcsProtocol::from_name(&conn.protocol);
@@ -504,14 +517,24 @@ pub async fn import_session_archive(
         );
     }
 
-    inner.topology = topo_builder.snapshot();
-    inner.assets = assets_vec;
-    inner.connections = conns_vec;
-    inner.packet_summaries = HashMap::new();
-    inner.imported_files = metadata.imported_files;
-    inner.deep_parse_info = metadata.deep_parse_info;
-    inner.current_session_id = Some(new_session_id);
-    inner.current_session_name = Some(session_name.clone());
+    // Write to each domain (capture → inventory → session)
+    {
+        let mut cap = state.capture.write().map_err(|e| e.to_string())?;
+        cap.topology = topo_builder.snapshot();
+        cap.connections = conns_vec;
+        cap.packet_summaries = HashMap::new();
+        cap.imported_files = metadata.imported_files;
+    }
+    {
+        let mut inv = state.inventory.write().map_err(|e| e.to_string())?;
+        inv.assets = assets_vec;
+        inv.deep_parse_info = metadata.deep_parse_info;
+    }
+    {
+        let mut sess = state.session.lock().map_err(|e| e.to_string())?;
+        sess.current_session_id = Some(new_session_id);
+        sess.current_session_name = Some(session_name.clone());
+    }
 
     log::info!(
         "Imported session archive '{}' from {}",
@@ -520,11 +543,11 @@ pub async fn import_session_archive(
     );
 
     Ok(SessionInfo {
-        id: session.id,
-        name: session.name,
-        description: session.description,
-        created_at: session.created_at,
-        updated_at: session.updated_at,
+        id: session_row.id,
+        name: session_row.name,
+        description: session_row.description,
+        created_at: session_row.created_at,
+        updated_at: session_row.updated_at,
         asset_count,
         connection_count: conn_count,
     })

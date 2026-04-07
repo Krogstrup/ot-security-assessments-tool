@@ -13,14 +13,20 @@ use gm_segmentation::{
     SecurityFinding, SegmentationInput, SegmentationReport,
 };
 
-use super::AppState;
+use super::{AnalysisState, AppState, CaptureState, InventoryState};
 
 // ── Input builder ─────────────────────────────────────────────────────────────
 
-/// Assemble a `SegmentationInput` from current AppState.
-fn build_segmentation_input(state: &super::AppStateInner) -> SegmentationInput {
+/// Assemble a `SegmentationInput` from domain state slices.
+///
+/// Lock order for callers: capture → inventory → analysis
+fn build_segmentation_input(
+    capture: &CaptureState,
+    inventory: &InventoryState,
+    analysis: &AnalysisState,
+) -> SegmentationInput {
     // ── Assets → AssetProfile ─────────────────────────────────────────────────
-    let assets: Vec<AssetProfile> = state
+    let assets: Vec<AssetProfile> = inventory
         .assets
         .iter()
         .map(|a| {
@@ -59,7 +65,7 @@ fn build_segmentation_input(state: &super::AppStateInner) -> SegmentationInput {
 
             // Build ProtocolRoles from deep parse info.
             let mut protocol_roles: Vec<ProtocolRole> = Vec::new();
-            if let Some(dp) = state.deep_parse_info.get(&a.ip_address) {
+            if let Some(dp) = inventory.deep_parse_info.get(&a.ip_address) {
                 if let Some(m) = &dp.modbus {
                     protocol_roles.push(ProtocolRole {
                         protocol: "modbus".to_string(),
@@ -120,17 +126,17 @@ fn build_segmentation_input(state: &super::AppStateInner) -> SegmentationInput {
 
     // ── Connections → ObservedConnection ─────────────────────────────────────
     // Build a lookup by (src_ip, dst_ip, dst_port) for comm_stats and deep parse.
-    let stats_map: HashMap<(&str, &str, u16), &gm_analysis::ConnectionStats> = state
+    let stats_map: HashMap<(&str, &str, u16), &gm_analysis::ConnectionStats> = analysis
         .connection_stats
         .iter()
         .map(|s| (s.src_ip.as_str(), s.dst_ip.as_str(), s.port))
-        .zip(state.connection_stats.iter())
+        .zip(analysis.connection_stats.iter())
         .collect();
 
     // Build write/config flag lookup from deep parse.
     let mut write_ops_set: HashSet<String> = HashSet::new();
     let mut config_ops_set: HashSet<String> = HashSet::new();
-    for (ip, dp) in &state.deep_parse_info {
+    for (ip, dp) in &inventory.deep_parse_info {
         if let Some(m) = &dp.modbus {
             let has_write = m.function_codes.iter().any(|fc| fc.is_write);
             if has_write {
@@ -165,7 +171,7 @@ fn build_segmentation_input(state: &super::AppStateInner) -> SegmentationInput {
     // Build allowlist set for is_in_allowlist.
     let allowlist_set: HashSet<String> = {
         use gm_analysis::{generate_allowlist, AssetSnapshot, ConnectionSnapshot};
-        let asset_snaps: Vec<AssetSnapshot> = state
+        let asset_snaps: Vec<AssetSnapshot> = inventory
             .assets
             .iter()
             .map(|a| AssetSnapshot {
@@ -180,7 +186,7 @@ fn build_segmentation_input(state: &super::AppStateInner) -> SegmentationInput {
                 product_family: a.product_family.clone(),
             })
             .collect();
-        let conn_snaps: Vec<ConnectionSnapshot> = state
+        let conn_snaps: Vec<ConnectionSnapshot> = capture
             .connections
             .iter()
             .map(|c| ConnectionSnapshot {
@@ -192,14 +198,14 @@ fn build_segmentation_input(state: &super::AppStateInner) -> SegmentationInput {
                 packet_count: c.packet_count,
             })
             .collect();
-        let entries = generate_allowlist(&conn_snaps, &asset_snaps, &state.connection_stats);
+        let entries = generate_allowlist(&conn_snaps, &asset_snaps, &analysis.connection_stats);
         entries
             .iter()
             .map(|e| format!("{}→{}:{}:{}", e.src_ip, e.dst_ip, e.protocol, e.dst_port))
             .collect()
     };
 
-    let connections: Vec<ObservedConnection> = state
+    let connections: Vec<ObservedConnection> = capture
         .connections
         .iter()
         .map(|c| {
@@ -207,7 +213,7 @@ fn build_segmentation_input(state: &super::AppStateInner) -> SegmentationInput {
                 .get(&(c.src_ip.as_str(), c.dst_ip.as_str(), c.dst_port))
                 .copied();
             let is_periodic = stat.map(|s| s.is_periodic).unwrap_or(false);
-            let pattern_anomaly = state
+            let pattern_anomaly = analysis
                 .pattern_anomalies
                 .iter()
                 .any(|pa| pa.src_ip == c.src_ip && pa.dst_ip == c.dst_ip && pa.port == c.dst_port);
@@ -241,7 +247,7 @@ fn build_segmentation_input(state: &super::AppStateInner) -> SegmentationInput {
         .collect();
 
     // ── SecurityFindings ──────────────────────────────────────────────────────
-    let findings: Vec<SecurityFinding> = state
+    let findings: Vec<SecurityFinding> = analysis
         .findings
         .iter()
         .map(|f| SecurityFinding {
@@ -277,15 +283,24 @@ fn compute_subnet_24(ip: &str) -> Option<String> {
 ///
 /// The result is cached in AppState for subsequent `export_enforcement_config`
 /// calls without re-running analysis.
+///
+/// Lock order: capture → inventory → analysis (read), then segmentation (write).
 #[tauri::command]
 pub fn run_segmentation(state: State<'_, AppState>) -> Result<SegmentationReport, String> {
-    let mut inner = state.inner.lock().map_err(|e| e.to_string())?;
+    let capture = state.capture.read().map_err(|e| e.to_string())?;
+    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
+    let analysis = state.analysis.read().map_err(|e| e.to_string())?;
 
-    let input = build_segmentation_input(&inner);
+    let input = build_segmentation_input(&capture, &inventory, &analysis);
     let report = run_segmentation_analysis(&input);
 
+    drop(capture);
+    drop(inventory);
+    drop(analysis);
+
     // Cache the report.
-    inner.segmentation_report = Some(report.clone());
+    let mut seg = state.segmentation.write().map_err(|e| e.to_string())?;
+    seg.segmentation_report = Some(report.clone());
 
     log::info!(
         "Segmentation analysis complete: {} groups, {} zones, {} conduits, {} rules",
@@ -307,9 +322,9 @@ pub fn export_enforcement_config(
     format: String,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let inner = state.inner.lock().map_err(|e| e.to_string())?;
+    let seg = state.segmentation.read().map_err(|e| e.to_string())?;
 
-    let report = inner.segmentation_report.as_ref().ok_or_else(|| {
+    let report = seg.segmentation_report.as_ref().ok_or_else(|| {
         "No segmentation report available. Run segmentation analysis first.".to_string()
     })?;
 
@@ -327,11 +342,13 @@ pub fn export_enforcement_config(
 /// Parse enforcement format string to enum.
 fn parse_enforcement_format(s: &str) -> Result<EnforcementFormat, String> {
     match s {
-        "cisco_ios_acl" => Ok(EnforcementFormat::CiscoIosAcl),
+        "cisco_ios_acl" | "cisco_acl" => Ok(EnforcementFormat::CiscoIosAcl),
         "cisco_asa_acl" => Ok(EnforcementFormat::CiscoAsaAcl),
-        "generic_firewall_table" => Ok(EnforcementFormat::GenericFirewallTable),
+        "generic_firewall_table" | "palo_alto" | "fortinet" | "iptables" | "windows_firewall" => {
+            Ok(EnforcementFormat::GenericFirewallTable)
+        }
         "suricata_rules" => Ok(EnforcementFormat::SuricataRules),
         "json_policy" => Ok(EnforcementFormat::JsonPolicy),
-        other => Err(format!("Unknown enforcement format: '{other}'. Valid values: cisco_ios_acl, cisco_asa_acl, generic_firewall_table, suricata_rules, json_policy")),
+        other => Err(format!("Unknown enforcement format: '{other}'")),
     }
 }

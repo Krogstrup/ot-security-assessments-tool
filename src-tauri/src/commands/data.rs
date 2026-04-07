@@ -22,8 +22,8 @@ const MAX_TOPOLOGY_EDGES: usize = 20_000;
 /// For smaller datasets the full graph is returned unchanged.
 #[tauri::command]
 pub fn get_topology(state: State<'_, AppState>) -> Result<TopologyGraph, String> {
-    let state_inner = state.inner.lock().map_err(|e| e.to_string())?;
-    let topo = &state_inner.topology;
+    let capture = state.capture.read().map_err(|e| e.to_string())?;
+    let topo = &capture.topology;
 
     if topo.nodes.len() <= MAX_TOPOLOGY_NODES && topo.edges.len() <= MAX_TOPOLOGY_EDGES {
         return Ok(topo.clone());
@@ -92,12 +92,12 @@ pub fn get_assets(
     page_size: Option<usize>,
     sort_by: Option<String>,
 ) -> Result<AssetPage, String> {
-    let state_inner = state.inner.lock().map_err(|e| e.to_string())?;
+    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
 
     let page = page.unwrap_or(0);
     let page_size = page_size.unwrap_or(200);
 
-    let mut all_assets = state_inner.assets.clone();
+    let mut all_assets = inventory.assets.clone();
     let total = all_assets.len();
 
     // Sort
@@ -145,12 +145,12 @@ pub fn get_connections(
     page_size: Option<usize>,
     sort_by: Option<String>,
 ) -> Result<ConnectionPage, String> {
-    let state_inner = state.inner.lock().map_err(|e| e.to_string())?;
+    let capture = state.capture.read().map_err(|e| e.to_string())?;
 
     let page = page.unwrap_or(0);
     let page_size = page_size.unwrap_or(500);
 
-    let mut all_connections = state_inner.connections.clone();
+    let mut all_connections = capture.connections.clone();
     let total = all_connections.len();
 
     match sort_by.as_deref() {
@@ -189,10 +189,11 @@ pub fn get_connections(
 /// This avoids serializing the full dataset just to show totals.
 #[tauri::command]
 pub fn get_data_counts(state: State<'_, AppState>) -> Result<DataCounts, String> {
-    let state_inner = state.inner.lock().map_err(|e| e.to_string())?;
+    let asset_count = state.inventory.read().map_err(|e| e.to_string())?.assets.len();
+    let connection_count = state.capture.read().map_err(|e| e.to_string())?.connections.len();
     Ok(DataCounts {
-        asset_count: state_inner.assets.len(),
-        connection_count: state_inner.connections.len(),
+        asset_count,
+        connection_count,
     })
 }
 
@@ -203,13 +204,13 @@ pub fn get_data_counts(state: State<'_, AppState>) -> Result<DataCounts, String>
 /// double-loop.
 #[tauri::command]
 pub fn get_protocol_stats(state: State<'_, AppState>) -> Result<Vec<ProtocolStatInfo>, String> {
-    let state_inner = state.inner.lock().map_err(|e| e.to_string())?;
+    let capture = state.capture.read().map_err(|e| e.to_string())?;
 
     let mut stats: HashMap<String, ProtocolStatInfo> = HashMap::new();
     // Track unique devices per protocol in the same pass.
     let mut devices_per_proto: HashMap<String, HashSet<String>> = HashMap::new();
 
-    for conn in &state_inner.connections {
+    for conn in &capture.connections {
         let entry = stats
             .entry(conn.protocol.clone())
             .or_insert_with(|| ProtocolStatInfo {
@@ -249,8 +250,8 @@ pub fn get_connection_packets(
     connection_id: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<PacketSummary>, String> {
-    let state_inner = state.inner.lock().map_err(|e| e.to_string())?;
-    Ok(state_inner
+    let capture = state.capture.read().map_err(|e| e.to_string())?;
+    Ok(capture
         .packet_summaries
         .get(&connection_id)
         .cloned()
@@ -266,8 +267,8 @@ pub fn get_deep_parse_info(
     ip_address: String,
     state: State<'_, AppState>,
 ) -> Result<Option<DeepParseInfo>, String> {
-    let state_inner = state.inner.lock().map_err(|e| e.to_string())?;
-    Ok(state_inner.deep_parse_info.get(&ip_address).cloned())
+    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
+    Ok(inventory.deep_parse_info.get(&ip_address).cloned())
 }
 
 /// Get function code distribution across all protocols.
@@ -278,12 +279,12 @@ pub fn get_deep_parse_info(
 pub fn get_function_code_stats(
     state: State<'_, AppState>,
 ) -> Result<HashMap<String, Vec<FunctionCodeStat>>, String> {
-    let state_inner = state.inner.lock().map_err(|e| e.to_string())?;
+    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
 
     let mut modbus_fcs: HashMap<u8, u64> = HashMap::new();
     let mut dnp3_fcs: HashMap<u8, u64> = HashMap::new();
 
-    for info in state_inner.deep_parse_info.values() {
+    for info in inventory.deep_parse_info.values() {
         if let Some(ref modbus) = info.modbus {
             for fc in &modbus.function_codes {
                 *modbus_fcs.entry(fc.code).or_insert(0) += fc.count;
@@ -347,12 +348,12 @@ pub struct TimelineRange {
 /// Scans all connections (not capped) to ensure accurate bounds.
 #[tauri::command]
 pub fn get_timeline_range(state: State<'_, AppState>) -> Result<TimelineRange, String> {
-    let state_inner = state.inner.lock().map_err(|e| e.to_string())?;
+    let capture = state.capture.read().map_err(|e| e.to_string())?;
 
     let mut earliest: Option<&str> = None;
     let mut latest: Option<&str> = None;
 
-    for conn in &state_inner.connections {
+    for conn in &capture.connections {
         let fs = conn.first_seen.as_str();
         let ls = conn.last_seen.as_str();
 
@@ -371,6 +372,6 @@ pub fn get_timeline_range(state: State<'_, AppState>) -> Result<TimelineRange, S
     Ok(TimelineRange {
         earliest: earliest.map(|s| s.to_string()),
         latest: latest.map(|s| s.to_string()),
-        connection_count: state_inner.connections.len(),
+        connection_count: capture.connections.len(),
     })
 }

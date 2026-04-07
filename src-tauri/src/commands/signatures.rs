@@ -66,8 +66,8 @@ pub struct TestResultInfo {
 /// Get all loaded signatures.
 #[tauri::command]
 pub fn get_signatures(state: State<'_, AppState>) -> Result<SignatureSummary, String> {
-    let state_inner = state.inner.lock().map_err(|e| e.to_string())?;
-    let sigs: Vec<SignatureInfo> = state_inner
+    let sigs_state = state.signatures.read().map_err(|e| e.to_string())?;
+    let sigs: Vec<SignatureInfo> = sigs_state
         .signature_engine
         .signatures()
         .iter()
@@ -83,8 +83,8 @@ pub fn get_signatures(state: State<'_, AppState>) -> Result<SignatureSummary, St
 /// Reload signatures from disk.
 #[tauri::command]
 pub fn reload_signatures(state: State<'_, AppState>) -> Result<usize, String> {
-    let mut state_inner = state.inner.lock().map_err(|e| e.to_string())?;
-    let count = state_inner
+    let mut sigs_state = state.signatures.write().map_err(|e| e.to_string())?;
+    let count = sigs_state
         .signature_engine
         .reload()
         .map_err(|e| e.to_string())?;
@@ -101,14 +101,17 @@ pub fn test_signature(
     yaml: String,
     state: State<'_, AppState>,
 ) -> Result<SignatureTestResult, String> {
-    let state_inner = state.inner.lock().map_err(|e| e.to_string())?;
+    // Lock order: capture → signatures (no shared lock ordering issue since
+    // signatures is always acquired after capture in all command paths)
+    let capture = state.capture.read().map_err(|e| e.to_string())?;
+    let sigs_state = state.signatures.read().map_err(|e| e.to_string())?;
 
     // Build PacketData from stored connections for testing.
     // We don't have full payload data in packet summaries (they're lightweight),
     // so we create basic PacketData from connection info for filter testing.
     let mut test_packets: Vec<PacketData> = Vec::new();
 
-    for conn in &state_inner.connections {
+    for conn in &capture.connections {
         test_packets.push(PacketData {
             src_ip: conn.src_ip.clone(),
             dst_ip: conn.dst_ip.clone(),
@@ -123,7 +126,7 @@ pub fn test_signature(
         });
     }
 
-    let results = state_inner
+    let results = sigs_state
         .signature_engine
         .test_signature(&yaml, &test_packets)
         .map_err(|e| e.to_string())?;

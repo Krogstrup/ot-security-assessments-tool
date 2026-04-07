@@ -157,12 +157,13 @@ pub async fn import_pcap(
 
     // Lock state to run signature matching (needs SignatureEngine + OUI + GeoIP)
     let (assets, sig_results) = {
-        let state_inner = state.inner.lock().map_err(|e| e.to_string())?;
+        let sigs = state.signatures.read().map_err(|e| e.to_string())?;
+        let inv = state.inventory.read().map_err(|e| e.to_string())?;
         processor.build_assets(
-            &state_inner.signature_engine,
+            &sigs.signature_engine,
             &deep_parse_info,
-            &state_inner.oui_lookup,
-            &state_inner.geoip_lookup,
+            &inv.oui_lookup,
+            &inv.geoip_lookup,
         )
     };
 
@@ -197,18 +198,26 @@ pub async fn import_pcap(
         .map(|f| f.filename.clone())
         .collect();
 
-    let mut state_inner = state.inner.lock().map_err(|e| e.to_string())?;
-    state_inner.topology = topology;
-    state_inner.assets = assets;
-    state_inner.connections = connection_list;
-    state_inner.packet_summaries = packet_summaries;
-    state_inner.deep_parse_info = deep_parse_info;
-    state_inner.connection_stats = connection_stats;
-    state_inner.pattern_anomalies = pattern_anomalies;
-    state_inner.redundancy_protocols = redundancy_protocols;
-    state_inner.imported_files.extend(imported_files);
-    state_inner.imported_files.sort();
-    state_inner.imported_files.dedup();
+    {
+        let mut cap = state.capture.write().map_err(|e| e.to_string())?;
+        cap.topology = topology;
+        cap.connections = connection_list;
+        cap.packet_summaries = packet_summaries;
+        cap.redundancy_protocols = redundancy_protocols;
+        cap.imported_files.extend(imported_files);
+        cap.imported_files.sort();
+        cap.imported_files.dedup();
+    }
+    {
+        let mut inv = state.inventory.write().map_err(|e| e.to_string())?;
+        inv.assets = assets;
+        inv.deep_parse_info = deep_parse_info;
+    }
+    {
+        let mut analysis = state.analysis.write().map_err(|e| e.to_string())?;
+        analysis.connection_stats = connection_stats;
+        analysis.pattern_anomalies = pattern_anomalies;
+    }
 
     let duration_ms = start.elapsed().as_millis() as u64;
 
@@ -279,8 +288,8 @@ pub async fn start_capture(
 ) -> Result<(), String> {
     // Check if a capture is already running
     {
-        let inner = state.inner.lock().map_err(|e| e.to_string())?;
-        if inner.live_capture.is_some() {
+        let cap = state.capture.read().map_err(|e| e.to_string())?;
+        if cap.live_capture.is_some() {
             return Err("A capture is already running. Stop it first.".to_string());
         }
     }
@@ -306,9 +315,9 @@ pub async fn start_capture(
     let processing_handle = spawn_processing_thread(rx, app);
 
     // Store handles in app state
-    let mut inner = state.inner.lock().map_err(|e| e.to_string())?;
-    inner.live_capture = Some(handle);
-    inner.processing_thread = Some(processing_handle);
+    let mut cap = state.capture.write().map_err(|e| e.to_string())?;
+    cap.live_capture = Some(handle);
+    cap.processing_thread = Some(processing_handle);
 
     Ok(())
 }
@@ -322,9 +331,9 @@ pub async fn stop_capture(
     // Take the capture handle and processing thread out of state
     // (releases the lock before stopping, avoiding deadlock)
     let (mut capture, processing_thread) = {
-        let mut inner = state.inner.lock().map_err(|e| e.to_string())?;
-        let capture = inner.live_capture.take();
-        let processing = inner.processing_thread.take();
+        let mut cap = state.capture.write().map_err(|e| e.to_string())?;
+        let capture = cap.live_capture.take();
+        let processing = cap.processing_thread.take();
         (capture, processing)
     };
 
@@ -373,8 +382,8 @@ pub async fn stop_capture(
 /// Pause the live capture (packets arriving while paused are not captured).
 #[tauri::command]
 pub async fn pause_capture(state: State<'_, AppState>) -> Result<(), String> {
-    let inner = state.inner.lock().map_err(|e| e.to_string())?;
-    if let Some(ref handle) = inner.live_capture {
+    let cap = state.capture.read().map_err(|e| e.to_string())?;
+    if let Some(ref handle) = cap.live_capture {
         handle.pause();
         log::info!("Live capture paused");
         Ok(())
@@ -386,8 +395,8 @@ pub async fn pause_capture(state: State<'_, AppState>) -> Result<(), String> {
 /// Resume a paused live capture.
 #[tauri::command]
 pub async fn resume_capture(state: State<'_, AppState>) -> Result<(), String> {
-    let inner = state.inner.lock().map_err(|e| e.to_string())?;
-    if let Some(ref handle) = inner.live_capture {
+    let cap = state.capture.read().map_err(|e| e.to_string())?;
+    if let Some(ref handle) = cap.live_capture {
         handle.resume();
         log::info!("Live capture resumed");
         Ok(())
@@ -399,8 +408,8 @@ pub async fn resume_capture(state: State<'_, AppState>) -> Result<(), String> {
 /// Get the current capture status.
 #[tauri::command]
 pub async fn get_capture_status(state: State<'_, AppState>) -> Result<CaptureStatusInfo, String> {
-    let inner = state.inner.lock().map_err(|e| e.to_string())?;
-    if let Some(ref handle) = inner.live_capture {
+    let cap = state.capture.read().map_err(|e| e.to_string())?;
+    if let Some(ref handle) = cap.live_capture {
         let stats = handle.stats();
         Ok(CaptureStatusInfo {
             is_running: handle.is_running(),
@@ -524,17 +533,19 @@ fn flush_batch(
 
     // Lock state to run signature matching and update
     let update_result: Result<CaptureStatsPayload, String> = (|| {
-        let inner = state.inner.lock().map_err(|e| e.to_string())?;
+        // Step 1: read-only lookups for sig matching and OUI/GeoIP enrichment
+        let (assets, sig_results) = {
+            let sigs = state.signatures.read().map_err(|e| e.to_string())?;
+            let inv = state.inventory.read().map_err(|e| e.to_string())?;
+            processor.build_assets(
+                &sigs.signature_engine,
+                &deep_parse_info,
+                &inv.oui_lookup,
+                &inv.geoip_lookup,
+            )
+        };
 
-        // Run signature matching with OUI + GeoIP enrichment
-        let (assets, sig_results) = processor.build_assets(
-            &inner.signature_engine,
-            &deep_parse_info,
-            &inner.oui_lookup,
-            &inner.geoip_lookup,
-        );
-
-        // Build topology snapshot, enriched with signature data
+        // Step 2: build topology enriched with signature data (no state access needed)
         let mut topology = processor.topo_builder.snapshot();
         for node in &mut topology.nodes {
             if let Some(sig_matches) = sig_results.get(&node.ip_address) {
@@ -559,18 +570,35 @@ fn flush_batch(
         let connection_count = connections.len();
         let total_packets = processor.total_packets;
 
-        // Drop the immutable borrow and get a mutable one
-        drop(inner);
-        let mut inner = state.inner.lock().map_err(|e| e.to_string())?;
+        // Step 3: get live capture stats before write (avoids re-acquiring capture lock)
+        let (bytes_captured, elapsed_seconds) = {
+            let cap = state.capture.read().map_err(|e| e.to_string())?;
+            if let Some(ref handle) = cap.live_capture {
+                let stats = handle.stats();
+                (stats.bytes_captured, stats.elapsed_seconds)
+            } else {
+                (0, 0.0)
+            }
+        };
 
-        inner.topology = topology;
-        inner.assets = assets;
-        inner.connections = connections;
-        inner.packet_summaries = packet_summaries;
-        inner.deep_parse_info = deep_parse_info;
-        inner.connection_stats = connection_stats;
-        inner.pattern_anomalies = pattern_anomalies;
-        inner.redundancy_protocols = redundancy_protocols;
+        // Step 4: write updated data to each domain (capture → inventory → analysis)
+        {
+            let mut cap = state.capture.write().map_err(|e| e.to_string())?;
+            cap.topology = topology;
+            cap.connections = connections;
+            cap.packet_summaries = packet_summaries;
+            cap.redundancy_protocols = redundancy_protocols;
+        }
+        {
+            let mut inv = state.inventory.write().map_err(|e| e.to_string())?;
+            inv.assets = assets;
+            inv.deep_parse_info = deep_parse_info;
+        }
+        {
+            let mut analysis = state.analysis.write().map_err(|e| e.to_string())?;
+            analysis.connection_stats = connection_stats;
+            analysis.pattern_anomalies = pattern_anomalies;
+        }
 
         // Compute PPS
         let elapsed = prev_stat_time.elapsed().as_secs_f64();
@@ -578,14 +606,6 @@ fn flush_batch(
             ((total_packets - *prev_packet_count) as f64 / elapsed) as u64
         } else {
             0
-        };
-
-        // Get capture stats from the live capture handle
-        let (bytes_captured, elapsed_seconds) = if let Some(ref handle) = inner.live_capture {
-            let stats = handle.stats();
-            (stats.bytes_captured, stats.elapsed_seconds)
-        } else {
-            (0, 0.0)
         };
 
         Ok(CaptureStatsPayload {
@@ -630,12 +650,16 @@ fn flush_batch(
 /// - T0868: Remote service (SSH/Telnet) to OT device
 /// - T0885: Web management UI (HTTP/HTTPS) to OT device
 fn run_live_attack_detection(state: &AppState, app: &tauri::AppHandle, watermark: &mut usize) {
-    let inner = match state.inner.lock() {
+    let cap = match state.capture.read() {
+        Ok(g) => g,
+        Err(_) => return,
+    };
+    let inv = match state.inventory.read() {
         Ok(g) => g,
         Err(_) => return,
     };
 
-    let connections = &inner.connections;
+    let connections = &cap.connections;
     if connections.len() <= *watermark {
         // No new connections
         *watermark = connections.len();
@@ -643,7 +667,7 @@ fn run_live_attack_detection(state: &AppState, app: &tauri::AppHandle, watermark
     }
 
     // Build OT device IP set from asset inventory
-    let ot_ips: HashSet<&str> = inner
+    let ot_ips: HashSet<&str> = inv
         .assets
         .iter()
         .filter(|a| is_ot_device_type(&a.device_type))

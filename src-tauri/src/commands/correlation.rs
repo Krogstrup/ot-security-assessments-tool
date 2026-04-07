@@ -7,7 +7,7 @@
 use serde::Serialize;
 use tauri::State;
 
-use super::{AppState, AppStateInner, StoredAlert};
+use super::{AppState, InventoryState, StoredAlert};
 
 /// An IDS/SIEM alert enriched with device inventory information.
 #[derive(Debug, Clone, Serialize)]
@@ -43,11 +43,11 @@ pub struct CorrelatedAlert {
 pub async fn get_correlated_alerts(
     state: State<'_, AppState>,
 ) -> Result<Vec<CorrelatedAlert>, String> {
-    let inner = state.inner.lock().map_err(|e| e.to_string())?;
-    let mut alerts: Vec<CorrelatedAlert> = inner
+    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
+    let mut alerts: Vec<CorrelatedAlert> = inventory
         .imported_alerts
         .iter()
-        .map(|a| correlate_alert(a, &inner))
+        .map(|a| correlate_alert(a, &inventory))
         .collect();
     // Sort by severity (1=high first), then timestamp descending
     alerts.sort_by(|a, b| {
@@ -64,12 +64,12 @@ pub async fn get_alerts_for_ip(
     ip: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<CorrelatedAlert>, String> {
-    let inner = state.inner.lock().map_err(|e| e.to_string())?;
-    let mut alerts: Vec<CorrelatedAlert> = inner
+    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
+    let mut alerts: Vec<CorrelatedAlert> = inventory
         .imported_alerts
         .iter()
         .filter(|a| a.src_ip == ip || a.dst_ip == ip)
-        .map(|a| correlate_alert(a, &inner))
+        .map(|a| correlate_alert(a, &inventory))
         .collect();
     alerts.sort_by(|a, b| {
         a.severity
@@ -82,18 +82,20 @@ pub async fn get_alerts_for_ip(
 /// Clear all stored alerts.
 #[tauri::command]
 pub async fn clear_alerts(state: State<'_, AppState>) -> Result<(), String> {
-    let mut inner = state.inner.lock().map_err(|e| e.to_string())?;
-    inner.imported_alerts.clear();
+    let mut inventory = state.inventory.write().map_err(|e| e.to_string())?;
+    inventory.imported_alerts.clear();
     log::info!("Cleared all imported alerts");
     Ok(())
 }
 
 // ─── Helpers ─────────────────────────────────────────────────
 
-/// Enrich a StoredAlert with device inventory info from AppStateInner.
-fn correlate_alert(alert: &StoredAlert, inner: &AppStateInner) -> CorrelatedAlert {
-    let (src_hostname, src_device_type, src_purdue_level) = lookup_device(&alert.src_ip, inner);
-    let (dst_hostname, dst_device_type, dst_purdue_level) = lookup_device(&alert.dst_ip, inner);
+/// Enrich a StoredAlert with device inventory info from InventoryState.
+fn correlate_alert(alert: &StoredAlert, inventory: &InventoryState) -> CorrelatedAlert {
+    let (src_hostname, src_device_type, src_purdue_level) =
+        lookup_device(&alert.src_ip, inventory);
+    let (dst_hostname, dst_device_type, dst_purdue_level) =
+        lookup_device(&alert.dst_ip, inventory);
 
     CorrelatedAlert {
         timestamp: alert.timestamp.clone(),
@@ -117,11 +119,14 @@ fn correlate_alert(alert: &StoredAlert, inner: &AppStateInner) -> CorrelatedAler
 
 /// Look up a device by IP in the asset inventory.
 /// Returns (hostname, device_type, purdue_level).
-fn lookup_device(ip: &str, inner: &AppStateInner) -> (Option<String>, Option<String>, Option<u8>) {
+fn lookup_device(
+    ip: &str,
+    inventory: &InventoryState,
+) -> (Option<String>, Option<String>, Option<u8>) {
     if ip.is_empty() {
         return (None, None, None);
     }
-    match inner.assets.iter().find(|a| a.ip_address == ip) {
+    match inventory.assets.iter().find(|a| a.ip_address == ip) {
         Some(asset) => (
             asset.hostname.clone(),
             Some(asset.device_type.clone()),

@@ -86,27 +86,44 @@ pub struct DriftSummary {
 ///
 /// Loads the baseline session from the database and diffs it against
 /// the current in-memory assets and connections.
+///
+/// Lock strategy: snapshot current data first (without holding any lock),
+/// then query the DB under the session lock.  No locks are held simultaneously.
 #[tauri::command]
 pub fn compare_sessions(
     baseline_session_id: String,
     state: State<'_, AppState>,
 ) -> Result<BaselineDiff, String> {
-    let inner = state.inner.lock().map_err(|e| e.to_string())?;
+    // Step 1: snapshot current assets and connections (no locks held after scope).
+    let current_assets_vec: Vec<AssetInfo> = state
+        .inventory
+        .read()
+        .map_err(|e| e.to_string())?
+        .assets
+        .clone();
 
-    let db = inner.db.as_ref().ok_or("Database not available")?;
+    let current_connections_vec = state
+        .capture
+        .read()
+        .map_err(|e| e.to_string())?
+        .connections
+        .clone();
 
-    // Load baseline session info
-    let session_row = db
-        .get_session(&baseline_session_id)
-        .map_err(|e| e.to_string())?;
-
-    // Load baseline assets and connections
-    let baseline_asset_rows = db
-        .list_assets(&baseline_session_id)
-        .map_err(|e| e.to_string())?;
-    let baseline_conn_rows = db
-        .list_connections(&baseline_session_id)
-        .map_err(|e| e.to_string())?;
+    // Step 2: load baseline from the database.
+    let (baseline_session_name, baseline_asset_rows, baseline_conn_rows) = {
+        let session = state.session.lock().map_err(|e| e.to_string())?;
+        let db = session.db.as_ref().ok_or("Database not available")?;
+        let session_row = db
+            .get_session(&baseline_session_id)
+            .map_err(|e| e.to_string())?;
+        let baseline_asset_rows = db
+            .list_assets(&baseline_session_id)
+            .map_err(|e| e.to_string())?;
+        let baseline_conn_rows = db
+            .list_connections(&baseline_session_id)
+            .map_err(|e| e.to_string())?;
+        (session_row.name, baseline_asset_rows, baseline_conn_rows)
+    };
 
     // Convert baseline assets to a map by IP for comparison
     let baseline_assets: HashMap<String, _> = baseline_asset_rows
@@ -115,8 +132,7 @@ pub fn compare_sessions(
         .collect();
 
     // Current assets by IP
-    let current_assets: HashMap<String, &AssetInfo> = inner
-        .assets
+    let current_assets: HashMap<String, &AssetInfo> = current_assets_vec
         .iter()
         .map(|a| (a.ip_address.clone(), a))
         .collect();
@@ -182,8 +198,7 @@ pub fn compare_sessions(
         })
         .collect();
 
-    let current_conn_keys: HashSet<(String, String, u16, String)> = inner
-        .connections
+    let current_conn_keys: HashSet<(String, String, u16, String)> = current_connections_vec
         .iter()
         .map(|c| {
             (
@@ -199,7 +214,7 @@ pub fn compare_sessions(
     let mut missing_connections = Vec::new();
 
     // New connections (in current but not baseline)
-    for conn in &inner.connections {
+    for conn in &current_connections_vec {
         let key = (
             conn.src_ip.clone(),
             conn.dst_ip.clone(),
@@ -272,7 +287,7 @@ pub fn compare_sessions(
     );
 
     Ok(BaselineDiff {
-        baseline_session_name: session_row.name,
+        baseline_session_name,
         new_assets,
         missing_assets,
         changed_assets,

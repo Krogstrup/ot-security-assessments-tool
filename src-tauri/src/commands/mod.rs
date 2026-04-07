@@ -39,75 +39,101 @@ use gm_signatures::SignatureEngine;
 use gm_topology::TopologyGraph;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread::JoinHandle;
 
-/// Shared application state, managed by Tauri.
-///
-/// This is wrapped in Mutex for thread-safe access from command handlers.
-/// Tauri's state management ensures this is available to all commands
-/// via the `State<'_, AppState>` parameter.
-pub struct AppState {
-    pub inner: Mutex<AppStateInner>,
-    /// Set to true to cancel an in-progress PCAP import. Lives outside the
-    /// Mutex so it can be read/written by the import thread and the cancel
-    /// command without acquiring the heavy state lock.
-    pub import_cancelled: Arc<AtomicBool>,
+// ── Domain state structs ─────────────────────────────────────────────────────
+//
+// Lock acquisition order (must be followed everywhere to avoid deadlocks):
+//   capture → inventory → analysis → session → physical → segmentation → signatures
+
+/// Capture and topology state: network graph, connections, live capture handle.
+pub struct CaptureState {
+    pub topology: TopologyGraph,
+    pub connections: Vec<ConnectionInfo>,
+    pub packet_summaries: HashMap<String, Vec<PacketSummary>>,
+    pub imported_files: Vec<String>,
+    pub live_capture: Option<LiveCaptureHandle>,
+    pub processing_thread: Option<JoinHandle<()>>,
+    pub redundancy_protocols: Vec<RedundancyInfo>,
 }
 
-pub struct AppStateInner {
-    /// The current network topology graph
-    pub topology: TopologyGraph,
-    /// All discovered assets
+/// Device inventory: assets, deep-parse results, OUI/GeoIP lookups, alert imports.
+pub struct InventoryState {
     pub assets: Vec<AssetInfo>,
-    /// All observed connections
-    pub connections: Vec<ConnectionInfo>,
-    /// Packet summaries grouped by connection ID, for the connection tree
-    pub packet_summaries: HashMap<String, Vec<PacketSummary>>,
-    /// List of imported PCAP files
-    pub imported_files: Vec<String>,
-    /// Signature engine for device fingerprinting
-    pub signature_engine: SignatureEngine,
-    /// Deep parse results grouped by IP address
     pub deep_parse_info: HashMap<String, DeepParseInfo>,
-    /// Handle to the running live capture (None if not capturing)
-    pub live_capture: Option<LiveCaptureHandle>,
-    /// Join handle for the live capture processing thread
-    pub processing_thread: Option<JoinHandle<()>>,
     /// IEEE OUI vendor lookup table
     pub oui_lookup: OuiLookup,
     /// GeoIP country lookup
     pub geoip_lookup: GeoIpLookup,
-    /// SQLite database for persistence
-    pub db: Option<Database>,
-    /// Currently loaded session ID (None if no session loaded)
-    pub current_session_id: Option<String>,
-    /// Currently loaded session name
-    pub current_session_name: Option<String>,
-    /// Active project ID (None if no project selected)
-    pub current_project_id: Option<i64>,
-    /// Physical topology from Cisco/JunOS/Aruba config/CAM/CDP/ARP imports
-    pub physical_topology: PhysicalTopology,
-    /// Traffic-inferred topology from packet analysis
-    pub inferred_topology: Option<InferredTopology>,
-    /// Security findings from the last analysis run
-    pub findings: Vec<Finding>,
-    /// Purdue level assignments from the last analysis run
-    pub purdue_assignments: Vec<PurdueAssignment>,
-    /// Anomaly scores from the last analysis run
-    pub anomalies: Vec<AnomalyScore>,
-    /// Per-connection timing statistics (computed after import / capture)
-    pub connection_stats: Vec<ConnectionStats>,
-    /// Communication pattern anomalies (computed alongside connection_stats)
-    pub pattern_anomalies: Vec<PatternAnomaly>,
-    /// Redundancy protocol frames observed (MRP/RSTP/HSR/PRP/DLR)
-    pub redundancy_protocols: Vec<RedundancyInfo>,
-    /// Alerts imported from external IDS/SIEM tools (Suricata, Wazuh)
-    pub imported_alerts: Vec<StoredAlert>,
-    /// Per-device Zeek event summaries (rebuilt on each Zeek import)
     pub zeek_device_events: HashMap<String, DeviceZeekEvents>,
-    /// Cached result of the last segmentation analysis run (Phase 15)
+    pub imported_alerts: Vec<StoredAlert>,
+}
+
+/// Security analysis results: findings, Purdue assignments, anomaly scores.
+pub struct AnalysisState {
+    pub findings: Vec<Finding>,
+    pub purdue_assignments: Vec<PurdueAssignment>,
+    pub anomalies: Vec<AnomalyScore>,
+    pub connection_stats: Vec<ConnectionStats>,
+    pub pattern_anomalies: Vec<PatternAnomaly>,
+}
+
+/// Session and project persistence: SQLite DB handle + current session/project IDs.
+pub struct SessionState {
+    pub db: Option<Database>,
+    pub current_session_id: Option<String>,
+    pub current_session_name: Option<String>,
+    pub current_project_id: Option<i64>,
+}
+
+/// Physical topology from switch config/CAM/CDP/ARP imports.
+pub struct PhysicalState {
+    pub physical_topology: PhysicalTopology,
+    pub inferred_topology: Option<InferredTopology>,
+}
+
+/// Cached microsegmentation analysis result.
+pub struct SegmentationState {
     pub segmentation_report: Option<SegmentationReport>,
+}
+
+/// Signature engine for device fingerprinting (read-only at runtime after init).
+pub struct SignatureState {
+    pub signature_engine: SignatureEngine,
+}
+
+// ── AppState ─────────────────────────────────────────────────────────────────
+
+/// Shared application state, managed by Tauri.
+///
+/// Each domain has its own lock, scoped to the set of fields it owns.
+/// Use `RwLock` for read-heavy domains (concurrent UI reads) and `Mutex`
+/// for domains that require serialised writes (DB, live-capture handles).
+///
+/// **Lock ordering**: always acquire in the order declared above
+/// (capture → inventory → analysis → session → physical → segmentation → signatures)
+/// to prevent deadlocks when multiple domains must be locked together.
+pub struct AppState {
+    /// Network topology, connections, packet data, live capture handle.
+    pub capture: RwLock<CaptureState>,
+    /// Device assets, deep-parse results, OUI/GeoIP, imported alerts.
+    pub inventory: RwLock<InventoryState>,
+    /// Findings, Purdue assignments, anomaly scores, connection statistics.
+    pub analysis: RwLock<AnalysisState>,
+    /// SQLite database and session/project identity.  Uses Mutex because the
+    /// Database handle requires serialised access.
+    pub session: Mutex<SessionState>,
+    /// Physical topology from switch configs and ARP tables.
+    pub physical: RwLock<PhysicalState>,
+    /// Cached microsegmentation report.
+    pub segmentation: RwLock<SegmentationState>,
+    /// Device-fingerprint signature engine (read-only after init).
+    pub signatures: RwLock<SignatureState>,
+    /// Set to true to cancel an in-progress PCAP import.  Lives outside any
+    /// domain lock so it can be written by the cancel command without
+    /// acquiring the heavy capture lock.
+    pub import_cancelled: Arc<AtomicBool>,
 }
 
 impl AppState {
@@ -173,33 +199,45 @@ impl AppState {
 
         AppState {
             import_cancelled: Arc::new(AtomicBool::new(false)),
-            inner: Mutex::new(AppStateInner {
+            capture: RwLock::new(CaptureState {
                 topology: TopologyGraph::default(),
-                assets: Vec::new(),
                 connections: Vec::new(),
                 packet_summaries: HashMap::new(),
                 imported_files: Vec::new(),
-                signature_engine: engine,
-                deep_parse_info: HashMap::new(),
                 live_capture: None,
                 processing_thread: None,
+                redundancy_protocols: Vec::new(),
+            }),
+            inventory: RwLock::new(InventoryState {
+                assets: Vec::new(),
+                deep_parse_info: HashMap::new(),
                 oui_lookup,
                 geoip_lookup,
-                db,
-                current_session_id: None,
-                current_session_name: None,
-                current_project_id: None,
-                physical_topology: PhysicalTopology::default(),
-                inferred_topology: None,
+                zeek_device_events: HashMap::new(),
+                imported_alerts: Vec::new(),
+            }),
+            analysis: RwLock::new(AnalysisState {
                 findings: Vec::new(),
                 purdue_assignments: Vec::new(),
                 anomalies: Vec::new(),
                 connection_stats: Vec::new(),
                 pattern_anomalies: Vec::new(),
-                redundancy_protocols: Vec::new(),
-                imported_alerts: Vec::new(),
-                zeek_device_events: HashMap::new(),
+            }),
+            session: Mutex::new(SessionState {
+                db,
+                current_session_id: None,
+                current_session_name: None,
+                current_project_id: None,
+            }),
+            physical: RwLock::new(PhysicalState {
+                physical_topology: PhysicalTopology::default(),
+                inferred_topology: None,
+            }),
+            segmentation: RwLock::new(SegmentationState {
                 segmentation_report: None,
+            }),
+            signatures: RwLock::new(SignatureState {
+                signature_engine: engine,
             }),
         }
     }

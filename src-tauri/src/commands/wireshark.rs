@@ -73,8 +73,8 @@ pub async fn open_in_wireshark(
 
     // Get connection info and build display filter
     let (filter, pcap_files) = {
-        let inner = state.inner.lock().map_err(|e| e.to_string())?;
-        let conn = inner
+        let capture = state.capture.read().map_err(|e| e.to_string())?;
+        let conn = capture
             .connections
             .iter()
             .find(|c| c.id == connection_id)
@@ -145,9 +145,9 @@ pub async fn get_connection_frames(
     connection_id: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<FrameRow>, String> {
-    let inner = state.inner.lock().map_err(|e| e.to_string())?;
+    let capture = state.capture.read().map_err(|e| e.to_string())?;
 
-    let packets = inner
+    let packets = capture
         .packet_summaries
         .get(&connection_id)
         .cloned()
@@ -178,9 +178,9 @@ pub async fn export_frames_csv(
     connection_id: String,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let inner = state.inner.lock().map_err(|e| e.to_string())?;
+    let capture = state.capture.read().map_err(|e| e.to_string())?;
 
-    let packets = inner
+    let packets = capture
         .packet_summaries
         .get(&connection_id)
         .cloned()

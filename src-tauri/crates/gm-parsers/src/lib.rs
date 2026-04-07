@@ -20,6 +20,14 @@
 //! 2. Add port mappings in `identify_by_port()`
 //! 3. Add a parser module (e.g., `modbus.rs`, `dnp3.rs`)
 
+pub mod models;
+
+pub use models::{
+    BacnetDetail, DeepParseInfo, Dnp3Detail, Dnp3Relationship, EnipDetail, FunctionCodeStat,
+    Iec104Detail, LldpDetail, ModbusDetail, ModbusDeviceIdInfo, ModbusRelationship, PollingInterval,
+    ProfinetDcpDetail, RegisterRangeInfo, S7Detail, SnmpDetail,
+};
+
 pub mod bacnet;
 pub mod dnp3;
 pub mod enip;

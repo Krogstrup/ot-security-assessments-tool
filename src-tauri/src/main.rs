@@ -61,14 +61,9 @@ fn main() {
                 if let Some(ref path) = args.import_pcap {
                     log::info!("CLI: importing PCAP from {}", path);
                     let state = app_handle.state::<commands::AppState>();
-                    let inner = state.inner.lock();
-                    if let Ok(mut inner) = inner {
-                        match import_pcap_file(path, &mut inner) {
-                            Ok(count) => {
-                                log::info!("CLI: imported {} packets from {}", count, path)
-                            }
-                            Err(e) => log::error!("CLI: failed to import {}: {}", path, e),
-                        }
+                    match import_pcap_file(path, &state) {
+                        Ok(count) => log::info!("CLI: imported {} packets from {}", count, path),
+                        Err(e) => log::error!("CLI: failed to import {}: {}", path, e),
                     }
                 } else if let Some(ref path) = args.open {
                     if path.ends_with(".kkj") {
@@ -77,14 +72,9 @@ fn main() {
                     } else {
                         log::info!("CLI: opening PCAP file {}", path);
                         let state = app_handle.state::<commands::AppState>();
-                        let inner = state.inner.lock();
-                        if let Ok(mut inner) = inner {
-                            match import_pcap_file(path, &mut inner) {
-                                Ok(count) => {
-                                    log::info!("CLI: imported {} packets from {}", count, path)
-                                }
-                                Err(e) => log::error!("CLI: failed to import {}: {}", path, e),
-                            }
+                        match import_pcap_file(path, &state) {
+                            Ok(count) => log::info!("CLI: imported {} packets from {}", count, path),
+                            Err(e) => log::error!("CLI: failed to import {}: {}", path, e),
                         }
                     }
                 }
@@ -217,7 +207,7 @@ fn main() {
 struct CliArgs(Mutex<Cli>);
 
 /// Import a PCAP file into the current state (used by CLI).
-fn import_pcap_file(path: &str, inner: &mut commands::AppStateInner) -> Result<usize, String> {
+fn import_pcap_file(path: &str, state: &commands::AppState) -> Result<usize, String> {
     use gm_capture::PcapReader;
 
     let reader = PcapReader::new();
@@ -230,12 +220,16 @@ fn import_pcap_file(path: &str, inner: &mut commands::AppStateInner) -> Result<u
     }
 
     let deep_parse_info = processor.build_deep_parse_info();
-    let (assets, sig_results) = processor.build_assets(
-        &inner.signature_engine,
-        &deep_parse_info,
-        &inner.oui_lookup,
-        &inner.geoip_lookup,
-    );
+    let (assets, sig_results) = {
+        let sigs = state.signatures.read().map_err(|e| e.to_string())?;
+        let inv = state.inventory.read().map_err(|e| e.to_string())?;
+        processor.build_assets(
+            &sigs.signature_engine,
+            &deep_parse_info,
+            &inv.oui_lookup,
+            &inv.geoip_lookup,
+        )
+    };
 
     // Build topology, enriched with signature data
     let mut topo = processor.topo_builder.snapshot();
@@ -254,12 +248,18 @@ fn import_pcap_file(path: &str, inner: &mut commands::AppStateInner) -> Result<u
         }
     }
 
-    inner.topology = topo;
-    inner.assets = assets;
-    inner.connections = processor.get_connections();
-    inner.packet_summaries = processor.get_packet_summaries();
-    inner.deep_parse_info = deep_parse_info;
-    inner.imported_files.push(path.to_string());
+    {
+        let mut cap = state.capture.write().map_err(|e| e.to_string())?;
+        cap.topology = topo;
+        cap.connections = processor.get_connections();
+        cap.packet_summaries = processor.get_packet_summaries();
+        cap.imported_files.push(path.to_string());
+    }
+    {
+        let mut inv = state.inventory.write().map_err(|e| e.to_string())?;
+        inv.assets = assets;
+        inv.deep_parse_info = deep_parse_info;
+    }
 
     Ok(count)
 }

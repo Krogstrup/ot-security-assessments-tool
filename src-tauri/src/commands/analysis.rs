@@ -18,11 +18,13 @@ use gm_analysis::{
     SwitchSecurityInput,
 };
 
-use super::AppState;
+use super::{AnalysisState, AppState, CaptureState, InventoryState};
 
-/// Build AnalysisInput from current AppState.
-fn build_analysis_input(state: &super::AppStateInner) -> AnalysisInput {
-    let assets: Vec<AssetSnapshot> = state
+// ─── Input builders ───────────────────────────────────────────────────────────
+
+/// Build AnalysisInput from capture + inventory domain slices.
+fn build_analysis_input(capture: &CaptureState, inventory: &InventoryState) -> AnalysisInput {
+    let assets: Vec<AssetSnapshot> = inventory
         .assets
         .iter()
         .map(|a| AssetSnapshot {
@@ -38,7 +40,7 @@ fn build_analysis_input(state: &super::AppStateInner) -> AnalysisInput {
         })
         .collect();
 
-    let connections: Vec<ConnectionSnapshot> = state
+    let connections: Vec<ConnectionSnapshot> = capture
         .connections
         .iter()
         .map(|c| ConnectionSnapshot {
@@ -52,7 +54,7 @@ fn build_analysis_input(state: &super::AppStateInner) -> AnalysisInput {
         .collect();
 
     let mut deep_parse = std::collections::HashMap::new();
-    for (ip, dp) in &state.deep_parse_info {
+    for (ip, dp) in &inventory.deep_parse_info {
         let modbus = dp.modbus.as_ref().map(|m| ModbusSnapshot {
             role: m.role.clone(),
             unit_ids: m.unit_ids.clone(),
@@ -163,8 +165,12 @@ fn build_analysis_input(state: &super::AppStateInner) -> AnalysisInput {
     }
 }
 
-/// Build a [`CaptureContext`] from current AppState for Phase 14C detections.
-fn build_capture_context(state: &super::AppStateInner) -> CaptureContext {
+/// Build a [`CaptureContext`] from domain state slices for Phase 14C detections.
+fn build_capture_context(
+    capture: &CaptureState,
+    inventory: &InventoryState,
+    analysis: &AnalysisState,
+) -> CaptureContext {
     // OT device IPs: assets running OT protocols or with OT device types.
     let ot_device_types = [
         "plc",
@@ -191,7 +197,7 @@ fn build_capture_context(state: &super::AppStateInner) -> CaptureContext {
         "WonderwareSuitelink",
     ];
 
-    let mut ot_device_ips: HashSet<String> = state
+    let mut ot_device_ips: HashSet<String> = inventory
         .assets
         .iter()
         .filter(|a| {
@@ -208,14 +214,14 @@ fn build_capture_context(state: &super::AppStateInner) -> CaptureContext {
         102, 502, 1089, 1090, 1091, 2222, 2404, 4840, 5007, 5094, 18245, 18246, 20000, 34962,
         34963, 34964, 44818, 47808,
     ];
-    for conn in &state.connections {
+    for conn in &capture.connections {
         if ot_ports.contains(&conn.dst_port) {
             ot_device_ips.insert(conn.dst_ip.clone());
         }
     }
 
     // External IPs from asset classification.
-    let external_ips: HashSet<String> = state
+    let external_ips: HashSet<String> = inventory
         .assets
         .iter()
         .filter(|a| a.is_public_ip)
@@ -224,7 +230,7 @@ fn build_capture_context(state: &super::AppStateInner) -> CaptureContext {
 
     // IP ↔ MAC mappings: from assets and connection headers.
     let mut ip_to_macs: HashMap<String, Vec<String>> = HashMap::new();
-    for asset in &state.assets {
+    for asset in &inventory.assets {
         if let Some(mac) = &asset.mac_address {
             let macs = ip_to_macs.entry(asset.ip_address.clone()).or_default();
             if !macs.contains(mac) {
@@ -232,7 +238,7 @@ fn build_capture_context(state: &super::AppStateInner) -> CaptureContext {
             }
         }
     }
-    for conn in &state.connections {
+    for conn in &capture.connections {
         if let Some(mac) = &conn.src_mac {
             let macs = ip_to_macs.entry(conn.src_ip.clone()).or_default();
             if !macs.contains(mac) {
@@ -259,7 +265,7 @@ fn build_capture_context(state: &super::AppStateInner) -> CaptureContext {
     let mut capture_start = f64::INFINITY;
     let mut capture_end = f64::NEG_INFINITY;
 
-    for cs in &state.connection_stats {
+    for cs in &analysis.connection_stats {
         if cs.first_seen < capture_start {
             capture_start = cs.first_seen;
         }
@@ -317,7 +323,7 @@ fn build_capture_context(state: &super::AppStateInner) -> CaptureContext {
 
     // Per-source dst ports.
     let mut per_source_dst_ports: HashMap<String, HashSet<u16>> = HashMap::new();
-    for conn in &state.connections {
+    for conn in &capture.connections {
         per_source_dst_ports
             .entry(conn.src_ip.clone())
             .or_default()
@@ -328,7 +334,7 @@ fn build_capture_context(state: &super::AppStateInner) -> CaptureContext {
     let mut per_source_write_targets: HashMap<String, HashSet<String>> = HashMap::new();
     let mut per_connection_write_rate: HashMap<(String, String), u64> = HashMap::new();
 
-    for (ip, dp) in &state.deep_parse_info {
+    for (ip, dp) in &inventory.deep_parse_info {
         if let Some(modbus) = &dp.modbus {
             if modbus.role == "master" || modbus.role == "both" {
                 let write_count: u64 = modbus
@@ -356,7 +362,7 @@ fn build_capture_context(state: &super::AppStateInner) -> CaptureContext {
 
     // Read targets: OT connections that are NOT write targets.
     let mut per_source_read_targets: HashMap<String, HashSet<String>> = HashMap::new();
-    for conn in &state.connections {
+    for conn in &capture.connections {
         if ot_ports.contains(&conn.dst_port) {
             let is_write_target = per_source_write_targets
                 .get(&conn.src_ip)
@@ -387,6 +393,8 @@ fn build_capture_context(state: &super::AppStateInner) -> CaptureContext {
     }
 }
 
+// ─── Commands ─────────────────────────────────────────────────────────────────
+
 /// Maximum findings returned by get_findings — nobody reads 50 000 findings.
 const MAX_FINDINGS: usize = 1_000;
 /// Maximum anomaly scores returned by get_anomalies.
@@ -396,18 +404,22 @@ const MAX_ANOMALIES: usize = 500;
 ///
 /// Detects ATT&CK techniques, auto-assigns Purdue levels, scores anomalies.
 /// Results are stored in AppState and returned to the frontend.
+///
+/// Lock order: capture (read) → inventory (write) → analysis (write)
 #[tauri::command]
 pub fn run_analysis(state: State<'_, AppState>) -> Result<AnalysisResult, String> {
-    let mut state_inner = state.inner.lock().map_err(|e| e.to_string())?;
+    let capture = state.capture.read().map_err(|e| e.to_string())?;
+    let mut inventory = state.inventory.write().map_err(|e| e.to_string())?;
+    let mut analysis = state.analysis.write().map_err(|e| e.to_string())?;
 
-    let input = build_analysis_input(&state_inner);
-    let ctx = build_capture_context(&state_inner);
+    let input = build_analysis_input(&capture, &inventory);
+    let ctx = build_capture_context(&capture, &inventory, &analysis);
     let result = gm_analysis::run_full_analysis(&input, &ctx);
 
     // Store results in AppState
-    state_inner.findings = result.findings.clone();
-    state_inner.purdue_assignments = result.purdue_assignments.clone();
-    state_inner.anomalies = result.anomalies.clone();
+    analysis.findings = result.findings.clone();
+    analysis.purdue_assignments = result.purdue_assignments.clone();
+    analysis.anomalies = result.anomalies.clone();
 
     // Apply auto-assigned Purdue levels to assets (only where not manually set).
     // Build a lookup map first so this is O(assignments) not O(assets × assignments).
@@ -417,7 +429,7 @@ pub fn run_analysis(state: State<'_, AppState>) -> Result<AnalysisResult, String
         .map(|a| (a.ip_address.as_str(), a.level))
         .collect();
 
-    for asset in &mut state_inner.assets {
+    for asset in &mut inventory.assets {
         if asset.purdue_level.is_none() {
             if let Some(&level) = purdue_map.get(asset.ip_address.as_str()) {
                 asset.purdue_level = Some(level);
@@ -431,28 +443,28 @@ pub fn run_analysis(state: State<'_, AppState>) -> Result<AnalysisResult, String
 /// Get findings from the last analysis run (capped at MAX_FINDINGS = 1 000).
 #[tauri::command]
 pub fn get_findings(state: State<'_, AppState>) -> Result<Vec<Finding>, String> {
-    let state_inner = state.inner.lock().map_err(|e| e.to_string())?;
-    if state_inner.findings.len() <= MAX_FINDINGS {
-        return Ok(state_inner.findings.clone());
+    let analysis = state.analysis.read().map_err(|e| e.to_string())?;
+    if analysis.findings.len() <= MAX_FINDINGS {
+        return Ok(analysis.findings.clone());
     }
-    Ok(state_inner.findings[..MAX_FINDINGS].to_vec())
+    Ok(analysis.findings[..MAX_FINDINGS].to_vec())
 }
 
 /// Get Purdue level assignments from the last analysis run.
 #[tauri::command]
 pub fn get_purdue_assignments(state: State<'_, AppState>) -> Result<Vec<PurdueAssignment>, String> {
-    let state_inner = state.inner.lock().map_err(|e| e.to_string())?;
-    Ok(state_inner.purdue_assignments.clone())
+    let analysis = state.analysis.read().map_err(|e| e.to_string())?;
+    Ok(analysis.purdue_assignments.clone())
 }
 
 /// Get anomaly scores from the last analysis run (capped at MAX_ANOMALIES = 500).
 #[tauri::command]
 pub fn get_anomalies(state: State<'_, AppState>) -> Result<Vec<AnomalyScore>, String> {
-    let state_inner = state.inner.lock().map_err(|e| e.to_string())?;
-    if state_inner.anomalies.len() <= MAX_ANOMALIES {
-        return Ok(state_inner.anomalies.clone());
+    let analysis = state.analysis.read().map_err(|e| e.to_string())?;
+    if analysis.anomalies.len() <= MAX_ANOMALIES {
+        return Ok(analysis.anomalies.clone());
     }
-    Ok(state_inner.anomalies[..MAX_ANOMALIES].to_vec())
+    Ok(analysis.anomalies[..MAX_ANOMALIES].to_vec())
 }
 
 /// Get credential warnings for all discovered devices.
@@ -462,12 +474,12 @@ pub fn get_anomalies(state: State<'_, AppState>) -> Result<Vec<AnomalyScore>, St
 pub fn get_credential_warnings(
     state: State<'_, AppState>,
 ) -> Result<Vec<DefaultCredential>, String> {
-    let state_inner = state.inner.lock().map_err(|e| e.to_string())?;
+    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
 
     let checker = CredentialChecker::new()?;
     let mut results = Vec::new();
 
-    for asset in &state_inner.assets {
+    for asset in &inventory.assets {
         let vendor = asset.vendor.as_deref().unwrap_or("");
         let product = asset.product_family.as_deref().unwrap_or("");
         let matches = checker.check_device(vendor, product);
@@ -483,16 +495,18 @@ pub fn get_credential_warnings(
 /// Assess criticality for all discovered assets.
 #[tauri::command]
 pub fn get_criticality(state: State<'_, AppState>) -> Result<Vec<CriticalityAssessment>, String> {
-    let state_inner = state.inner.lock().map_err(|e| e.to_string())?;
-    let input = build_analysis_input(&state_inner);
+    let capture = state.capture.read().map_err(|e| e.to_string())?;
+    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
+    let input = build_analysis_input(&capture, &inventory);
     Ok(gm_analysis::assess_criticality_all(&input.assets))
 }
 
 /// Get naming suggestions for all discovered assets.
 #[tauri::command]
 pub fn get_naming_suggestions(state: State<'_, AppState>) -> Result<Vec<NamingSuggestion>, String> {
-    let state_inner = state.inner.lock().map_err(|e| e.to_string())?;
-    let input = build_analysis_input(&state_inner);
+    let capture = state.capture.read().map_err(|e| e.to_string())?;
+    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
+    let input = build_analysis_input(&capture, &inventory);
     Ok(gm_analysis::suggest_names_all(&input.assets))
 }
 
@@ -500,14 +514,17 @@ pub fn get_naming_suggestions(state: State<'_, AppState>) -> Result<Vec<NamingSu
 ///
 /// Uses asset list, protocol observations, redundancy frames, LLDP VLAN data,
 /// and default credential matches to produce actionable switch security findings.
+///
+/// Lock order: capture (read) → inventory (read)
 #[tauri::command]
 pub fn get_switch_security_findings(
     state: State<'_, AppState>,
 ) -> Result<Vec<SwitchSecurityFinding>, String> {
-    let state_inner = state.inner.lock().map_err(|e| e.to_string())?;
+    let capture = state.capture.read().map_err(|e| e.to_string())?;
+    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
 
     // Build asset snapshots
-    let assets: Vec<AssetSnapshot> = state_inner
+    let assets: Vec<AssetSnapshot> = inventory
         .assets
         .iter()
         .map(|a| AssetSnapshot {
@@ -524,26 +541,26 @@ pub fn get_switch_security_findings(
         .collect();
 
     // Build protocols_by_ip from asset protocol lists
-    let protocols_by_ip = state_inner
+    let protocols_by_ip = inventory
         .assets
         .iter()
         .map(|a| (a.ip_address.clone(), a.protocols.clone()))
         .collect();
 
     // Collect redundancy protocol names and topology change flag
-    let redundancy_protocols_seen: Vec<String> = state_inner
+    let redundancy_protocols_seen: Vec<String> = capture
         .redundancy_protocols
         .iter()
         .map(|r| r.protocol.hint().to_string())
         .collect();
 
-    let topology_change_seen = state_inner
+    let topology_change_seen = capture
         .redundancy_protocols
         .iter()
         .any(|r| r.topology_change);
 
     // Collect VLAN IDs from LLDP data
-    let vlan_ids_seen: Vec<u16> = state_inner
+    let vlan_ids_seen: Vec<u16> = inventory
         .deep_parse_info
         .values()
         .filter_map(|dp| dp.lldp.as_ref())
@@ -554,7 +571,7 @@ pub fn get_switch_security_findings(
 
     // Find switches that match default credentials
     let checker = CredentialChecker::new()?;
-    let default_cred_switch_ips: Vec<String> = state_inner
+    let default_cred_switch_ips: Vec<String> = inventory
         .assets
         .iter()
         .filter(|a| {
@@ -585,16 +602,20 @@ pub fn get_switch_security_findings(
 ///
 /// Checks for FrostyGoop (Modbus write-only master), PIPEDREAM/INCONTROLLER
 /// (multi-protocol reconnaissance), and Industroyer2 (IEC 104 burst commands).
+///
+/// Lock order: capture (read) → inventory (read) → analysis (read)
 #[tauri::command]
 pub fn get_malware_findings(state: State<'_, AppState>) -> Result<Vec<MalwareFinding>, String> {
-    let state_inner = state.inner.lock().map_err(|e| e.to_string())?;
+    let capture = state.capture.read().map_err(|e| e.to_string())?;
+    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
+    let analysis = state.analysis.read().map_err(|e| e.to_string())?;
 
-    let ctx = build_capture_context(&state_inner);
-    let connections = build_analysis_input(&state_inner).connections;
+    let ctx = build_capture_context(&capture, &inventory, &analysis);
+    let connections = build_analysis_input(&capture, &inventory).connections;
 
     // Build deep parse snapshot map
     let mut deep_parse = std::collections::HashMap::new();
-    for (ip, dp) in &state_inner.deep_parse_info {
+    for (ip, dp) in &inventory.deep_parse_info {
         let modbus = dp.modbus.as_ref().map(|m| gm_analysis::ModbusSnapshot {
             role: m.role.clone(),
             unit_ids: m.unit_ids.clone(),
@@ -654,11 +675,11 @@ pub fn get_malware_findings(state: State<'_, AppState>) -> Result<Vec<MalwareFin
 /// data) against the bundled OT infrastructure CVE database.
 #[tauri::command]
 pub fn get_cve_warnings(ip: String, state: State<'_, AppState>) -> Result<Vec<CveMatch>, String> {
-    let state_inner = state.inner.lock().map_err(|e| e.to_string())?;
+    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
 
     // Priority for vendor/model/firmware: LLDP > SNMP > asset info
-    let dp = state_inner.deep_parse_info.get(&ip);
-    let asset = state_inner.assets.iter().find(|a| a.ip_address == ip);
+    let dp = inventory.deep_parse_info.get(&ip);
+    let asset = inventory.assets.iter().find(|a| a.ip_address == ip);
 
     let (vendor, model, firmware) = if let Some(lldp) = dp.and_then(|d| d.lldp.as_ref()) {
         (
@@ -699,13 +720,13 @@ pub fn get_cve_warnings(ip: String, state: State<'_, AppState>) -> Result<Vec<Cv
 /// Generate a compliance report mapping findings to a specific framework.
 ///
 /// `framework` must be one of: `"iec62443"`, `"nist80082"`, `"nerccip"`.
+///
+/// Lock order: capture (read) → inventory (read) → analysis (read)
 #[tauri::command]
 pub fn get_compliance_report(
     state: State<'_, AppState>,
     framework: String,
 ) -> Result<Vec<ComplianceMapping>, String> {
-    let state_inner = state.inner.lock().map_err(|e| e.to_string())?;
-
     if !["iec62443", "nist80082", "nerccip"].contains(&framework.as_str()) {
         return Err(format!(
             "Unknown framework '{}'. Supported: iec62443, nist80082, nerccip",
@@ -713,9 +734,13 @@ pub fn get_compliance_report(
         ));
     }
 
-    let input = build_analysis_input(&state_inner);
+    let capture = state.capture.read().map_err(|e| e.to_string())?;
+    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
+    let analysis = state.analysis.read().map_err(|e| e.to_string())?;
+
+    let input = build_analysis_input(&capture, &inventory);
     Ok(generate_compliance_report(
-        &state_inner.findings,
+        &analysis.findings,
         &input.assets,
         &input.connections,
         &framework,

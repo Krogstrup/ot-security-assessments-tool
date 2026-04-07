@@ -13,10 +13,7 @@ use std::collections::HashMap;
 use gm_ingest::{IngestResult, IngestSource, IngestedAlert, IngestedAsset};
 use gm_parsers::IcsProtocol;
 
-use super::{
-    AppState, AppStateInner, AssetInfo, ConnectionInfo, DeviceZeekEvents, StoredAlert,
-    ZeekEventSummary,
-};
+use super::{AppState, AssetInfo, ConnectionInfo, DeviceZeekEvents, StoredAlert, ZeekEventSummary};
 
 /// Result returned to the frontend from an ingest operation.
 #[derive(Serialize)]
@@ -165,12 +162,15 @@ pub async fn import_masscan_json(
 /// the ingested data enriches it (hostname, OS, open ports) without overwriting.
 /// New assets are created for IPs not yet seen.
 /// Connections are appended with the ingest source tagged.
+///
+/// Lock order: capture (write) → inventory (write)
 fn merge_ingest_result(
     ingest: IngestResult,
     state: &AppState,
     start: Instant,
 ) -> Result<IngestImportResult, String> {
-    let mut inner = state.inner.lock().map_err(|e| e.to_string())?;
+    let mut capture = state.capture.write().map_err(|e| e.to_string())?;
+    let mut inventory = state.inventory.write().map_err(|e| e.to_string())?;
 
     let source_name = ingest
         .source
@@ -189,7 +189,7 @@ fn merge_ingest_result(
     let mut updated_count = 0;
 
     for ingested_asset in &ingest.assets {
-        if let Some(existing) = inner
+        if let Some(existing) = inventory
             .assets
             .iter_mut()
             .find(|a| a.ip_address == ingested_asset.ip_address)
@@ -200,7 +200,7 @@ fn merge_ingest_result(
         } else {
             // Create new asset
             let asset = create_asset_from_ingested(ingested_asset, is_active);
-            inner.assets.push(asset);
+            inventory.assets.push(asset);
             new_count += 1;
         }
     }
@@ -210,7 +210,7 @@ fn merge_ingest_result(
         let origin = format!("[{}]", source_name);
 
         // Check if this connection already exists
-        if let Some(existing) = inner.connections.iter_mut().find(|c| {
+        if let Some(existing) = capture.connections.iter_mut().find(|c| {
             c.src_ip == ingested_conn.src_ip
                 && c.dst_ip == ingested_conn.dst_ip
                 && c.src_port == ingested_conn.src_port
@@ -246,32 +246,32 @@ fn merge_ingest_result(
                     .unwrap_or_default(),
                 origin_files: vec![origin],
             };
-            inner.connections.push(conn);
+            capture.connections.push(conn);
         }
     }
 
     // Store ingest source for tracking
     if let Some(source) = ingest_source {
         let source_tag = format!("[{}]", source.display_name());
-        if !inner.imported_files.contains(&source_tag) {
-            inner.imported_files.push(source_tag);
+        if !capture.imported_files.contains(&source_tag) {
+            capture.imported_files.push(source_tag);
         }
     }
 
     // Store alerts for correlation
     for alert in &ingest.alerts {
-        inner.imported_alerts.push(ingested_alert_to_stored(alert));
+        inventory.imported_alerts.push(ingested_alert_to_stored(alert));
     }
 
     // Rebuild per-device Zeek event summaries after any Zeek import
     if ingest_source == Some(IngestSource::Zeek) {
-        rebuild_zeek_device_events(&mut inner);
+        inventory.zeek_device_events =
+            rebuild_zeek_device_events(&capture.connections, &inventory.imported_alerts);
     }
 
     // Rebuild topology from updated connections
-    // The topology builder needs to be re-run with new data
     let mut topo = gm_topology::TopologyBuilder::new();
-    for conn in &inner.connections {
+    for conn in &capture.connections {
         let protocol = IcsProtocol::from_name(&conn.protocol);
         topo.add_connection(
             &conn.src_ip,
@@ -282,11 +282,10 @@ fn merge_ingest_result(
             conn.byte_count,
         );
     }
-    inner.topology = topo.snapshot();
+    capture.topology = topo.snapshot();
 
     // Enrich topology nodes with asset data
-    // Collect asset lookup first to avoid borrow conflict
-    let asset_lookup: std::collections::HashMap<String, (Option<String>, String, u8)> = inner
+    let asset_lookup: std::collections::HashMap<String, (Option<String>, String, u8)> = inventory
         .assets
         .iter()
         .map(|a| {
@@ -297,7 +296,7 @@ fn merge_ingest_result(
         })
         .collect();
 
-    for node in &mut inner.topology.nodes {
+    for node in &mut capture.topology.nodes {
         if let Some((vendor, device_type, confidence)) = asset_lookup.get(&node.ip_address) {
             if let Some(ref v) = vendor {
                 node.vendor = Some(v.clone());
@@ -441,13 +440,16 @@ fn create_asset_from_ingested(ingested: &IngestedAsset, is_active: bool) -> Asse
 
 /// Rebuild per-device Zeek event summaries from all connections tagged with [Zeek].
 ///
-/// Called after each Zeek import. Replaces the previous zeek_device_events map.
-fn rebuild_zeek_device_events(inner: &mut AppStateInner) {
+/// Called after each Zeek import. Returns a new zeek_device_events map.
+fn rebuild_zeek_device_events(
+    connections: &[ConnectionInfo],
+    imported_alerts: &[StoredAlert],
+) -> HashMap<String, DeviceZeekEvents> {
     // Accumulate counts and sample events per device IP
     let mut map: HashMap<String, (DeviceZeekEvents, std::collections::HashSet<String>)> =
         HashMap::new();
 
-    for conn in &inner.connections {
+    for conn in connections {
         if !conn.origin_files.iter().any(|f| f.contains("Zeek")) {
             continue;
         }
@@ -504,21 +506,20 @@ fn rebuild_zeek_device_events(inner: &mut AppStateInner) {
     // Finalize unique_peers counts and correlate alerts
     let alert_map: HashMap<String, u32> = {
         let mut m: HashMap<String, u32> = HashMap::new();
-        for alert in &inner.imported_alerts {
+        for alert in imported_alerts {
             *m.entry(alert.src_ip.clone()).or_insert(0) += 1;
             *m.entry(alert.dst_ip.clone()).or_insert(0) += 1;
         }
         m
     };
 
-    inner.zeek_device_events = map
-        .into_iter()
+    map.into_iter()
         .map(|(ip, (mut events, peers))| {
             events.unique_peers = peers.len() as u32;
             events.alert_count = alert_map.get(&ip).copied().unwrap_or(0);
             (ip, events)
         })
-        .collect();
+        .collect()
 }
 
 /// Map a connection protocol string to a Zeek log type label.
@@ -541,8 +542,8 @@ pub async fn get_device_zeek_events(
     device_ip: String,
     state: State<'_, AppState>,
 ) -> Result<DeviceZeekEvents, String> {
-    let inner = state.inner.lock().map_err(|e| e.to_string())?;
-    Ok(inner
+    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
+    Ok(inventory
         .zeek_device_events
         .get(&device_ip)
         .cloned()

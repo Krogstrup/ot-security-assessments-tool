@@ -515,15 +515,19 @@ async fn import_pcap(
 
     let deep_parse_info = processor.build_deep_parse_info();
     let (assets, sig_results) = {
-        let state_inner = state
-            .inner
-            .lock()
+        let sigs = state
+            .signatures
+            .read()
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        let inv = state
+            .inventory
+            .read()
             .map_err(|e| ApiError::internal(e.to_string()))?;
         processor.build_assets(
-            &state_inner.signature_engine,
+            &sigs.signature_engine,
             &deep_parse_info,
-            &state_inner.oui_lookup,
-            &state_inner.geoip_lookup,
+            &inv.oui_lookup,
+            &inv.geoip_lookup,
         )
     };
 
@@ -558,21 +562,33 @@ async fn import_pcap(
         .collect();
 
     {
-        let mut state_inner = state
-            .inner
-            .lock()
+        let mut cap = state
+            .capture
+            .write()
             .map_err(|e| ApiError::internal(e.to_string()))?;
-        state_inner.topology = topology;
-        state_inner.assets = assets;
-        state_inner.connections = connection_list;
-        state_inner.packet_summaries = packet_summaries;
-        state_inner.deep_parse_info = deep_parse_info;
-        state_inner.connection_stats = connection_stats;
-        state_inner.pattern_anomalies = pattern_anomalies;
-        state_inner.redundancy_protocols = redundancy_protocols;
-        state_inner.imported_files.extend(imported_files);
-        state_inner.imported_files.sort();
-        state_inner.imported_files.dedup();
+        cap.topology = topology;
+        cap.connections = connection_list;
+        cap.packet_summaries = packet_summaries;
+        cap.redundancy_protocols = redundancy_protocols;
+        cap.imported_files.extend(imported_files);
+        cap.imported_files.sort();
+        cap.imported_files.dedup();
+    }
+    {
+        let mut inv = state
+            .inventory
+            .write()
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        inv.assets = assets;
+        inv.deep_parse_info = deep_parse_info;
+    }
+    {
+        let mut analysis = state
+            .analysis
+            .write()
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        analysis.connection_stats = connection_stats;
+        analysis.pattern_anomalies = pattern_anomalies;
     }
 
     let duration_ms = start.elapsed().as_millis() as u64;
@@ -589,11 +605,11 @@ async fn import_pcap(
 }
 
 async fn get_topology(State(state): State<SharedState>) -> Result<Json<TopologyGraph>, ApiError> {
-    let state_inner = state
-        .inner
-        .lock()
+    let cap = state
+        .capture
+        .read()
         .map_err(|e| ApiError::internal(e.to_string()))?;
-    let topo = &state_inner.topology;
+    let topo = &cap.topology;
 
     if topo.nodes.len() <= MAX_TOPOLOGY_NODES && topo.edges.len() <= MAX_TOPOLOGY_EDGES {
         return Ok(Json(topo.clone()));
@@ -620,15 +636,15 @@ async fn get_assets(
     State(state): State<SharedState>,
     Query(query): Query<PagingQuery>,
 ) -> Result<Json<AssetPage>, ApiError> {
-    let state_inner = state
-        .inner
-        .lock()
+    let inv = state
+        .inventory
+        .read()
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
     let page = query.page.unwrap_or(0);
     let page_size = query.page_size.unwrap_or(200);
 
-    let mut all_assets = state_inner.assets.clone();
+    let mut all_assets = inv.assets.clone();
     let total = all_assets.len();
 
     match query.sort_by.as_deref() {
@@ -665,15 +681,15 @@ async fn get_connections(
     State(state): State<SharedState>,
     Query(query): Query<PagingQuery>,
 ) -> Result<Json<ConnectionPage>, ApiError> {
-    let state_inner = state
-        .inner
-        .lock()
+    let cap = state
+        .capture
+        .read()
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
     let page = query.page.unwrap_or(0);
     let page_size = query.page_size.unwrap_or(500);
 
-    let mut all_connections = state_inner.connections.clone();
+    let mut all_connections = cap.connections.clone();
     let total = all_connections.len();
 
     match query.sort_by.as_deref() {
@@ -708,28 +724,32 @@ async fn get_connections(
 }
 
 async fn get_counts(State(state): State<SharedState>) -> Result<Json<DataCounts>, ApiError> {
-    let state_inner = state
-        .inner
-        .lock()
+    let cap = state
+        .capture
+        .read()
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let inv = state
+        .inventory
+        .read()
         .map_err(|e| ApiError::internal(e.to_string()))?;
     Ok(Json(DataCounts {
-        asset_count: state_inner.assets.len(),
-        connection_count: state_inner.connections.len(),
+        asset_count: inv.assets.len(),
+        connection_count: cap.connections.len(),
     }))
 }
 
 async fn get_protocol_stats(
     State(state): State<SharedState>,
 ) -> Result<Json<Vec<ProtocolStatInfo>>, ApiError> {
-    let state_inner = state
-        .inner
-        .lock()
+    let cap = state
+        .capture
+        .read()
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
     let mut stats: HashMap<String, ProtocolStatInfo> = HashMap::new();
     let mut devices_per_proto: HashMap<String, HashSet<String>> = HashMap::new();
 
-    for conn in &state_inner.connections {
+    for conn in &cap.connections {
         let entry = stats
             .entry(conn.protocol.clone())
             .or_insert_with(|| ProtocolStatInfo {
@@ -764,11 +784,11 @@ async fn get_connection_packets(
     State(state): State<SharedState>,
     Path(connection_id): Path<String>,
 ) -> Result<Json<Vec<commands::PacketSummary>>, ApiError> {
-    let state_inner = state
-        .inner
-        .lock()
+    let cap = state
+        .capture
+        .read()
         .map_err(|e| ApiError::internal(e.to_string()))?;
-    let packets = state_inner
+    let packets = cap
         .packet_summaries
         .get(&connection_id)
         .cloned()
@@ -864,18 +884,19 @@ fn flush_batch_headless(
 
     let deep_parse_info = processor.build_deep_parse_info();
     let (assets, sig_results) = {
-        let state_inner = match state.inner.lock() {
+        let sigs = match state.signatures.read() {
             Ok(v) => v,
-            Err(e) => {
-                log::error!("capture flush lock error: {}", e);
-                return;
-            }
+            Err(e) => { log::error!("capture flush signatures lock error: {}", e); return; }
+        };
+        let inv = match state.inventory.read() {
+            Ok(v) => v,
+            Err(e) => { log::error!("capture flush inventory lock error: {}", e); return; }
         };
         processor.build_assets(
-            &state_inner.signature_engine,
+            &sigs.signature_engine,
             &deep_parse_info,
-            &state_inner.oui_lookup,
-            &state_inner.geoip_lookup,
+            &inv.oui_lookup,
+            &inv.geoip_lookup,
         )
     };
 
@@ -900,15 +921,19 @@ fn flush_batch_headless(
     let (connection_stats, pattern_anomalies) = processor.build_pattern_results();
     let redundancy_protocols = processor.build_redundancy_info();
 
-    if let Ok(mut state_inner) = state.inner.lock() {
-        state_inner.topology = topology;
-        state_inner.assets = assets;
-        state_inner.connections = connections;
-        state_inner.packet_summaries = packet_summaries;
-        state_inner.deep_parse_info = deep_parse_info;
-        state_inner.connection_stats = connection_stats;
-        state_inner.pattern_anomalies = pattern_anomalies;
-        state_inner.redundancy_protocols = redundancy_protocols;
+    if let Ok(mut cap) = state.capture.write() {
+        cap.topology = topology;
+        cap.connections = connections;
+        cap.packet_summaries = packet_summaries;
+        cap.redundancy_protocols = redundancy_protocols;
+    }
+    if let Ok(mut inv) = state.inventory.write() {
+        inv.assets = assets;
+        inv.deep_parse_info = deep_parse_info;
+    }
+    if let Ok(mut analysis) = state.analysis.write() {
+        analysis.connection_stats = connection_stats;
+        analysis.pattern_anomalies = pattern_anomalies;
     }
 }
 
@@ -918,11 +943,11 @@ async fn start_capture_headless(
     bpf_filter: Option<String>,
 ) -> Result<(), ApiError> {
     {
-        let inner = state
-            .inner
-            .lock()
+        let cap = state
+            .capture
+            .read()
             .map_err(|e| ApiError::internal(e.to_string()))?;
-        if inner.live_capture.is_some() {
+        if cap.live_capture.is_some() {
             return Err(ApiError::bad_request(
                 "A capture is already running. Stop it first.",
             ));
@@ -941,12 +966,12 @@ async fn start_capture_headless(
         .map_err(|e| ApiError::bad_request(e.to_string()))?;
     let processing = spawn_processing_thread_headless(rx, state.clone());
 
-    let mut inner = state
-        .inner
-        .lock()
+    let mut cap = state
+        .capture
+        .write()
         .map_err(|e| ApiError::internal(e.to_string()))?;
-    inner.live_capture = Some(handle);
-    inner.processing_thread = Some(processing);
+    cap.live_capture = Some(handle);
+    cap.processing_thread = Some(processing);
 
     log::info!(
         "Headless live capture started on {} (filter: {:?})",

@@ -10,6 +10,9 @@
 //! compatible with the existing pipeline.
 
 pub mod error;
+pub mod models;
+
+pub use models::{DeviceZeekEvents, StoredAlert, ZeekEventSummary};
 pub mod masscan;
 pub mod nmap;
 pub mod sinema;
