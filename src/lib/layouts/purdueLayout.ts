@@ -1,7 +1,7 @@
 /**
  * Custom Cytoscape.js layout: 'purdue'
  *
- * Arranges device nodes into 7 horizontal Purdue Model bands (L0–L5 + unknown).
+ * Arranges device nodes into 7 horizontal Purdue Model bands (L0 to L5 + unknown).
  * Register once with: cytoscape('layout', 'purdue', PurdueLayout)
  * Use with:           cy.layout({ name: 'purdue' }).run()
  *
