@@ -54,7 +54,7 @@ export const PURDUE_LABELS: Record<number, string> = {
 	5: 'L5 — Enterprise Network'
 };
 
-// ── Device identification confidence scale (0–5) ──────────────────────────────
+// ── Device identification confidence scale (0 to 5) ──────────────────────────────
 
 export const CONFIDENCE_LABELS: Record<number, string> = {
 	0: '—',
