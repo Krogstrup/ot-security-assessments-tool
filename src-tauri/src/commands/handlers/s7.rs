@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use gm_capture::ParsedPacket;
 use gm_parsers::{DeepParseResult, S7Function, S7Role};
 
-use crate::commands::{S7Detail};
 use crate::commands::protocol_handler::{ProcessorOutput, ProtocolHandler};
+use crate::commands::S7Detail;
 
 /// Accumulates S7comm state per IP across all packets.
 #[derive(Default)]

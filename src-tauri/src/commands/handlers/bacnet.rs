@@ -5,8 +5,8 @@ use std::collections::{HashMap, HashSet};
 use gm_capture::ParsedPacket;
 use gm_parsers::{BacnetObjectType, BacnetRole, BacnetService, DeepParseResult};
 
-use crate::commands::BacnetDetail;
 use crate::commands::protocol_handler::{ProcessorOutput, ProtocolHandler};
+use crate::commands::BacnetDetail;
 
 /// Accumulates BACnet state per IP across all packets.
 #[derive(Default)]

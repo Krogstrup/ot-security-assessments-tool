@@ -13,6 +13,7 @@ use gm_parsers::{IcsProtocol, RedundancyInfo};
 use gm_signatures::SignatureEngine;
 use gm_topology::TopologyBuilder;
 
+use super::protocol_handler::{ProcessorCore, ProcessorOutput, ProtocolHandler};
 use super::{
     handlers::{
         bacnet::BacnetHandler, dnp3::Dnp3Handler, enip::EnipHandler, iec104::Iec104Handler,
@@ -21,8 +22,6 @@ use super::{
     infer_device_type, AssetInfo, AssetSignatureMatch, ConnectionInfo, DeepParseInfo,
     PacketSummary,
 };
-use super::protocol_handler::{ProcessorCore, ProcessorOutput, ProtocolHandler};
-
 
 /// Processes packets through the full pipeline:
 /// protocol identification → deep parse → connection tracking → topology building.
@@ -65,9 +64,9 @@ impl PacketProcessor {
 
     /// Process a single packet through the pipeline.
     pub fn process_packet(&mut self, packet: &ParsedPacket) {
-        if let Some(deep_result) = self
-            .core
-            .process(packet, &mut self.topo_builder, &mut self.total_packets)
+        if let Some(deep_result) =
+            self.core
+                .process(packet, &mut self.topo_builder, &mut self.total_packets)
         {
             for handler in &mut self.handlers {
                 handler.process(packet, &deep_result);
@@ -135,7 +134,8 @@ impl PacketProcessor {
 
         for ip in &all_ips {
             let protocols: Vec<IcsProtocol> = self
-                .core.asset_protocols
+                .core
+                .asset_protocols
                 .get(ip)
                 .map(|s| s.iter().copied().collect())
                 .unwrap_or_default();
@@ -253,8 +253,18 @@ impl PacketProcessor {
                     .iter()
                     .map(|p| format!("{:?}", p).to_lowercase())
                     .collect(),
-                first_seen: self.core.asset_first_seen.get(ip).cloned().unwrap_or_default(),
-                last_seen: self.core.asset_last_seen.get(ip).cloned().unwrap_or_default(),
+                first_seen: self
+                    .core
+                    .asset_first_seen
+                    .get(ip)
+                    .cloned()
+                    .unwrap_or_default(),
+                last_seen: self
+                    .core
+                    .asset_last_seen
+                    .get(ip)
+                    .cloned()
+                    .unwrap_or_default(),
                 notes: String::new(),
                 purdue_level: None,
                 tags: Vec::new(),

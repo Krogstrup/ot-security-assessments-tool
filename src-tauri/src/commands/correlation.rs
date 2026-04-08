@@ -5,7 +5,6 @@
 //! "External Alerts" tab in AnalysisView and the device detail panel.
 
 use serde::Serialize;
-use tauri::State;
 
 use super::{AppState, InventoryState, StoredAlert};
 
@@ -39,10 +38,7 @@ pub struct CorrelatedAlert {
 // ─── Commands ────────────────────────────────────────────────
 
 /// Return all imported IDS/SIEM alerts, enriched with device inventory data.
-#[tauri::command]
-pub async fn get_correlated_alerts(
-    state: State<'_, AppState>,
-) -> Result<Vec<CorrelatedAlert>, String> {
+pub async fn get_correlated_alerts(state: &AppState) -> Result<Vec<CorrelatedAlert>, String> {
     let inventory = state.inventory.read().map_err(|e| e.to_string())?;
     let mut alerts: Vec<CorrelatedAlert> = inventory
         .imported_alerts
@@ -59,10 +55,9 @@ pub async fn get_correlated_alerts(
 }
 
 /// Return alerts involving a specific IP address (as src or dst).
-#[tauri::command]
 pub async fn get_alerts_for_ip(
     ip: String,
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<Vec<CorrelatedAlert>, String> {
     let inventory = state.inventory.read().map_err(|e| e.to_string())?;
     let mut alerts: Vec<CorrelatedAlert> = inventory
@@ -80,8 +75,7 @@ pub async fn get_alerts_for_ip(
 }
 
 /// Clear all stored alerts.
-#[tauri::command]
-pub async fn clear_alerts(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn clear_alerts(state: &AppState) -> Result<(), String> {
     let mut inventory = state.inventory.write().map_err(|e| e.to_string())?;
     inventory.imported_alerts.clear();
     log::info!("Cleared all imported alerts");
@@ -92,10 +86,8 @@ pub async fn clear_alerts(state: State<'_, AppState>) -> Result<(), String> {
 
 /// Enrich a StoredAlert with device inventory info from InventoryState.
 fn correlate_alert(alert: &StoredAlert, inventory: &InventoryState) -> CorrelatedAlert {
-    let (src_hostname, src_device_type, src_purdue_level) =
-        lookup_device(&alert.src_ip, inventory);
-    let (dst_hostname, dst_device_type, dst_purdue_level) =
-        lookup_device(&alert.dst_ip, inventory);
+    let (src_hostname, src_device_type, src_purdue_level) = lookup_device(&alert.src_ip, inventory);
+    let (dst_hostname, dst_device_type, dst_purdue_level) = lookup_device(&alert.dst_ip, inventory);
 
     CorrelatedAlert {
         timestamp: alert.timestamp.clone(),

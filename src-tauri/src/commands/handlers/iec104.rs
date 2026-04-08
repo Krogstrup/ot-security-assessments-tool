@@ -5,8 +5,8 @@ use std::collections::{HashMap, HashSet};
 use gm_capture::ParsedPacket;
 use gm_parsers::{AsduTypeId, DeepParseResult, Iec104Role};
 
-use crate::commands::{Iec104Detail};
 use crate::commands::protocol_handler::{ProcessorOutput, ProtocolHandler};
+use crate::commands::Iec104Detail;
 
 /// Accumulates IEC 60870-5-104 state per IP across all packets.
 #[derive(Default)]

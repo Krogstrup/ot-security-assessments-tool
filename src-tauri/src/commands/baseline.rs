@@ -5,7 +5,6 @@
 
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
-use tauri::State;
 
 use super::{AppState, AssetInfo};
 
@@ -89,10 +88,9 @@ pub struct DriftSummary {
 ///
 /// Lock strategy: snapshot current data first (without holding any lock),
 /// then query the DB under the session lock.  No locks are held simultaneously.
-#[tauri::command]
 pub fn compare_sessions(
     baseline_session_id: String,
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<BaselineDiff, String> {
     // Step 1: snapshot current assets and connections (no locks held after scope).
     let current_assets_vec: Vec<AssetInfo> = state

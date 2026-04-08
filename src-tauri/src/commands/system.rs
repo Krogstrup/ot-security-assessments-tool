@@ -2,10 +2,6 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// List all available network interfaces.
-///
-/// This is the Phase 0 deliverable — proof that the Rust backend
-/// is communicating with the SvelteKit frontend via Tauri IPC.
-#[tauri::command]
 pub fn list_interfaces() -> Result<Vec<gm_capture::NetworkInterface>, String> {
     gm_capture::list_interfaces().map_err(|e| e.to_string())
 }
@@ -17,7 +13,6 @@ pub struct AppInfo {
 }
 
 /// Get application version info.
-#[tauri::command]
 pub fn get_app_info() -> AppInfo {
     AppInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
@@ -54,7 +49,6 @@ fn settings_path() -> Result<PathBuf, String> {
 }
 
 /// Load user settings from disk. Returns defaults if file doesn't exist.
-#[tauri::command]
 pub fn get_settings() -> Result<UserSettings, String> {
     let path = settings_path()?;
     if !path.exists() {
@@ -65,7 +59,6 @@ pub fn get_settings() -> Result<UserSettings, String> {
 }
 
 /// Save user settings to disk.
-#[tauri::command]
 pub fn save_settings(settings: UserSettings) -> Result<(), String> {
     let path = settings_path()?;
     if let Some(parent) = path.parent() {
@@ -93,7 +86,6 @@ pub struct PluginManifest {
 /// List plugins found in the plugins directory.
 ///
 /// Scans ~/.kusanaginokajiki/plugins/ for manifest.json files.
-#[tauri::command]
 pub fn list_plugins() -> Result<Vec<PluginManifest>, String> {
     let home = dirs::home_dir().ok_or("Could not determine home directory")?;
     let plugins_dir = home.join(".kusanaginokajiki").join("plugins");

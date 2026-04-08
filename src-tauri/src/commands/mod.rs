@@ -1,9 +1,9 @@
 pub mod analysis;
 pub mod baseline;
 pub mod capture;
-pub mod error;
 pub mod correlation;
 pub mod data;
+pub mod error;
 pub mod export;
 pub mod handlers;
 pub mod ingest;
@@ -27,12 +27,12 @@ pub use gm_models::{
     AssetInfo, AssetSignatureMatch, ConnectionInfo, PacketSummary, ProtocolStatInfo,
 };
 use gm_parsers::IcsProtocol;
+use gm_parsers::RedundancyInfo;
 pub use gm_parsers::{
     BacnetDetail, DeepParseInfo, Dnp3Detail, Dnp3Relationship, EnipDetail, FunctionCodeStat,
-    Iec104Detail, LldpDetail, ModbusDetail, ModbusDeviceIdInfo, ModbusRelationship, PollingInterval,
-    ProfinetDcpDetail, RegisterRangeInfo, S7Detail, SnmpDetail,
+    Iec104Detail, LldpDetail, ModbusDetail, ModbusDeviceIdInfo, ModbusRelationship,
+    PollingInterval, ProfinetDcpDetail, RegisterRangeInfo, S7Detail, SnmpDetail,
 };
-use gm_parsers::RedundancyInfo;
 use gm_physical::{InferredTopology, PhysicalTopology};
 use gm_segmentation::SegmentationReport;
 use gm_signatures::SignatureEngine;
@@ -106,7 +106,7 @@ pub struct SignatureState {
 
 // ── AppState ─────────────────────────────────────────────────────────────────
 
-/// Shared application state, managed by Tauri.
+/// Shared application state for the Web/API runtime.
 ///
 /// Each domain has its own lock, scoped to the set of fields it owns.
 /// Use `RwLock` for read-heavy domains (concurrent UI reads) and `Mutex`
@@ -136,7 +136,7 @@ pub struct AppState {
     /// acquiring the heavy capture lock.
     pub import_cancelled: Arc<AtomicBool>,
     /// Optional SSE broadcast channel for real-time web event streaming.
-    /// Set by the web binary; None in the Tauri desktop binary.
+    /// Set by the web binary when event streaming is enabled.
     pub event_tx: Option<broadcast::Sender<(String, serde_json::Value)>>,
 }
 
@@ -166,22 +166,24 @@ impl AppState {
         }
 
         // Load OUI database
-        let oui_lookup = OuiLookup::load_from_file(&paths.oui_path)
-            .unwrap_or_else(|e| {
-                log::warn!("Failed to load OUI from {}: {}", paths.oui_path.display(), e);
-                OuiLookup::empty()
-            });
+        let oui_lookup = OuiLookup::load_from_file(&paths.oui_path).unwrap_or_else(|e| {
+            log::warn!(
+                "Failed to load OUI from {}: {}",
+                paths.oui_path.display(),
+                e
+            );
+            OuiLookup::empty()
+        });
 
         // Load GeoIP database
-        let geoip_lookup = GeoIpLookup::load_from_file(&paths.geoip_path)
-            .unwrap_or_else(|e| {
-                log::warn!(
-                    "Failed to load GeoIP from {}: {}",
-                    paths.geoip_path.display(),
-                    e
-                );
-                GeoIpLookup::empty()
-            });
+        let geoip_lookup = GeoIpLookup::load_from_file(&paths.geoip_path).unwrap_or_else(|e| {
+            log::warn!(
+                "Failed to load GeoIP from {}: {}",
+                paths.geoip_path.display(),
+                e
+            );
+            GeoIpLookup::empty()
+        });
 
         // Open SQLite database at ~/.kusanaginokajiki/data.db
         let db = match dirs::home_dir() {

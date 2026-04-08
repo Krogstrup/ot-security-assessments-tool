@@ -3,7 +3,6 @@
 //! Provides commands to list, reload, and test signatures from the frontend.
 
 use serde::Serialize;
-use tauri::State;
 
 use gm_signatures::{PacketData, Signature};
 
@@ -64,8 +63,7 @@ pub struct TestResultInfo {
 }
 
 /// Get all loaded signatures.
-#[tauri::command]
-pub fn get_signatures(state: State<'_, AppState>) -> Result<SignatureSummary, String> {
+pub fn get_signatures(state: &AppState) -> Result<SignatureSummary, String> {
     let sigs_state = state.signatures.read().map_err(|e| e.to_string())?;
     let sigs: Vec<SignatureInfo> = sigs_state
         .signature_engine
@@ -81,8 +79,7 @@ pub fn get_signatures(state: State<'_, AppState>) -> Result<SignatureSummary, St
 }
 
 /// Reload signatures from disk.
-#[tauri::command]
-pub fn reload_signatures(state: State<'_, AppState>) -> Result<usize, String> {
+pub fn reload_signatures(state: &AppState) -> Result<usize, String> {
     let mut sigs_state = state.signatures.write().map_err(|e| e.to_string())?;
     let count = sigs_state
         .signature_engine
@@ -96,11 +93,7 @@ pub fn reload_signatures(state: State<'_, AppState>) -> Result<usize, String> {
 ///
 /// The frontend sends raw YAML text; we parse it, run it against
 /// all stored packet summaries' connection data, and return matches.
-#[tauri::command]
-pub fn test_signature(
-    yaml: String,
-    state: State<'_, AppState>,
-) -> Result<SignatureTestResult, String> {
+pub fn test_signature(yaml: String, state: &AppState) -> Result<SignatureTestResult, String> {
     // Lock order: capture → signatures (no shared lock ordering issue since
     // signatures is always acquired after capture in all command paths)
     let capture = state.capture.read().map_err(|e| e.to_string())?;

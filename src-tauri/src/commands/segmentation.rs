@@ -4,8 +4,6 @@
 //! Assembles a `SegmentationInput` from AppState, runs the full
 //! 15A–15E pipeline, and caches the result for export.
 
-use tauri::State;
-
 use std::collections::{HashMap, HashSet};
 
 use gm_segmentation::{
@@ -285,8 +283,7 @@ fn compute_subnet_24(ip: &str) -> Option<String> {
 /// calls without re-running analysis.
 ///
 /// Lock order: capture → inventory → analysis (read), then segmentation (write).
-#[tauri::command]
-pub fn run_segmentation(state: State<'_, AppState>) -> Result<SegmentationReport, String> {
+pub fn run_segmentation(state: &AppState) -> Result<SegmentationReport, String> {
     let capture = state.capture.read().map_err(|e| e.to_string())?;
     let inventory = state.inventory.read().map_err(|e| e.to_string())?;
     let analysis = state.analysis.read().map_err(|e| e.to_string())?;
@@ -317,11 +314,7 @@ pub fn run_segmentation(state: State<'_, AppState>) -> Result<SegmentationReport
 ///
 /// Returns the full text content of the generated configuration file.
 /// Returns an error if `run_segmentation` has not been called yet in this session.
-#[tauri::command]
-pub fn export_enforcement_config(
-    format: String,
-    state: State<'_, AppState>,
-) -> Result<String, String> {
+pub fn export_enforcement_config(format: String, state: &AppState) -> Result<String, String> {
     let seg = state.segmentation.read().map_err(|e| e.to_string())?;
 
     let report = seg.segmentation_report.as_ref().ok_or_else(|| {

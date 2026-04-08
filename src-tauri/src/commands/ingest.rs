@@ -6,7 +6,6 @@
 use serde::Serialize;
 use std::path::Path;
 use std::time::Instant;
-use tauri::State;
 
 use std::collections::HashMap;
 
@@ -30,10 +29,9 @@ pub struct IngestImportResult {
 }
 
 /// Import Zeek TSV log files (conn.log, modbus.log, dnp3.log, s7comm.log).
-#[tauri::command]
 pub async fn import_zeek_logs(
     paths: Vec<String>,
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<IngestImportResult, String> {
     let start = Instant::now();
 
@@ -55,10 +53,9 @@ pub async fn import_zeek_logs(
 }
 
 /// Import a Suricata eve.json file.
-#[tauri::command]
 pub async fn import_suricata_eve(
     path: String,
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<IngestImportResult, String> {
     let start = Instant::now();
 
@@ -83,11 +80,7 @@ pub async fn import_suricata_eve(
 ///
 /// **WARNING:** This imports results from an ACTIVE SCAN performed externally.
 /// Kusanagi Kajiki NEVER performs active scans itself.
-#[tauri::command]
-pub async fn import_nmap_xml(
-    path: String,
-    state: State<'_, AppState>,
-) -> Result<IngestImportResult, String> {
+pub async fn import_nmap_xml(path: String, state: &AppState) -> Result<IngestImportResult, String> {
     let start = Instant::now();
 
     let ingest_result =
@@ -109,10 +102,9 @@ pub async fn import_nmap_xml(
 ///
 /// Accepts both line-delimited JSON and JSON array formats.
 /// Alerts are stored for correlation with the device inventory.
-#[tauri::command]
 pub async fn import_wazuh_alerts(
     path: String,
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<IngestImportResult, String> {
     let start = Instant::now();
 
@@ -134,10 +126,9 @@ pub async fn import_wazuh_alerts(
 ///
 /// **WARNING:** This imports results from an ACTIVE SCAN performed externally.
 /// Kusanagi Kajiki NEVER performs active scans itself.
-#[tauri::command]
 pub async fn import_masscan_json(
     path: String,
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<IngestImportResult, String> {
     let start = Instant::now();
 
@@ -260,7 +251,9 @@ fn merge_ingest_result(
 
     // Store alerts for correlation
     for alert in &ingest.alerts {
-        inventory.imported_alerts.push(ingested_alert_to_stored(alert));
+        inventory
+            .imported_alerts
+            .push(ingested_alert_to_stored(alert));
     }
 
     // Rebuild per-device Zeek event summaries after any Zeek import
@@ -537,10 +530,9 @@ fn classify_zeek_log_type(protocol: &str, dst_port: u16) -> String {
 }
 
 /// Get Zeek-observed event statistics for a specific device IP.
-#[tauri::command]
 pub async fn get_device_zeek_events(
     device_ip: String,
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<DeviceZeekEvents, String> {
     let inventory = state.inventory.read().map_err(|e| e.to_string())?;
     Ok(inventory
@@ -557,10 +549,9 @@ pub async fn get_device_zeek_events(
 ///
 /// SINEMA Server exports device lists with IP, MAC, model, firmware, and location.
 /// Data is merged with existing passively-discovered assets.
-#[tauri::command]
 pub async fn import_sinema_csv(
     path: String,
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<IngestImportResult, String> {
     let start = Instant::now();
 
@@ -583,11 +574,7 @@ pub async fn import_sinema_csv(
 ///
 /// Extracts device names, IP addresses, hardware models, and firmware versions
 /// from TIA Portal V15+ XML exports.
-#[tauri::command]
-pub async fn import_tia_xml(
-    path: String,
-    state: State<'_, AppState>,
-) -> Result<IngestImportResult, String> {
+pub async fn import_tia_xml(path: String, state: &AppState) -> Result<IngestImportResult, String> {
     let start = Instant::now();
 
     let ingest_result =

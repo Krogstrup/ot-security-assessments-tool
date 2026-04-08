@@ -5,11 +5,11 @@ use std::collections::{HashMap, HashSet};
 use gm_capture::ParsedPacket;
 use gm_parsers::{modbus_function_code_name, DeepParseResult, ModbusRole};
 
-use crate::commands::{
-    FunctionCodeStat, ModbusDetail, ModbusDeviceIdInfo, ModbusRelationship,
-    PollingInterval, RegisterRangeInfo,
-};
 use crate::commands::protocol_handler::{ProcessorOutput, ProtocolHandler};
+use crate::commands::{
+    FunctionCodeStat, ModbusDetail, ModbusDeviceIdInfo, ModbusRelationship, PollingInterval,
+    RegisterRangeInfo,
+};
 
 /// Accumulates Modbus state per IP across all packets.
 #[derive(Default)]
@@ -70,7 +70,8 @@ impl ProtocolHandler for ModbusHandler {
         }
 
         if let Some(ref dev_id) = info.device_id {
-            self.device_ids.insert(packet.src_ip.clone(), dev_id.clone());
+            self.device_ids
+                .insert(packet.src_ip.clone(), dev_id.clone());
         }
 
         let (local_ip, remote_ip, remote_role) = match info.role {
@@ -94,7 +95,10 @@ impl ProtocolHandler for ModbusHandler {
                 info.function_code,
                 info.unit_id,
             );
-            self.polling_timestamps.entry(key).or_default().push(ts_epoch);
+            self.polling_timestamps
+                .entry(key)
+                .or_default()
+                .push(ts_epoch);
         }
     }
 
@@ -155,12 +159,14 @@ impl ProtocolHandler for ModbusHandler {
                 .map(|range_map| {
                     let mut ranges: Vec<RegisterRangeInfo> = range_map
                         .iter()
-                        .map(|((start, count, reg_type), &access_count)| RegisterRangeInfo {
-                            start: *start,
-                            count: *count,
-                            register_type: reg_type.clone(),
-                            access_count,
-                        })
+                        .map(
+                            |((start, count, reg_type), &access_count)| RegisterRangeInfo {
+                                start: *start,
+                                count: *count,
+                                register_type: reg_type.clone(),
+                                access_count,
+                            },
+                        )
                         .collect();
                     ranges.sort_by(|a, b| a.start.cmp(&b.start));
                     ranges
@@ -200,8 +206,7 @@ impl ProtocolHandler for ModbusHandler {
             for ((src, dst, fc, uid), timestamps) in &self.polling_timestamps {
                 if src == ip && timestamps.len() >= 3 {
                     let mut sorted_ts = timestamps.clone();
-                    sorted_ts
-                        .sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                    sorted_ts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
                     let intervals: Vec<f64> = sorted_ts
                         .windows(2)

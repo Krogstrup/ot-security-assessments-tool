@@ -1,15 +1,13 @@
 //! Project management commands: create, list, get, update, delete, set active.
 
 use gm_db::{Project, ProjectInput, ProjectSummary};
-use tauri::State;
 
 use super::AppState;
 
 /// Create a new project.
 #[allow(clippy::too_many_arguments)]
-#[tauri::command]
 pub async fn create_project(
-    state: State<'_, AppState>,
+    state: &AppState,
     name: String,
     client_name: Option<String>,
     site_name: Option<String>,
@@ -33,16 +31,14 @@ pub async fn create_project(
 }
 
 /// List all projects with session counts.
-#[tauri::command]
-pub async fn list_projects(state: State<'_, AppState>) -> Result<Vec<ProjectSummary>, String> {
+pub async fn list_projects(state: &AppState) -> Result<Vec<ProjectSummary>, String> {
     let inner = state.session.lock().map_err(|e| e.to_string())?;
     let db = inner.db.as_ref().ok_or("Database not available")?;
     db.list_projects().map_err(|e| e.to_string())
 }
 
 /// Get a single project by ID.
-#[tauri::command]
-pub async fn get_project(state: State<'_, AppState>, id: i64) -> Result<Project, String> {
+pub async fn get_project(state: &AppState, id: i64) -> Result<Project, String> {
     let inner = state.session.lock().map_err(|e| e.to_string())?;
     let db = inner.db.as_ref().ok_or("Database not available")?;
     db.get_project(id).map_err(|e| e.to_string())
@@ -50,9 +46,8 @@ pub async fn get_project(state: State<'_, AppState>, id: i64) -> Result<Project,
 
 /// Update a project's metadata.
 #[allow(clippy::too_many_arguments)]
-#[tauri::command]
 pub async fn update_project(
-    state: State<'_, AppState>,
+    state: &AppState,
     id: i64,
     name: String,
     client_name: Option<String>,
@@ -77,8 +72,7 @@ pub async fn update_project(
 }
 
 /// Delete a project (and cascade to all its sessions).
-#[tauri::command]
-pub async fn delete_project(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+pub async fn delete_project(state: &AppState, id: i64) -> Result<(), String> {
     let mut inner = state.session.lock().map_err(|e| e.to_string())?;
     let db = inner.db.as_ref().ok_or("Database not available")?;
     db.delete_project(id).map_err(|e| e.to_string())?;
@@ -92,8 +86,7 @@ pub async fn delete_project(state: State<'_, AppState>, id: i64) -> Result<(), S
 
 /// Set the active project. All subsequent save_session / list_sessions calls
 /// will be scoped to this project.
-#[tauri::command]
-pub async fn set_active_project(state: State<'_, AppState>, id: i64) -> Result<Project, String> {
+pub async fn set_active_project(state: &AppState, id: i64) -> Result<Project, String> {
     let mut inner = state.session.lock().map_err(|e| e.to_string())?;
     let db = inner.db.as_ref().ok_or("Database not available")?;
     let project = db.get_project(id).map_err(|e| e.to_string())?;
@@ -103,8 +96,7 @@ pub async fn set_active_project(state: State<'_, AppState>, id: i64) -> Result<P
 }
 
 /// Clear the active project (return to project selection view).
-#[tauri::command]
-pub async fn clear_active_project(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn clear_active_project(state: &AppState) -> Result<(), String> {
     let mut inner = state.session.lock().map_err(|e| e.to_string())?;
     inner.current_project_id = None;
     Ok(())

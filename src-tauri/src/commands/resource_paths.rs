@@ -2,9 +2,7 @@ use std::path::PathBuf;
 
 /// Resolved paths for bundled runtime resources (signatures, OUI, GeoIP).
 ///
-/// Use [`ResourcePaths::from_resource_dir`] in Tauri builds (pass the result of
-/// `app.path().resource_dir()`) and [`ResourcePaths::from_env`] in headless/web
-/// builds.
+/// Web/API builds resolve paths from environment variables plus local fallbacks.
 pub struct ResourcePaths {
     pub signatures_dir: PathBuf,
     pub oui_path: PathBuf,
@@ -12,17 +10,6 @@ pub struct ResourcePaths {
 }
 
 impl ResourcePaths {
-    /// Build paths rooted at an already-resolved resource directory.
-    ///
-    /// For Tauri builds: `app.path().resource_dir().unwrap_or_else(...)`.
-    pub fn from_resource_dir(resource_dir: PathBuf) -> Self {
-        Self {
-            signatures_dir: resource_dir.join("signatures"),
-            oui_path: resource_dir.join("data").join("oui.tsv"),
-            geoip_path: resource_dir.join("data").join("dbip-country-lite.mmdb"),
-        }
-    }
-
     /// Resolve for headless/web builds: env vars, then CWD-relative fallbacks.
     ///
     /// Environment variables:
@@ -43,11 +30,15 @@ impl ResourcePaths {
     }
 
     fn probe_signatures_dir() -> PathBuf {
-        ["signatures", "../src-tauri/signatures", "src-tauri/signatures"]
-            .iter()
-            .map(PathBuf::from)
-            .find(|p| p.exists())
-            .unwrap_or_else(|| PathBuf::from("signatures"))
+        [
+            "signatures",
+            "../src-tauri/signatures",
+            "src-tauri/signatures",
+        ]
+        .iter()
+        .map(PathBuf::from)
+        .find(|p| p.exists())
+        .unwrap_or_else(|| PathBuf::from("signatures"))
     }
 
     fn probe_data_dir() -> PathBuf {

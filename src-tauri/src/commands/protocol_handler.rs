@@ -189,7 +189,8 @@ impl ProcessorCore {
         // SNMP GET-Response: extract device identity from responses (src port 161).
         if packet.src_port == 161 && !packet.payload.is_empty() {
             if let Some(dev_info) = parse_snmp_response(&packet.payload) {
-                self.snmp_device_info.insert(packet.src_ip.clone(), dev_info);
+                self.snmp_device_info
+                    .insert(packet.src_ip.clone(), dev_info);
             }
         }
 

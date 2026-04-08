@@ -6,7 +6,6 @@
 
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
-use tauri::State;
 
 use gm_analysis::{
     allowlist_to_csv, format_firewall_rules, generate_allowlist, AllowlistEntry, AssetSnapshot,
@@ -156,11 +155,7 @@ fn state_connections_to_snapshots(capture: &CaptureState) -> Vec<ConnectionSnaps
 // ─── CSV Export Commands ─────────────────────────────────────
 
 /// Export all assets as CSV, writing to the specified file path.
-#[tauri::command]
-pub async fn export_assets_csv(
-    output_path: String,
-    state: State<'_, AppState>,
-) -> Result<String, String> {
+pub async fn export_assets_csv(output_path: String, state: &AppState) -> Result<String, String> {
     let inv = state.inventory.read().map_err(|e| e.to_string())?;
     let assets = state_assets_to_export(&inv);
     let csv = gm_report::csv_export::assets_to_csv(&assets).map_err(|e| e.to_string())?;
@@ -170,10 +165,9 @@ pub async fn export_assets_csv(
 }
 
 /// Export all connections as CSV, writing to the specified file path.
-#[tauri::command]
 pub async fn export_connections_csv(
     output_path: String,
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<String, String> {
     let cap = state.capture.read().map_err(|e| e.to_string())?;
     let connections = state_connections_to_export(&cap);
@@ -190,11 +184,7 @@ pub async fn export_connections_csv(
 // ─── JSON Export Commands ────────────────────────────────────
 
 /// Export the full topology (assets + connections + stats) as JSON.
-#[tauri::command]
-pub async fn export_topology_json(
-    output_path: String,
-    state: State<'_, AppState>,
-) -> Result<String, String> {
+pub async fn export_topology_json(output_path: String, state: &AppState) -> Result<String, String> {
     // Lock order: capture → inventory → session
     let capture = state.capture.read().map_err(|e| e.to_string())?;
     let inventory = state.inventory.read().map_err(|e| e.to_string())?;
@@ -214,11 +204,7 @@ pub async fn export_topology_json(
 }
 
 /// Export all assets as JSON.
-#[tauri::command]
-pub async fn export_assets_json(
-    output_path: String,
-    state: State<'_, AppState>,
-) -> Result<String, String> {
+pub async fn export_assets_json(output_path: String, state: &AppState) -> Result<String, String> {
     let inv = state.inventory.read().map_err(|e| e.to_string())?;
     let assets = state_assets_to_export(&inv);
     let json = gm_report::json_export::assets_to_json(&assets).map_err(|e| e.to_string())?;
@@ -244,11 +230,10 @@ pub struct ReportConfigInput {
 }
 
 /// Generate a PDF assessment report.
-#[tauri::command]
 pub async fn generate_pdf_report(
     config: ReportConfigInput,
     output_path: String,
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<String, String> {
     // Lock order: capture → inventory → session
     let capture = state.capture.read().map_err(|e| e.to_string())?;
@@ -287,11 +272,10 @@ pub async fn generate_pdf_report(
 
 /// Export asset inventory as SBOM (CISA BOD 23-01 format).
 /// `format` can be "csv" or "json".
-#[tauri::command]
 pub async fn export_sbom(
     format: String,
     output_path: String,
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<String, String> {
     let inv = state.inventory.read().map_err(|e| e.to_string())?;
     let assets = state_assets_to_export(&inv);
@@ -321,11 +305,7 @@ pub async fn export_sbom(
 // ─── STIX 2.1 Export Command ─────────────────────────────────
 
 /// Export as STIX 2.1 bundle (JSON).
-#[tauri::command]
-pub async fn export_stix_bundle(
-    output_path: String,
-    state: State<'_, AppState>,
-) -> Result<String, String> {
+pub async fn export_stix_bundle(output_path: String, state: &AppState) -> Result<String, String> {
     let capture = state.capture.read().map_err(|e| e.to_string())?;
     let inventory = state.inventory.read().map_err(|e| e.to_string())?;
 
@@ -360,12 +340,11 @@ pub struct FilteredPcapResult {
 /// If both filters are empty, all packets are exported (full copy).
 ///
 /// Only real PCAP file paths are read; ingest-source tags like `[Suricata]` are skipped.
-#[tauri::command]
 pub async fn export_filtered_pcap(
     filter_ips: Vec<String>,
     filter_ports: Vec<u16>,
     output_path: String,
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<FilteredPcapResult, String> {
     let input_paths = state
         .capture
@@ -402,7 +381,6 @@ pub async fn export_filtered_pcap(
 
 /// Save topology image data (PNG base64 or SVG string) to a file.
 /// The frontend captures the image from Cytoscape and sends it here.
-#[tauri::command]
 pub async fn save_topology_image(
     image_data: String,
     output_path: String,
@@ -431,9 +409,8 @@ pub async fn save_topology_image(
 ///
 /// Returns one entry per unique observed flow, enriched with frequency,
 /// classification, and human-readable justification.
-#[tauri::command]
 pub async fn generate_communication_allowlist(
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<Vec<AllowlistEntry>, String> {
     // Lock order: capture → inventory → analysis
     let capture = state.capture.read().map_err(|e| e.to_string())?;
@@ -452,11 +429,7 @@ pub async fn generate_communication_allowlist(
 }
 
 /// Export the communication allowlist as a CSV file.
-#[tauri::command]
-pub async fn export_allowlist_csv(
-    output_path: String,
-    state: State<'_, AppState>,
-) -> Result<String, String> {
+pub async fn export_allowlist_csv(output_path: String, state: &AppState) -> Result<String, String> {
     // Lock order: capture → inventory → analysis
     let capture = state.capture.read().map_err(|e| e.to_string())?;
     let inventory = state.inventory.read().map_err(|e| e.to_string())?;
@@ -482,10 +455,9 @@ pub async fn export_allowlist_csv(
 }
 
 /// Export firewall rule suggestions derived from the communication allowlist.
-#[tauri::command]
 pub async fn export_firewall_rules(
     output_path: String,
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<String, String> {
     // Lock order: capture → inventory → analysis
     let capture = state.capture.read().map_err(|e| e.to_string())?;

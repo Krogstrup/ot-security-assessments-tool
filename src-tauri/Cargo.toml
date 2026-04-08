@@ -26,10 +26,6 @@ members = [
 ]
 
 [dependencies]
-# Tauri State type — used by command handlers via state_ref() in web binary.
-# TODO: refactor command signatures to Arc<AppState> and remove this dependency.
-tauri = { version = "2", features = [] }
-
 # Workspace crates
 gm-constants = { path = "crates/gm-constants" }
 gm-models = { path = "crates/gm-models" }

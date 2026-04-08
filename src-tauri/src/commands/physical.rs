@@ -5,7 +5,6 @@
 //! Also supports traffic-inferred topology from observed packet flows.
 
 use std::path::Path;
-use tauri::State;
 
 use gm_physical::inference::{AssetSnapshot as InfAssetSnapshot, ConnSnapshot, InferenceInput};
 use gm_physical::{aruba, cisco, inference, juniper, InferredTopology, PhysicalTopology};
@@ -16,11 +15,7 @@ use super::AppState;
 ///
 /// Parses the config for hostname, interfaces, VLANs, and IPs,
 /// then adds the switch to the physical topology.
-#[tauri::command]
-pub fn import_cisco_config(
-    path: String,
-    state: State<'_, AppState>,
-) -> Result<PhysicalTopology, String> {
+pub fn import_cisco_config(path: String, state: &AppState) -> Result<PhysicalTopology, String> {
     let file_path = Path::new(&path);
     let switch = cisco::parse_running_config_file(file_path).map_err(|e| e.to_string())?;
 
@@ -28,7 +23,10 @@ pub fn import_cisco_config(
 
     // Check if a switch with this hostname already exists; if so, replace it
     let hostname = switch.hostname.clone();
-    physical.physical_topology.switches.retain(|s| s.hostname != hostname);
+    physical
+        .physical_topology
+        .switches
+        .retain(|s| s.hostname != hostname);
     physical.physical_topology.switches.push(switch);
 
     // Rebuild links from CDP data
@@ -49,11 +47,10 @@ pub fn import_cisco_config(
 ///
 /// Associates MAC addresses with switch ports. Requires a switch
 /// hostname to know which switch this data belongs to.
-#[tauri::command]
 pub fn import_mac_table(
     path: String,
     switch_hostname: String,
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<PhysicalTopology, String> {
     let file_path = Path::new(&path);
     let entries = cisco::parse_mac_table_file(file_path).map_err(|e| e.to_string())?;
@@ -93,11 +90,10 @@ pub fn import_mac_table(
 /// Import a `show cdp neighbors detail` output file.
 ///
 /// Discovers physical adjacencies between switches.
-#[tauri::command]
 pub fn import_cdp_neighbors(
     path: String,
     switch_hostname: String,
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<PhysicalTopology, String> {
     let file_path = Path::new(&path);
     let neighbors = cisco::parse_cdp_neighbors_file(file_path).map_err(|e| e.to_string())?;
@@ -137,11 +133,7 @@ pub fn import_cdp_neighbors(
 ///
 /// Correlates IP addresses with MAC addresses and maps them to
 /// switch ports via the MAC address table.
-#[tauri::command]
-pub fn import_arp_table(
-    path: String,
-    state: State<'_, AppState>,
-) -> Result<PhysicalTopology, String> {
+pub fn import_arp_table(path: String, state: &AppState) -> Result<PhysicalTopology, String> {
     let file_path = Path::new(&path);
     let entries = cisco::parse_arp_table_file(file_path).map_err(|e| e.to_string())?;
 
@@ -159,15 +151,13 @@ pub fn import_arp_table(
 }
 
 /// Get the current physical topology.
-#[tauri::command]
-pub fn get_physical_topology(state: State<'_, AppState>) -> Result<PhysicalTopology, String> {
+pub fn get_physical_topology(state: &AppState) -> Result<PhysicalTopology, String> {
     let physical = state.physical.read().map_err(|e| e.to_string())?;
     Ok(physical.physical_topology.clone())
 }
 
 /// Clear all physical topology data.
-#[tauri::command]
-pub fn clear_physical_topology(state: State<'_, AppState>) -> Result<(), String> {
+pub fn clear_physical_topology(state: &AppState) -> Result<(), String> {
     let mut physical = state.physical.write().map_err(|e| e.to_string())?;
     physical.physical_topology = PhysicalTopology::default();
     log::info!("Cleared physical topology");
@@ -180,11 +170,7 @@ pub fn clear_physical_topology(state: State<'_, AppState>) -> Result<(), String>
 ///
 /// Detects Cisco IOS, Juniper JunOS, or HP/Aruba ProCurve by content
 /// signatures and dispatches to the appropriate parser.
-#[tauri::command]
-pub fn import_network_config(
-    path: String,
-    state: State<'_, AppState>,
-) -> Result<PhysicalTopology, String> {
+pub fn import_network_config(path: String, state: &AppState) -> Result<PhysicalTopology, String> {
     let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let file_path = Path::new(&path);
 
@@ -225,11 +211,10 @@ pub fn import_network_config(
 ///
 /// The switch must already be imported (via import_network_config or
 /// import_cisco_config) before calling this command.
-#[tauri::command]
 pub fn import_mac_table_auto(
     path: String,
     switch_hostname: String,
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<PhysicalTopology, String> {
     let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let file_path = Path::new(&path);
@@ -278,11 +263,10 @@ pub fn import_mac_table_auto(
 /// Import an LLDP/CDP neighbor table with automatic vendor detection.
 ///
 /// The switch must already be imported before calling this command.
-#[tauri::command]
 pub fn import_neighbor_table(
     path: String,
     switch_hostname: String,
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<PhysicalTopology, String> {
     let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let file_path = Path::new(&path);
@@ -337,8 +321,7 @@ pub fn import_neighbor_table(
 /// files required.
 ///
 /// Lock order: capture → inventory → physical
-#[tauri::command]
-pub fn run_topology_inference(state: State<'_, AppState>) -> Result<InferredTopology, String> {
+pub fn run_topology_inference(state: &AppState) -> Result<InferredTopology, String> {
     let capture = state.capture.read().map_err(|e| e.to_string())?;
     let inventory = state.inventory.read().map_err(|e| e.to_string())?;
 
@@ -382,10 +365,7 @@ pub fn run_topology_inference(state: State<'_, AppState>) -> Result<InferredTopo
 }
 
 /// Get the last computed inferred topology (or None if not yet run).
-#[tauri::command]
-pub fn get_inferred_topology(
-    state: State<'_, AppState>,
-) -> Result<Option<InferredTopology>, String> {
+pub fn get_inferred_topology(state: &AppState) -> Result<Option<InferredTopology>, String> {
     let physical = state.physical.read().map_err(|e| e.to_string())?;
     Ok(physical.inferred_topology.clone())
 }

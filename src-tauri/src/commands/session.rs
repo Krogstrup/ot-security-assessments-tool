@@ -3,7 +3,6 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tauri::State;
 
 use gm_db::{AssetRow, ConnectionRow};
 use gm_topology::TopologyBuilder;
@@ -44,11 +43,10 @@ struct SessionMetadata {
 // ─── Session Commands ───────────────────────────────────────
 
 /// Save the current state as a named session.
-#[tauri::command]
 pub async fn save_session(
     name: String,
     description: Option<String>,
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<SessionInfo, String> {
     // Snapshot capture + inventory data before locking the DB (lock order: capture → inventory)
     let (connections_snap, assets_snap, deep_parse_snap, imported_files_snap) = {
@@ -119,11 +117,7 @@ pub async fn save_session(
 }
 
 /// Load a session by ID, replacing the current state.
-#[tauri::command]
-pub async fn load_session(
-    session_id: String,
-    state: State<'_, AppState>,
-) -> Result<SessionInfo, String> {
+pub async fn load_session(session_id: String, state: &AppState) -> Result<SessionInfo, String> {
     // Step 1: load all data from DB (session domain only)
     let (session_row, metadata, assets, connections) = {
         let sess = state.session.lock().map_err(|e| e.to_string())?;
@@ -198,8 +192,7 @@ pub async fn load_session(
 }
 
 /// List saved sessions. When a project is active, returns only that project's sessions.
-#[tauri::command]
-pub async fn list_sessions(state: State<'_, AppState>) -> Result<Vec<SessionInfo>, String> {
+pub async fn list_sessions(state: &AppState) -> Result<Vec<SessionInfo>, String> {
     let sess = state.session.lock().map_err(|e| e.to_string())?;
     let db = sess.db.as_ref().ok_or("Database not available")?;
 
@@ -225,8 +218,7 @@ pub async fn list_sessions(state: State<'_, AppState>) -> Result<Vec<SessionInfo
 }
 
 /// Delete a session by ID.
-#[tauri::command]
-pub async fn delete_session(session_id: String, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn delete_session(session_id: String, state: &AppState) -> Result<(), String> {
     let sess = state.session.lock().map_err(|e| e.to_string())?;
     let db = sess.db.as_ref().ok_or("Database not available")?;
     db.delete_session(&session_id).map_err(|e| e.to_string())?;
@@ -237,11 +229,10 @@ pub async fn delete_session(session_id: String, state: State<'_, AppState>) -> R
 // ─── Asset Update Commands ──────────────────────────────────
 
 /// Update a single asset's editable fields.
-#[tauri::command]
 pub async fn update_asset(
     asset_id: String,
     updates: AssetUpdate,
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<AssetInfo, String> {
     // Step 1: update asset in inventory domain
     let updated = {
@@ -299,11 +290,10 @@ pub async fn update_asset(
 }
 
 /// Bulk update assets (same field on multiple assets).
-#[tauri::command]
 pub async fn bulk_update_assets(
     asset_ids: Vec<String>,
     updates: AssetUpdate,
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<usize, String> {
     // Step 1: update assets in inventory domain
     let count = {
@@ -353,11 +343,10 @@ pub async fn bulk_update_assets(
 // ─── Session Archive (ZIP) ──────────────────────────────────
 
 /// Export a session to a .kkj ZIP archive.
-#[tauri::command]
 pub async fn export_session_archive(
     session_id: String,
     output_path: String,
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<String, String> {
     let sess = state.session.lock().map_err(|e| e.to_string())?;
     let db = sess.db.as_ref().ok_or("Database not available")?;
@@ -426,10 +415,9 @@ pub async fn export_session_archive(
 }
 
 /// Import a session from a .kkj ZIP archive.
-#[tauri::command]
 pub async fn import_session_archive(
     archive_path: String,
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<SessionInfo, String> {
     // Read the ZIP file
     let file = std::fs::File::open(&archive_path).map_err(|e| e.to_string())?;
@@ -496,11 +484,20 @@ pub async fn import_session_archive(
                 deep_parse_info: HashMap::new(),
                 imported_files: Vec::new(),
             });
-        let assets_vec: Vec<AssetInfo> =
-            loaded_assets.into_iter().map(row_to_asset_info).collect();
-        let conns_vec: Vec<ConnectionInfo> =
-            loaded_conns.into_iter().map(row_to_connection_info).collect();
-        (new_session_id, session_row, asset_count, conn_count, metadata, assets_vec, conns_vec)
+        let assets_vec: Vec<AssetInfo> = loaded_assets.into_iter().map(row_to_asset_info).collect();
+        let conns_vec: Vec<ConnectionInfo> = loaded_conns
+            .into_iter()
+            .map(row_to_connection_info)
+            .collect();
+        (
+            new_session_id,
+            session_row,
+            asset_count,
+            conn_count,
+            metadata,
+            assets_vec,
+            conns_vec,
+        )
     };
 
     // Rebuild topology (no state access)

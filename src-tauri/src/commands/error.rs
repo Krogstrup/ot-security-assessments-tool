@@ -1,6 +1,7 @@
-//! Structured error type for Tauri command handlers.
+//! Structured error type for backend command handlers.
 //!
-//! All commands return `Result<T, AppError>`. Tauri serialises `AppError` as:
+//! All commands return `Result<T, AppError>`. The HTTP adapter serialises
+//! `AppError` as:
 //!
 //! ```json
 //! { "code": "no_session", "message": "No active session" }

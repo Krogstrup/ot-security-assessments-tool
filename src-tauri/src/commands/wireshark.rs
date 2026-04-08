@@ -10,7 +10,6 @@
 
 use serde::Serialize;
 use std::path::PathBuf;
-use tauri::State;
 
 use super::AppState;
 
@@ -39,7 +38,6 @@ pub struct FrameRow {
 /// Detect Wireshark installation path.
 ///
 /// Searches well-known locations on Linux, macOS, and Windows.
-#[tauri::command]
 pub async fn detect_wireshark() -> Result<WiresharkInfo, String> {
     let wireshark_path = find_wireshark_binary();
 
@@ -62,11 +60,7 @@ pub async fn detect_wireshark() -> Result<WiresharkInfo, String> {
 ///
 /// If origin PCAP files are available, opens them in Wireshark
 /// with a filter matching the connection's endpoints and ports.
-#[tauri::command]
-pub async fn open_in_wireshark(
-    connection_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn open_in_wireshark(connection_id: String, state: &AppState) -> Result<(), String> {
     let wireshark_path = find_wireshark_binary().ok_or_else(|| {
         "Wireshark not found. Install Wireshark and ensure it's in your PATH.".to_string()
     })?;
@@ -116,7 +110,6 @@ pub async fn open_in_wireshark(
 }
 
 /// Open Wireshark focused on a specific IP (node).
-#[tauri::command]
 pub async fn open_wireshark_for_node(ip_address: String) -> Result<(), String> {
     let wireshark_path = find_wireshark_binary().ok_or_else(|| {
         "Wireshark not found. Install Wireshark and ensure it's in your PATH.".to_string()
@@ -140,10 +133,9 @@ pub async fn open_wireshark_for_node(ip_address: String) -> Result<(), String> {
 }
 
 /// Get packet frames for a connection (View Frames dialog data).
-#[tauri::command]
 pub async fn get_connection_frames(
     connection_id: String,
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<Vec<FrameRow>, String> {
     let capture = state.capture.read().map_err(|e| e.to_string())?;
 
@@ -173,11 +165,7 @@ pub async fn get_connection_frames(
 }
 
 /// Export connection frames as CSV text.
-#[tauri::command]
-pub async fn export_frames_csv(
-    connection_id: String,
-    state: State<'_, AppState>,
-) -> Result<String, String> {
+pub async fn export_frames_csv(connection_id: String, state: &AppState) -> Result<String, String> {
     let capture = state.capture.read().map_err(|e| e.to_string())?;
 
     let packets = capture
@@ -208,11 +196,10 @@ pub async fn export_frames_csv(
 }
 
 /// Save connection frames CSV to a file on disk.
-#[tauri::command]
 pub async fn save_frames_csv(
     connection_id: String,
     output_path: String,
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<(), String> {
     let csv = export_frames_csv(connection_id, state).await?;
     std::fs::write(&output_path, csv).map_err(|e| format!("Failed to write CSV: {}", e))?;

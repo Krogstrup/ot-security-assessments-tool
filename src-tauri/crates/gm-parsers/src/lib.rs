@@ -24,8 +24,8 @@ pub mod models;
 
 pub use models::{
     BacnetDetail, DeepParseInfo, Dnp3Detail, Dnp3Relationship, EnipDetail, FunctionCodeStat,
-    Iec104Detail, LldpDetail, ModbusDetail, ModbusDeviceIdInfo, ModbusRelationship, PollingInterval,
-    ProfinetDcpDetail, RegisterRangeInfo, S7Detail, SnmpDetail,
+    Iec104Detail, LldpDetail, ModbusDetail, ModbusDeviceIdInfo, ModbusRelationship,
+    PollingInterval, ProfinetDcpDetail, RegisterRangeInfo, S7Detail, SnmpDetail,
 };
 
 pub mod bacnet;

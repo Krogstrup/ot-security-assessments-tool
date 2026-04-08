@@ -1,27 +1,24 @@
-#![allow(dead_code)]
-
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
-use std::convert::Infallible;
-use tokio::sync::broadcast;
-use tokio_stream::wrappers::BroadcastStream;
-use tokio_stream::{Stream, StreamExt as _};
 use clap::Parser;
-use gm_capture::{list_interfaces, LiveCaptureConfig, ParsedPacket, PcapReader};
+use gm_capture::{LiveCaptureConfig, ParsedPacket, PcapReader};
 use gm_topology::TopologyGraph;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::{HashMap, HashSet};
+use std::convert::Infallible;
 use std::path::{Path as StdPath, PathBuf};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
+use tokio::sync::broadcast;
+use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::{Stream, StreamExt as _};
 use tower_http::services::{ServeDir, ServeFile};
 
 #[path = "../commands/mod.rs"]
@@ -33,8 +30,6 @@ use commands::processor::PacketProcessor;
 use commands::AppState;
 use commands::ProtocolStatInfo;
 
-const MAX_TOPOLOGY_NODES: usize = 5_000;
-const MAX_TOPOLOGY_EDGES: usize = 20_000;
 const DEFAULT_IMPORT_FILE_LIST_LIMIT: usize = 500;
 
 type SharedState = Arc<AppState>;
@@ -128,12 +123,6 @@ struct PagingQuery {
 }
 
 #[derive(Debug, Serialize)]
-struct AppInfo {
-    version: String,
-    rust_version: String,
-}
-
-#[derive(Debug, Serialize)]
 struct ImportPcapFileEntry {
     name: String,
     path: String,
@@ -167,6 +156,22 @@ enum ImportKind {
 }
 
 impl ImportKind {
+    const ALL: [Self; 13] = [
+        ImportKind::Pcap,
+        ImportKind::PhysicalConfig,
+        ImportKind::PhysicalMac,
+        ImportKind::PhysicalNeighbor,
+        ImportKind::PhysicalArp,
+        ImportKind::Zeek,
+        ImportKind::Suricata,
+        ImportKind::Nmap,
+        ImportKind::Masscan,
+        ImportKind::Wazuh,
+        ImportKind::Sinema,
+        ImportKind::Tia,
+        ImportKind::SessionArchive,
+    ];
+
     fn as_str(self) -> &'static str {
         match self {
             ImportKind::Pcap => "pcap",
@@ -182,25 +187,6 @@ impl ImportKind {
             ImportKind::Sinema => "sinema",
             ImportKind::Tia => "tia",
             ImportKind::SessionArchive => "session_archive",
-        }
-    }
-
-    fn from_str(value: &str) -> Option<Self> {
-        match value {
-            "pcap" => Some(ImportKind::Pcap),
-            "physical_config" => Some(ImportKind::PhysicalConfig),
-            "physical_mac" => Some(ImportKind::PhysicalMac),
-            "physical_neighbor" => Some(ImportKind::PhysicalNeighbor),
-            "physical_arp" => Some(ImportKind::PhysicalArp),
-            "zeek" => Some(ImportKind::Zeek),
-            "suricata" => Some(ImportKind::Suricata),
-            "nmap" => Some(ImportKind::Nmap),
-            "masscan" => Some(ImportKind::Masscan),
-            "wazuh" => Some(ImportKind::Wazuh),
-            "sinema" => Some(ImportKind::Sinema),
-            "tia" => Some(ImportKind::Tia),
-            "session_archive" => Some(ImportKind::SessionArchive),
-            _ => None,
         }
     }
 
@@ -221,22 +207,37 @@ impl ImportKind {
             ImportKind::SessionArchive => &["kkj"],
         }
     }
+
+    fn supported_values_csv() -> String {
+        ImportKind::ALL
+            .iter()
+            .map(|kind| kind.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    env_logger::init();
+impl std::str::FromStr for ImportKind {
+    type Err = ();
 
-    let cli = Cli::parse();
-    let frontend_dist = resolve_frontend_dist(cli.frontend_dist);
-    let index_path = frontend_dist.join("index.html");
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        ImportKind::ALL
+            .iter()
+            .copied()
+            .find(|kind| kind.as_str() == value)
+            .ok_or(())
+    }
+}
 
+fn build_shared_state() -> SharedState {
     let (event_tx, _) = broadcast::channel::<(String, serde_json::Value)>(256);
-    let mut app = AppState::new(commands::resource_paths::ResourcePaths::from_env());
-    app.event_tx = Some(event_tx.clone());
-    let state: SharedState = Arc::new(app);
+    let mut app_state = AppState::new(commands::resource_paths::ResourcePaths::from_env());
+    app_state.event_tx = Some(event_tx);
+    Arc::new(app_state)
+}
 
-    let api = Router::new()
+fn build_api_router() -> Router<SharedState> {
+    Router::new()
         .route("/health", get(health))
         .route("/system/app-info", get(get_app_info))
         .route("/system/interfaces", get(get_interfaces))
@@ -255,12 +256,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         // v1 resource endpoints — projects
         // NOTE: /v1/projects/active must be registered before /v1/projects/{id}
-        .route("/v1/projects", get(list_projects_handler).post(create_project_handler))
-        .route("/v1/projects/active", put(set_active_project_handler).delete(clear_active_project_handler))
-        .route("/v1/projects/{id}", get(get_project_handler).put(update_project_handler).delete(delete_project_handler))
+        .route(
+            "/v1/projects",
+            get(list_projects_handler).post(create_project_handler),
+        )
+        .route(
+            "/v1/projects/active",
+            put(set_active_project_handler).delete(clear_active_project_handler),
+        )
+        .route(
+            "/v1/projects/{id}",
+            get(get_project_handler)
+                .put(update_project_handler)
+                .delete(delete_project_handler),
+        )
         // v1 resource endpoints — sessions
         // NOTE: static sub-paths (/import, /compare) must be registered before /sessions/{id}
-        .route("/v1/sessions", get(list_sessions_handler).post(save_session_handler))
+        .route(
+            "/v1/sessions",
+            get(list_sessions_handler).post(save_session_handler),
+        )
         .route("/v1/sessions/import", post(import_session_handler))
         .route("/v1/sessions/compare", post(compare_sessions_handler))
         .route("/v1/sessions/{id}/load", post(load_session_handler))
@@ -273,20 +288,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/v1/analysis/anomalies", get(get_anomalies_handler))
         .route("/v1/analysis/credentials", get(get_credentials_handler))
         .route("/v1/analysis/criticality", get(get_criticality_handler))
-        .route("/v1/analysis/naming-suggestions", get(get_naming_suggestions_handler))
+        .route(
+            "/v1/analysis/naming-suggestions",
+            get(get_naming_suggestions_handler),
+        )
         .route("/v1/analysis/malware", get(get_malware_handler))
-        .route("/v1/analysis/switch-security", get(get_switch_security_handler))
+        .route(
+            "/v1/analysis/switch-security",
+            get(get_switch_security_handler),
+        )
         .route("/v1/analysis/compliance", get(get_compliance_handler))
         .route("/v1/analysis/cve", get(get_cve_handler))
         // v1 SSE event stream
-        .route("/v1/events", get(events_handler));
+        .route("/v1/events", get(events_handler))
+}
 
-    let static_files = ServeDir::new(&frontend_dist).not_found_service(ServeFile::new(index_path));
+fn build_http_app(frontend_dist: &StdPath, state: SharedState) -> Router {
+    let index_path = frontend_dist.join("index.html");
+    let static_files = ServeDir::new(frontend_dist).not_found_service(ServeFile::new(index_path));
 
-    let app = Router::new()
-        .nest("/api", api)
+    Router::new()
+        .nest("/api", build_api_router())
         .fallback_service(static_files)
-        .with_state(state);
+        .with_state(state)
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::init();
+
+    let cli = Cli::parse();
+    let frontend_dist = resolve_frontend_dist(cli.frontend_dist);
+    let state = build_shared_state();
+    let app = build_http_app(frontend_dist.as_path(), state);
 
     let addr = format!("{}:{}", cli.host, cli.port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -304,24 +338,24 @@ fn resolve_frontend_dist(arg_dist: Option<PathBuf>) -> PathBuf {
 
     if let Ok(env_dist) = std::env::var("KK_FRONTEND_DIST") {
         let path = PathBuf::from(env_dist);
-        if path.exists() {
+        if has_frontend_index(path.as_path()) {
             return path;
         }
     }
 
-    let candidates = [
-        PathBuf::from("build"),
-        PathBuf::from("../build"),
-        PathBuf::from("./build"),
-    ];
+    let candidates = [PathBuf::from("build"), PathBuf::from("../build")];
 
     for candidate in candidates {
-        if candidate.join("index.html").exists() {
+        if has_frontend_index(candidate.as_path()) {
             return candidate;
         }
     }
 
     PathBuf::from("build")
+}
+
+fn has_frontend_index(path: &StdPath) -> bool {
+    path.join("index.html").exists()
 }
 
 fn resolve_app_data_dir() -> PathBuf {
@@ -368,7 +402,9 @@ fn has_allowed_extension(name: &str, allowed: &[&str]) -> bool {
         Some((_, ext)) => ext,
         None => return false,
     };
-    allowed.iter().any(|candidate| ext.eq_ignore_ascii_case(candidate))
+    allowed
+        .iter()
+        .any(|candidate| ext.eq_ignore_ascii_case(candidate))
 }
 
 fn resolve_export_output_path(raw_path: &str, fallback_name: &str) -> Result<String, ApiError> {
@@ -494,15 +530,12 @@ async fn health() -> Json<serde_json::Value> {
     Json(json!({ "ok": true }))
 }
 
-async fn get_app_info() -> Json<AppInfo> {
-    Json(AppInfo {
-        version: env!("CARGO_PKG_VERSION").to_string(),
-        rust_version: format!("rustc {}", env!("CARGO_PKG_RUST_VERSION")),
-    })
+async fn get_app_info() -> Result<Json<Value>, ApiError> {
+    to_json(commands::system::get_app_info())
 }
 
 async fn get_interfaces() -> Result<Json<Vec<gm_capture::NetworkInterface>>, ApiError> {
-    let interfaces = list_interfaces().map_err(|e| ApiError::internal(e.to_string()))?;
+    let interfaces = commands::system::list_interfaces().map_err(ApiError::bad_request)?;
     Ok(Json(interfaces))
 }
 
@@ -513,10 +546,11 @@ async fn list_import_pcap_files() -> Result<Json<ImportPcapFilesResponse>, ApiEr
 async fn list_import_files(
     Path(kind): Path<String>,
 ) -> Result<Json<ImportPcapFilesResponse>, ApiError> {
-    let kind = ImportKind::from_str(&kind).ok_or_else(|| {
+    let kind = kind.parse::<ImportKind>().map_err(|_| {
         ApiError::bad_request(format!(
-            "unsupported import kind '{}'. expected one of: pcap, physical_config, physical_mac, physical_neighbor, physical_arp, zeek, suricata, nmap, masscan, wazuh, sinema, tia, session_archive",
-            kind
+            "unsupported import kind '{}'. expected one of: {}",
+            kind,
+            ImportKind::supported_values_csv()
         ))
     })?;
     Ok(Json(list_import_files_for_kind(kind)?))
@@ -687,194 +721,49 @@ async fn import_pcap(
 }
 
 async fn get_topology(State(state): State<SharedState>) -> Result<Json<TopologyGraph>, ApiError> {
-    let cap = state
-        .capture
-        .read()
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-    let topo = &cap.topology;
-
-    if topo.nodes.len() <= MAX_TOPOLOGY_NODES && topo.edges.len() <= MAX_TOPOLOGY_EDGES {
-        return Ok(Json(topo.clone()));
-    }
-
-    let mut nodes = topo.nodes.clone();
-    nodes.sort_by(|a, b| b.packet_count.cmp(&a.packet_count));
-    nodes.truncate(MAX_TOPOLOGY_NODES);
-
-    let retained: HashSet<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
-    let mut edges: Vec<_> = topo
-        .edges
-        .iter()
-        .filter(|e| retained.contains(e.source.as_str()) && retained.contains(e.target.as_str()))
-        .cloned()
-        .collect();
-    edges.sort_by(|a, b| b.packet_count.cmp(&a.packet_count));
-    edges.truncate(MAX_TOPOLOGY_EDGES);
-
-    Ok(Json(TopologyGraph { nodes, edges }))
+    let topology = commands::data::get_topology(state.as_ref()).map_err(ApiError::bad_request)?;
+    Ok(Json(topology))
 }
 
 async fn get_assets(
     State(state): State<SharedState>,
     Query(query): Query<PagingQuery>,
 ) -> Result<Json<AssetPage>, ApiError> {
-    let inv = state
-        .inventory
-        .read()
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    let page = query.page.unwrap_or(0);
-    let page_size = query.page_size.unwrap_or(200);
-
-    let mut all_assets = inv.assets.clone();
-    let total = all_assets.len();
-
-    match query.sort_by.as_deref() {
-        Some("ip") => all_assets.sort_by(|a, b| a.ip_address.cmp(&b.ip_address)),
-        Some("packets") => all_assets.sort_by(|a, b| b.packet_count.cmp(&a.packet_count)),
-        Some("protocol") => {
-            all_assets.sort_by(|a, b| {
-                let ap = a.protocols.first().map(|s| s.as_str()).unwrap_or("");
-                let bp = b.protocols.first().map(|s| s.as_str()).unwrap_or("");
-                ap.cmp(bp)
-            });
-        }
-        _ => {}
-    }
-
-    let start = page * page_size;
-    let assets = if start < total {
-        all_assets.into_iter().skip(start).take(page_size).collect()
-    } else {
-        Vec::new()
-    };
-    let has_more = start + page_size < total;
-
-    Ok(Json(AssetPage {
-        assets,
-        total,
-        page,
-        page_size,
-        has_more,
-    }))
+    let page =
+        commands::data::get_assets(state.as_ref(), query.page, query.page_size, query.sort_by)
+            .map_err(ApiError::bad_request)?;
+    Ok(Json(page))
 }
 
 async fn get_connections(
     State(state): State<SharedState>,
     Query(query): Query<PagingQuery>,
 ) -> Result<Json<ConnectionPage>, ApiError> {
-    let cap = state
-        .capture
-        .read()
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    let page = query.page.unwrap_or(0);
-    let page_size = query.page_size.unwrap_or(500);
-
-    let mut all_connections = cap.connections.clone();
-    let total = all_connections.len();
-
-    match query.sort_by.as_deref() {
-        Some("packets") => {
-            all_connections.sort_by(|a, b| b.packet_count.cmp(&a.packet_count));
-        }
-        Some("bytes") => {
-            all_connections.sort_by(|a, b| b.byte_count.cmp(&a.byte_count));
-        }
-        _ => {}
-    }
-
-    let start = page * page_size;
-    let connections = if start < total {
-        all_connections
-            .into_iter()
-            .skip(start)
-            .take(page_size)
-            .collect()
-    } else {
-        Vec::new()
-    };
-    let has_more = start + page_size < total;
-
-    Ok(Json(ConnectionPage {
-        connections,
-        total,
-        page,
-        page_size,
-        has_more,
-    }))
+    let page =
+        commands::data::get_connections(state.as_ref(), query.page, query.page_size, query.sort_by)
+            .map_err(ApiError::bad_request)?;
+    Ok(Json(page))
 }
 
 async fn get_counts(State(state): State<SharedState>) -> Result<Json<DataCounts>, ApiError> {
-    let cap = state
-        .capture
-        .read()
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-    let inv = state
-        .inventory
-        .read()
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-    Ok(Json(DataCounts {
-        asset_count: inv.assets.len(),
-        connection_count: cap.connections.len(),
-    }))
+    let counts = commands::data::get_data_counts(state.as_ref()).map_err(ApiError::bad_request)?;
+    Ok(Json(counts))
 }
 
 async fn get_protocol_stats(
     State(state): State<SharedState>,
 ) -> Result<Json<Vec<ProtocolStatInfo>>, ApiError> {
-    let cap = state
-        .capture
-        .read()
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    let mut stats: HashMap<String, ProtocolStatInfo> = HashMap::new();
-    let mut devices_per_proto: HashMap<String, HashSet<String>> = HashMap::new();
-
-    for conn in &cap.connections {
-        let entry = stats
-            .entry(conn.protocol.clone())
-            .or_insert_with(|| ProtocolStatInfo {
-                protocol: conn.protocol.clone(),
-                packet_count: 0,
-                byte_count: 0,
-                connection_count: 0,
-                unique_devices: 0,
-            });
-        entry.packet_count += conn.packet_count;
-        entry.byte_count += conn.byte_count;
-        entry.connection_count += 1;
-
-        let dev = devices_per_proto.entry(conn.protocol.clone()).or_default();
-        dev.insert(conn.src_ip.clone());
-        dev.insert(conn.dst_ip.clone());
-    }
-
-    for (proto, dev_set) in &devices_per_proto {
-        if let Some(stat) = stats.get_mut(proto) {
-            stat.unique_devices = dev_set.len() as u64;
-        }
-    }
-
-    let mut result: Vec<ProtocolStatInfo> = stats.into_values().collect();
-    result.sort_by(|a, b| b.packet_count.cmp(&a.packet_count));
-
-    Ok(Json(result))
+    let stats =
+        commands::data::get_protocol_stats(state.as_ref()).map_err(ApiError::bad_request)?;
+    Ok(Json(stats))
 }
 
 async fn get_connection_packets(
     State(state): State<SharedState>,
     Path(connection_id): Path<String>,
 ) -> Result<Json<Vec<commands::PacketSummary>>, ApiError> {
-    let cap = state
-        .capture
-        .read()
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-    let packets = cap
-        .packet_summaries
-        .get(&connection_id)
-        .cloned()
-        .unwrap_or_default();
+    let packets = commands::data::get_connection_packets(connection_id, state.as_ref())
+        .map_err(ApiError::bad_request)?;
     Ok(Json(packets))
 }
 
@@ -912,11 +801,6 @@ fn arg_opt<T: DeserializeOwned>(payload: &Value, names: &[&str]) -> Result<Optio
         }
     }
     Ok(None)
-}
-
-fn state_ref(state: &SharedState) -> tauri::State<'_, AppState> {
-    // SAFETY: tauri::State is a transparent newtype over `&T` in tauri 2.x.
-    unsafe { std::mem::transmute::<&AppState, tauri::State<'_, AppState>>(state.as_ref()) }
 }
 
 fn spawn_processing_thread_headless(
@@ -968,11 +852,17 @@ fn flush_batch_headless(
     let (assets, sig_results) = {
         let sigs = match state.signatures.read() {
             Ok(v) => v,
-            Err(e) => { log::error!("capture flush signatures lock error: {}", e); return; }
+            Err(e) => {
+                log::error!("capture flush signatures lock error: {}", e);
+                return;
+            }
         };
         let inv = match state.inventory.read() {
             Ok(v) => v,
-            Err(e) => { log::error!("capture flush inventory lock error: {}", e); return; }
+            Err(e) => {
+                log::error!("capture flush inventory lock error: {}", e);
+                return;
+            }
         };
         processor.build_assets(
             &sigs.signature_engine,
@@ -1020,8 +910,16 @@ fn flush_batch_headless(
 
     // Emit capture_stats event for SSE subscribers
     if let Some(tx) = &state.event_tx {
-        let asset_count = state.inventory.read().map(|inv| inv.assets.len()).unwrap_or(0);
-        let connection_count = state.capture.read().map(|cap| cap.connections.len()).unwrap_or(0);
+        let asset_count = state
+            .inventory
+            .read()
+            .map(|inv| inv.assets.len())
+            .unwrap_or(0);
+        let connection_count = state
+            .capture
+            .read()
+            .map(|cap| cap.connections.len())
+            .unwrap_or(0);
         let _ = tx.send((
             "capture_stats".to_string(),
             json!({
@@ -1082,10 +980,8 @@ async fn start_capture_headless(
 
 // ── /api/v1/projects ─────────────────────────────────────────────────────────
 
-async fn list_projects_handler(
-    State(state): State<SharedState>,
-) -> Result<Json<Value>, ApiError> {
-    let projects = commands::projects::list_projects(state_ref(&state))
+async fn list_projects_handler(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
+    let projects = commands::projects::list_projects(state.as_ref())
         .await
         .map_err(ApiError::bad_request)?;
     to_json(projects)
@@ -1096,7 +992,7 @@ async fn create_project_handler(
     Json(body): Json<CreateProjectRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let project = commands::projects::create_project(
-        state_ref(&state),
+        state.as_ref(),
         body.name,
         body.client_name,
         body.site_name,
@@ -1114,7 +1010,7 @@ async fn get_project_handler(
     Path(id): Path<i64>,
     State(state): State<SharedState>,
 ) -> Result<Json<Value>, ApiError> {
-    let project = commands::projects::get_project(state_ref(&state), id)
+    let project = commands::projects::get_project(state.as_ref(), id)
         .await
         .map_err(ApiError::bad_request)?;
     to_json(project)
@@ -1126,7 +1022,7 @@ async fn update_project_handler(
     Json(body): Json<UpdateProjectRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let project = commands::projects::update_project(
-        state_ref(&state),
+        state.as_ref(),
         id,
         body.name,
         body.client_name,
@@ -1145,7 +1041,7 @@ async fn delete_project_handler(
     Path(id): Path<i64>,
     State(state): State<SharedState>,
 ) -> Result<Json<Value>, ApiError> {
-    commands::projects::delete_project(state_ref(&state), id)
+    commands::projects::delete_project(state.as_ref(), id)
         .await
         .map_err(ApiError::bad_request)?;
     Ok(Json(json!({})))
@@ -1155,7 +1051,7 @@ async fn set_active_project_handler(
     State(state): State<SharedState>,
     Json(body): Json<SetActiveProjectRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    let project = commands::projects::set_active_project(state_ref(&state), body.id)
+    let project = commands::projects::set_active_project(state.as_ref(), body.id)
         .await
         .map_err(ApiError::bad_request)?;
     to_json(project)
@@ -1164,7 +1060,7 @@ async fn set_active_project_handler(
 async fn clear_active_project_handler(
     State(state): State<SharedState>,
 ) -> Result<Json<Value>, ApiError> {
-    commands::projects::clear_active_project(state_ref(&state))
+    commands::projects::clear_active_project(state.as_ref())
         .await
         .map_err(ApiError::bad_request)?;
     Ok(Json(json!({})))
@@ -1197,10 +1093,8 @@ struct CompareSessionsRequest {
     baseline_session_id: String,
 }
 
-async fn list_sessions_handler(
-    State(state): State<SharedState>,
-) -> Result<Json<Value>, ApiError> {
-    let sessions = commands::session::list_sessions(state_ref(&state))
+async fn list_sessions_handler(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
+    let sessions = commands::session::list_sessions(state.as_ref())
         .await
         .map_err(ApiError::bad_request)?;
     to_json(sessions)
@@ -1210,7 +1104,7 @@ async fn save_session_handler(
     State(state): State<SharedState>,
     Json(body): Json<SaveSessionRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    let session = commands::session::save_session(body.name, body.description, state_ref(&state))
+    let session = commands::session::save_session(body.name, body.description, state.as_ref())
         .await
         .map_err(ApiError::bad_request)?;
     to_json(session)
@@ -1220,7 +1114,7 @@ async fn load_session_handler(
     Path(id): Path<String>,
     State(state): State<SharedState>,
 ) -> Result<Json<Value>, ApiError> {
-    let session = commands::session::load_session(id, state_ref(&state))
+    let session = commands::session::load_session(id, state.as_ref())
         .await
         .map_err(ApiError::bad_request)?;
     to_json(session)
@@ -1230,7 +1124,7 @@ async fn delete_session_handler(
     Path(id): Path<String>,
     State(state): State<SharedState>,
 ) -> Result<Json<Value>, ApiError> {
-    commands::session::delete_session(id, state_ref(&state))
+    commands::session::delete_session(id, state.as_ref())
         .await
         .map_err(ApiError::bad_request)?;
     Ok(Json(json!({})))
@@ -1242,7 +1136,7 @@ async fn export_session_handler(
     Json(body): Json<ExportSessionRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let output_path = resolve_export_output_path(&body.output_path, "session.kkj")?;
-    let path = commands::session::export_session_archive(id, output_path, state_ref(&state))
+    let path = commands::session::export_session_archive(id, output_path, state.as_ref())
         .await
         .map_err(ApiError::bad_request)?;
     to_json(path)
@@ -1253,7 +1147,7 @@ async fn import_session_handler(
     Json(body): Json<ImportSessionRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let archive_path = resolve_import_input_path(&body.archive_path, ImportKind::SessionArchive)?;
-    let session = commands::session::import_session_archive(archive_path, state_ref(&state))
+    let session = commands::session::import_session_archive(archive_path, state.as_ref())
         .await
         .map_err(ApiError::bad_request)?;
     to_json(session)
@@ -1263,9 +1157,8 @@ async fn compare_sessions_handler(
     State(state): State<SharedState>,
     Json(body): Json<CompareSessionsRequest>,
 ) -> Result<Json<Value>, ApiError> {
-    let diff =
-        commands::baseline::compare_sessions(body.baseline_session_id, state_ref(&state))
-            .map_err(ApiError::bad_request)?;
+    let diff = commands::baseline::compare_sessions(body.baseline_session_id, state.as_ref())
+        .map_err(ApiError::bad_request)?;
     to_json(diff)
 }
 
@@ -1281,39 +1174,31 @@ struct CveQuery {
     ip: String,
 }
 
-async fn run_analysis_handler(
-    State(state): State<SharedState>,
-) -> Result<Json<Value>, ApiError> {
-    let result = commands::analysis::run_analysis(state_ref(&state)).map_err(ApiError::bad_request)?;
+async fn run_analysis_handler(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
+    let result = commands::analysis::run_analysis(state.as_ref()).map_err(ApiError::bad_request)?;
     to_json(result)
 }
 
-async fn get_findings_handler(
-    State(state): State<SharedState>,
-) -> Result<Json<Value>, ApiError> {
-    to_json(commands::analysis::get_findings(state_ref(&state)).map_err(ApiError::bad_request)?)
+async fn get_findings_handler(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
+    to_json(commands::analysis::get_findings(state.as_ref()).map_err(ApiError::bad_request)?)
 }
 
-async fn get_purdue_handler(
-    State(state): State<SharedState>,
-) -> Result<Json<Value>, ApiError> {
+async fn get_purdue_handler(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
     to_json(
-        commands::analysis::get_purdue_assignments(state_ref(&state))
+        commands::analysis::get_purdue_assignments(state.as_ref())
             .map_err(ApiError::bad_request)?,
     )
 }
 
-async fn get_anomalies_handler(
-    State(state): State<SharedState>,
-) -> Result<Json<Value>, ApiError> {
-    to_json(commands::analysis::get_anomalies(state_ref(&state)).map_err(ApiError::bad_request)?)
+async fn get_anomalies_handler(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
+    to_json(commands::analysis::get_anomalies(state.as_ref()).map_err(ApiError::bad_request)?)
 }
 
 async fn get_credentials_handler(
     State(state): State<SharedState>,
 ) -> Result<Json<Value>, ApiError> {
     to_json(
-        commands::analysis::get_credential_warnings(state_ref(&state))
+        commands::analysis::get_credential_warnings(state.as_ref())
             .map_err(ApiError::bad_request)?,
     )
 }
@@ -1321,26 +1206,21 @@ async fn get_credentials_handler(
 async fn get_criticality_handler(
     State(state): State<SharedState>,
 ) -> Result<Json<Value>, ApiError> {
-    to_json(
-        commands::analysis::get_criticality(state_ref(&state)).map_err(ApiError::bad_request)?,
-    )
+    to_json(commands::analysis::get_criticality(state.as_ref()).map_err(ApiError::bad_request)?)
 }
 
 async fn get_naming_suggestions_handler(
     State(state): State<SharedState>,
 ) -> Result<Json<Value>, ApiError> {
     to_json(
-        commands::analysis::get_naming_suggestions(state_ref(&state))
+        commands::analysis::get_naming_suggestions(state.as_ref())
             .map_err(ApiError::bad_request)?,
     )
 }
 
-async fn get_malware_handler(
-    State(state): State<SharedState>,
-) -> Result<Json<Value>, ApiError> {
+async fn get_malware_handler(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
     to_json(
-        commands::analysis::get_malware_findings(state_ref(&state))
-            .map_err(ApiError::bad_request)?,
+        commands::analysis::get_malware_findings(state.as_ref()).map_err(ApiError::bad_request)?,
     )
 }
 
@@ -1348,7 +1228,7 @@ async fn get_switch_security_handler(
     State(state): State<SharedState>,
 ) -> Result<Json<Value>, ApiError> {
     to_json(
-        commands::analysis::get_switch_security_findings(state_ref(&state))
+        commands::analysis::get_switch_security_findings(state.as_ref())
             .map_err(ApiError::bad_request)?,
     )
 }
@@ -1358,7 +1238,7 @@ async fn get_compliance_handler(
     Query(query): Query<ComplianceQuery>,
 ) -> Result<Json<Value>, ApiError> {
     to_json(
-        commands::analysis::get_compliance_report(state_ref(&state), query.framework)
+        commands::analysis::get_compliance_report(state.as_ref(), query.framework)
             .map_err(ApiError::bad_request)?,
     )
 }
@@ -1368,7 +1248,7 @@ async fn get_cve_handler(
     Query(query): Query<CveQuery>,
 ) -> Result<Json<Value>, ApiError> {
     to_json(
-        commands::analysis::get_cve_warnings(query.ip, state_ref(&state))
+        commands::analysis::get_cve_warnings(query.ip, state.as_ref())
             .map_err(ApiError::bad_request)?,
     )
 }
@@ -1411,34 +1291,33 @@ async fn invoke_command(
 
     let out = match command.as_str() {
         "cancel_import" => to_json(
-            commands::capture::cancel_import(state_ref(&state))
+            commands::capture::cancel_import(state.as_ref())
                 .await
                 .map_err(ApiError::bad_request)?,
         )?,
         "get_signatures" => to_json(
-            commands::signatures::get_signatures(state_ref(&state))
-                .map_err(ApiError::bad_request)?,
+            commands::signatures::get_signatures(state.as_ref()).map_err(ApiError::bad_request)?,
         )?,
         "reload_signatures" => to_json(
-            commands::signatures::reload_signatures(state_ref(&state))
+            commands::signatures::reload_signatures(state.as_ref())
                 .map_err(ApiError::bad_request)?,
         )?,
         "test_signature" => {
             let yaml: String = arg(&payload, &["yaml"])?;
             to_json(
-                commands::signatures::test_signature(yaml, state_ref(&state))
+                commands::signatures::test_signature(yaml, state.as_ref())
                     .map_err(ApiError::bad_request)?,
             )?
         }
         "get_deep_parse_info" => {
             let ip: String = arg(&payload, &["ipAddress", "ip_address"])?;
             to_json(
-                commands::data::get_deep_parse_info(ip, state_ref(&state))
+                commands::data::get_deep_parse_info(ip, state.as_ref())
                     .map_err(ApiError::bad_request)?,
             )?
         }
         "get_function_code_stats" => to_json(
-            commands::data::get_function_code_stats(state_ref(&state))
+            commands::data::get_function_code_stats(state.as_ref())
                 .map_err(ApiError::bad_request)?,
         )?,
         "start_capture" => {
@@ -1454,23 +1333,23 @@ async fn invoke_command(
                 .map(|v| resolve_export_output_path(v, "capture.pcap"))
                 .transpose()?;
             to_json(
-                commands::capture::stop_capture(save_path, state_ref(&state))
+                commands::capture::stop_capture(save_path, state.as_ref())
                     .await
                     .map_err(ApiError::bad_request)?,
             )?
         }
         "pause_capture" => to_json(
-            commands::capture::pause_capture(state_ref(&state))
+            commands::capture::pause_capture(state.as_ref())
                 .await
                 .map_err(ApiError::bad_request)?,
         )?,
         "resume_capture" => to_json(
-            commands::capture::resume_capture(state_ref(&state))
+            commands::capture::resume_capture(state.as_ref())
                 .await
                 .map_err(ApiError::bad_request)?,
         )?,
         "get_capture_status" => to_json(
-            commands::capture::get_capture_status(state_ref(&state))
+            commands::capture::get_capture_status(state.as_ref())
                 .await
                 .map_err(ApiError::bad_request)?,
         )?,
@@ -1478,7 +1357,7 @@ async fn invoke_command(
             let asset_id: String = arg(&payload, &["assetId", "asset_id"])?;
             let updates: commands::session::AssetUpdate = arg(&payload, &["updates"])?;
             to_json(
-                commands::session::update_asset(asset_id, updates, state_ref(&state))
+                commands::session::update_asset(asset_id, updates, state.as_ref())
                     .await
                     .map_err(ApiError::bad_request)?,
             )?
@@ -1487,7 +1366,7 @@ async fn invoke_command(
             let asset_ids: Vec<String> = arg(&payload, &["assetIds", "asset_ids"])?;
             let updates: commands::session::AssetUpdate = arg(&payload, &["updates"])?;
             to_json(
-                commands::session::bulk_update_assets(asset_ids, updates, state_ref(&state))
+                commands::session::bulk_update_assets(asset_ids, updates, state.as_ref())
                     .await
                     .map_err(ApiError::bad_request)?,
             )?
@@ -1496,7 +1375,7 @@ async fn invoke_command(
             let path: String = arg(&payload, &["path"])?;
             let path = resolve_import_input_path(&path, ImportKind::PhysicalConfig)?;
             to_json(
-                commands::physical::import_cisco_config(path, state_ref(&state))
+                commands::physical::import_cisco_config(path, state.as_ref())
                     .map_err(ApiError::bad_request)?,
             )?
         }
@@ -1505,7 +1384,7 @@ async fn invoke_command(
             let switch_hostname: String = arg(&payload, &["switchHostname", "switch_hostname"])?;
             let path = resolve_import_input_path(&path, ImportKind::PhysicalMac)?;
             to_json(
-                commands::physical::import_mac_table(path, switch_hostname, state_ref(&state))
+                commands::physical::import_mac_table(path, switch_hostname, state.as_ref())
                     .map_err(ApiError::bad_request)?,
             )?
         }
@@ -1514,7 +1393,7 @@ async fn invoke_command(
             let switch_hostname: String = arg(&payload, &["switchHostname", "switch_hostname"])?;
             let path = resolve_import_input_path(&path, ImportKind::PhysicalNeighbor)?;
             to_json(
-                commands::physical::import_cdp_neighbors(path, switch_hostname, state_ref(&state))
+                commands::physical::import_cdp_neighbors(path, switch_hostname, state.as_ref())
                     .map_err(ApiError::bad_request)?,
             )?
         }
@@ -1522,23 +1401,23 @@ async fn invoke_command(
             let path: String = arg(&payload, &["path"])?;
             let path = resolve_import_input_path(&path, ImportKind::PhysicalArp)?;
             to_json(
-                commands::physical::import_arp_table(path, state_ref(&state))
+                commands::physical::import_arp_table(path, state.as_ref())
                     .map_err(ApiError::bad_request)?,
             )?
         }
         "get_physical_topology" => to_json(
-            commands::physical::get_physical_topology(state_ref(&state))
+            commands::physical::get_physical_topology(state.as_ref())
                 .map_err(ApiError::bad_request)?,
         )?,
         "clear_physical_topology" => to_json(
-            commands::physical::clear_physical_topology(state_ref(&state))
+            commands::physical::clear_physical_topology(state.as_ref())
                 .map_err(ApiError::bad_request)?,
         )?,
         "import_network_config" => {
             let path: String = arg(&payload, &["path"])?;
             let path = resolve_import_input_path(&path, ImportKind::PhysicalConfig)?;
             to_json(
-                commands::physical::import_network_config(path, state_ref(&state))
+                commands::physical::import_network_config(path, state.as_ref())
                     .map_err(ApiError::bad_request)?,
             )?
         }
@@ -1547,7 +1426,7 @@ async fn invoke_command(
             let switch_hostname: String = arg(&payload, &["switchHostname", "switch_hostname"])?;
             let path = resolve_import_input_path(&path, ImportKind::PhysicalMac)?;
             to_json(
-                commands::physical::import_mac_table_auto(path, switch_hostname, state_ref(&state))
+                commands::physical::import_mac_table_auto(path, switch_hostname, state.as_ref())
                     .map_err(ApiError::bad_request)?,
             )?
         }
@@ -1556,16 +1435,16 @@ async fn invoke_command(
             let switch_hostname: String = arg(&payload, &["switchHostname", "switch_hostname"])?;
             let path = resolve_import_input_path(&path, ImportKind::PhysicalNeighbor)?;
             to_json(
-                commands::physical::import_neighbor_table(path, switch_hostname, state_ref(&state))
+                commands::physical::import_neighbor_table(path, switch_hostname, state.as_ref())
                     .map_err(ApiError::bad_request)?,
             )?
         }
         "run_topology_inference" => to_json(
-            commands::physical::run_topology_inference(state_ref(&state))
+            commands::physical::run_topology_inference(state.as_ref())
                 .map_err(ApiError::bad_request)?,
         )?,
         "get_inferred_topology" => to_json(
-            commands::physical::get_inferred_topology(state_ref(&state))
+            commands::physical::get_inferred_topology(state.as_ref())
                 .map_err(ApiError::bad_request)?,
         )?,
         "import_zeek_logs" => {
@@ -1575,7 +1454,7 @@ async fn invoke_command(
                 .map(|path| resolve_import_input_path(path, ImportKind::Zeek))
                 .collect::<Result<Vec<_>, _>>()?;
             to_json(
-                commands::ingest::import_zeek_logs(paths, state_ref(&state))
+                commands::ingest::import_zeek_logs(paths, state.as_ref())
                     .await
                     .map_err(ApiError::bad_request)?,
             )?
@@ -1584,7 +1463,7 @@ async fn invoke_command(
             let path: String = arg(&payload, &["path"])?;
             let path = resolve_import_input_path(&path, ImportKind::Suricata)?;
             to_json(
-                commands::ingest::import_suricata_eve(path, state_ref(&state))
+                commands::ingest::import_suricata_eve(path, state.as_ref())
                     .await
                     .map_err(ApiError::bad_request)?,
             )?
@@ -1593,7 +1472,7 @@ async fn invoke_command(
             let path: String = arg(&payload, &["path"])?;
             let path = resolve_import_input_path(&path, ImportKind::Nmap)?;
             to_json(
-                commands::ingest::import_nmap_xml(path, state_ref(&state))
+                commands::ingest::import_nmap_xml(path, state.as_ref())
                     .await
                     .map_err(ApiError::bad_request)?,
             )?
@@ -1602,7 +1481,7 @@ async fn invoke_command(
             let path: String = arg(&payload, &["path"])?;
             let path = resolve_import_input_path(&path, ImportKind::Masscan)?;
             to_json(
-                commands::ingest::import_masscan_json(path, state_ref(&state))
+                commands::ingest::import_masscan_json(path, state.as_ref())
                     .await
                     .map_err(ApiError::bad_request)?,
             )?
@@ -1611,7 +1490,7 @@ async fn invoke_command(
             let path: String = arg(&payload, &["path"])?;
             let path = resolve_import_input_path(&path, ImportKind::Wazuh)?;
             to_json(
-                commands::ingest::import_wazuh_alerts(path, state_ref(&state))
+                commands::ingest::import_wazuh_alerts(path, state.as_ref())
                     .await
                     .map_err(ApiError::bad_request)?,
             )?
@@ -1620,7 +1499,7 @@ async fn invoke_command(
             let path: String = arg(&payload, &["path"])?;
             let path = resolve_import_input_path(&path, ImportKind::Sinema)?;
             to_json(
-                commands::ingest::import_sinema_csv(path, state_ref(&state))
+                commands::ingest::import_sinema_csv(path, state.as_ref())
                     .await
                     .map_err(ApiError::bad_request)?,
             )?
@@ -1629,7 +1508,7 @@ async fn invoke_command(
             let path: String = arg(&payload, &["path"])?;
             let path = resolve_import_input_path(&path, ImportKind::Tia)?;
             to_json(
-                commands::ingest::import_tia_xml(path, state_ref(&state))
+                commands::ingest::import_tia_xml(path, state.as_ref())
                     .await
                     .map_err(ApiError::bad_request)?,
             )?
@@ -1637,7 +1516,7 @@ async fn invoke_command(
         "get_device_zeek_events" => {
             let device_ip: String = arg(&payload, &["deviceIp", "device_ip"])?;
             to_json(
-                commands::ingest::get_device_zeek_events(device_ip, state_ref(&state))
+                commands::ingest::get_device_zeek_events(device_ip, state.as_ref())
                     .await
                     .map_err(ApiError::bad_request)?,
             )?
@@ -1650,7 +1529,7 @@ async fn invoke_command(
         "open_in_wireshark" => {
             let connection_id: String = arg(&payload, &["connectionId", "connection_id"])?;
             to_json(
-                commands::wireshark::open_in_wireshark(connection_id, state_ref(&state))
+                commands::wireshark::open_in_wireshark(connection_id, state.as_ref())
                     .await
                     .map_err(ApiError::bad_request)?,
             )?
@@ -1666,7 +1545,7 @@ async fn invoke_command(
         "get_connection_frames" => {
             let connection_id: String = arg(&payload, &["connectionId", "connection_id"])?;
             to_json(
-                commands::wireshark::get_connection_frames(connection_id, state_ref(&state))
+                commands::wireshark::get_connection_frames(connection_id, state.as_ref())
                     .await
                     .map_err(ApiError::bad_request)?,
             )?
@@ -1674,7 +1553,7 @@ async fn invoke_command(
         "export_frames_csv" => {
             let connection_id: String = arg(&payload, &["connectionId", "connection_id"])?;
             to_json(
-                commands::wireshark::export_frames_csv(connection_id, state_ref(&state))
+                commands::wireshark::export_frames_csv(connection_id, state.as_ref())
                     .await
                     .map_err(ApiError::bad_request)?,
             )?
@@ -1684,7 +1563,7 @@ async fn invoke_command(
             let output_path: String = arg(&payload, &["outputPath", "output_path"])?;
             let output_path = resolve_export_output_path(&output_path, "frames.csv")?;
             to_json(
-                commands::wireshark::save_frames_csv(connection_id, output_path, state_ref(&state))
+                commands::wireshark::save_frames_csv(connection_id, output_path, state.as_ref())
                     .await
                     .map_err(ApiError::bad_request)?,
             )?
@@ -1693,7 +1572,7 @@ async fn invoke_command(
             let output_path: String = arg(&payload, &["outputPath", "output_path"])?;
             let output_path = resolve_export_output_path(&output_path, "assets.csv")?;
             to_json(
-                commands::export::export_assets_csv(output_path, state_ref(&state))
+                commands::export::export_assets_csv(output_path, state.as_ref())
                     .await
                     .map_err(ApiError::bad_request)?,
             )?
@@ -1702,7 +1581,7 @@ async fn invoke_command(
             let output_path: String = arg(&payload, &["outputPath", "output_path"])?;
             let output_path = resolve_export_output_path(&output_path, "connections.csv")?;
             to_json(
-                commands::export::export_connections_csv(output_path, state_ref(&state))
+                commands::export::export_connections_csv(output_path, state.as_ref())
                     .await
                     .map_err(ApiError::bad_request)?,
             )?
@@ -1711,7 +1590,7 @@ async fn invoke_command(
             let output_path: String = arg(&payload, &["outputPath", "output_path"])?;
             let output_path = resolve_export_output_path(&output_path, "topology.json")?;
             to_json(
-                commands::export::export_topology_json(output_path, state_ref(&state))
+                commands::export::export_topology_json(output_path, state.as_ref())
                     .await
                     .map_err(ApiError::bad_request)?,
             )?
@@ -1720,7 +1599,7 @@ async fn invoke_command(
             let output_path: String = arg(&payload, &["outputPath", "output_path"])?;
             let output_path = resolve_export_output_path(&output_path, "assets.json")?;
             to_json(
-                commands::export::export_assets_json(output_path, state_ref(&state))
+                commands::export::export_assets_json(output_path, state.as_ref())
                     .await
                     .map_err(ApiError::bad_request)?,
             )?
@@ -1730,7 +1609,7 @@ async fn invoke_command(
             let output_path: String = arg(&payload, &["outputPath", "output_path"])?;
             let output_path = resolve_export_output_path(&output_path, "assessment_report.pdf")?;
             to_json(
-                commands::export::generate_pdf_report(config, output_path, state_ref(&state))
+                commands::export::generate_pdf_report(config, output_path, state.as_ref())
                     .await
                     .map_err(ApiError::bad_request)?,
             )?
@@ -1740,7 +1619,7 @@ async fn invoke_command(
             let output_path: String = arg(&payload, &["outputPath", "output_path"])?;
             let output_path = resolve_export_output_path(&output_path, "sbom.json")?;
             to_json(
-                commands::export::export_sbom(format, output_path, state_ref(&state))
+                commands::export::export_sbom(format, output_path, state.as_ref())
                     .await
                     .map_err(ApiError::bad_request)?,
             )?
@@ -1749,7 +1628,7 @@ async fn invoke_command(
             let output_path: String = arg(&payload, &["outputPath", "output_path"])?;
             let output_path = resolve_export_output_path(&output_path, "stix_bundle.json")?;
             to_json(
-                commands::export::export_stix_bundle(output_path, state_ref(&state))
+                commands::export::export_stix_bundle(output_path, state.as_ref())
                     .await
                     .map_err(ApiError::bad_request)?,
             )?
@@ -1774,7 +1653,7 @@ async fn invoke_command(
                     filter_ips,
                     filter_ports,
                     output_path,
-                    state_ref(&state),
+                    state.as_ref(),
                 )
                 .await
                 .map_err(ApiError::bad_request)?,
@@ -1788,43 +1667,43 @@ async fn invoke_command(
             to_json(commands::system::save_settings(settings).map_err(ApiError::bad_request)?)?
         }
         "get_timeline_range" => to_json(
-            commands::data::get_timeline_range(state_ref(&state)).map_err(ApiError::bad_request)?,
+            commands::data::get_timeline_range(state.as_ref()).map_err(ApiError::bad_request)?,
         )?,
         "list_plugins" => {
             to_json(commands::system::list_plugins().map_err(ApiError::bad_request)?)?
         }
         "get_connection_stats" => to_json(
-            commands::patterns::get_connection_stats(state_ref(&state))
+            commands::patterns::get_connection_stats(state.as_ref())
                 .map_err(ApiError::bad_request)?,
         )?,
         "get_pattern_anomalies" => to_json(
-            commands::patterns::get_pattern_anomalies(state_ref(&state))
+            commands::patterns::get_pattern_anomalies(state.as_ref())
                 .map_err(ApiError::bad_request)?,
         )?,
         "get_redundancy_protocols" => to_json(
-            commands::patterns::get_redundancy_protocols(state_ref(&state))
+            commands::patterns::get_redundancy_protocols(state.as_ref())
                 .map_err(ApiError::bad_request)?,
         )?,
         "get_correlated_alerts" => to_json(
-            commands::correlation::get_correlated_alerts(state_ref(&state))
+            commands::correlation::get_correlated_alerts(state.as_ref())
                 .await
                 .map_err(ApiError::bad_request)?,
         )?,
         "get_alerts_for_ip" => {
             let ip: String = arg(&payload, &["ip"])?;
             to_json(
-                commands::correlation::get_alerts_for_ip(ip, state_ref(&state))
+                commands::correlation::get_alerts_for_ip(ip, state.as_ref())
                     .await
                     .map_err(ApiError::bad_request)?,
             )?
         }
         "clear_alerts" => to_json(
-            commands::correlation::clear_alerts(state_ref(&state))
+            commands::correlation::clear_alerts(state.as_ref())
                 .await
                 .map_err(ApiError::bad_request)?,
         )?,
         "generate_communication_allowlist" => to_json(
-            commands::export::generate_communication_allowlist(state_ref(&state))
+            commands::export::generate_communication_allowlist(state.as_ref())
                 .await
                 .map_err(ApiError::bad_request)?,
         )?,
@@ -1832,7 +1711,7 @@ async fn invoke_command(
             let output_path: String = arg(&payload, &["outputPath", "output_path"])?;
             let output_path = resolve_export_output_path(&output_path, "allowlist.csv")?;
             to_json(
-                commands::export::export_allowlist_csv(output_path, state_ref(&state))
+                commands::export::export_allowlist_csv(output_path, state.as_ref())
                     .await
                     .map_err(ApiError::bad_request)?,
             )?
@@ -1841,19 +1720,19 @@ async fn invoke_command(
             let output_path: String = arg(&payload, &["outputPath", "output_path"])?;
             let output_path = resolve_export_output_path(&output_path, "firewall_rules.txt")?;
             to_json(
-                commands::export::export_firewall_rules(output_path, state_ref(&state))
+                commands::export::export_firewall_rules(output_path, state.as_ref())
                     .await
                     .map_err(ApiError::bad_request)?,
             )?
         }
         "run_segmentation" => to_json(
-            commands::segmentation::run_segmentation(state_ref(&state))
+            commands::segmentation::run_segmentation(state.as_ref())
                 .map_err(ApiError::bad_request)?,
         )?,
         "export_enforcement_config" => {
             let format: String = arg(&payload, &["format"])?;
             to_json(
-                commands::segmentation::export_enforcement_config(format, state_ref(&state))
+                commands::segmentation::export_enforcement_config(format, state.as_ref())
                     .map_err(ApiError::bad_request)?,
             )?
         }

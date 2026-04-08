@@ -1,6 +1,5 @@
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
-use tauri::State;
 
 use super::{
     AppState, AssetInfo, ConnectionInfo, DeepParseInfo, FunctionCodeStat, PacketSummary,
@@ -20,8 +19,7 @@ const MAX_TOPOLOGY_EDGES: usize = 20_000;
 /// Edges are then filtered to only include connections between remaining nodes
 /// and capped at MAX_TOPOLOGY_EDGES (20 000) by packet_count descending.
 /// For smaller datasets the full graph is returned unchanged.
-#[tauri::command]
-pub fn get_topology(state: State<'_, AppState>) -> Result<TopologyGraph, String> {
+pub fn get_topology(state: &AppState) -> Result<TopologyGraph, String> {
     let capture = state.capture.read().map_err(|e| e.to_string())?;
     let topo = &capture.topology;
 
@@ -85,9 +83,8 @@ pub struct DataCounts {
 /// - `page`: zero-based page index (default 0)
 /// - `page_size`: items per page (default 200)
 /// - `sort_by`: optional sort key — "ip", "packets", "protocol", "connections"
-#[tauri::command]
 pub fn get_assets(
-    state: State<'_, AppState>,
+    state: &AppState,
     page: Option<usize>,
     page_size: Option<usize>,
     sort_by: Option<String>,
@@ -138,9 +135,8 @@ pub fn get_assets(
 /// - `page`: zero-based page index (default 0)
 /// - `page_size`: items per page (default 500)
 /// - `sort_by`: optional sort key — "packets", "bytes"
-#[tauri::command]
 pub fn get_connections(
-    state: State<'_, AppState>,
+    state: &AppState,
     page: Option<usize>,
     page_size: Option<usize>,
     sort_by: Option<String>,
@@ -187,10 +183,19 @@ pub fn get_connections(
 /// Get lightweight asset/connection counts for the sidebar.
 ///
 /// This avoids serializing the full dataset just to show totals.
-#[tauri::command]
-pub fn get_data_counts(state: State<'_, AppState>) -> Result<DataCounts, String> {
-    let asset_count = state.inventory.read().map_err(|e| e.to_string())?.assets.len();
-    let connection_count = state.capture.read().map_err(|e| e.to_string())?.connections.len();
+pub fn get_data_counts(state: &AppState) -> Result<DataCounts, String> {
+    let asset_count = state
+        .inventory
+        .read()
+        .map_err(|e| e.to_string())?
+        .assets
+        .len();
+    let connection_count = state
+        .capture
+        .read()
+        .map_err(|e| e.to_string())?
+        .connections
+        .len();
     Ok(DataCounts {
         asset_count,
         connection_count,
@@ -202,8 +207,7 @@ pub fn get_data_counts(state: State<'_, AppState>) -> Result<DataCounts, String>
 /// Single-pass O(n_connections): accumulates stats and unique-device sets for
 /// all protocols in one loop, avoiding the previous O(protocols × connections)
 /// double-loop.
-#[tauri::command]
-pub fn get_protocol_stats(state: State<'_, AppState>) -> Result<Vec<ProtocolStatInfo>, String> {
+pub fn get_protocol_stats(state: &AppState) -> Result<Vec<ProtocolStatInfo>, String> {
     let capture = state.capture.read().map_err(|e| e.to_string())?;
 
     let mut stats: HashMap<String, ProtocolStatInfo> = HashMap::new();
@@ -245,10 +249,9 @@ pub fn get_protocol_stats(state: State<'_, AppState>) -> Result<Vec<ProtocolStat
 /// Get packet summaries for a specific connection (for the connection tree detail view).
 ///
 /// Already capped at 1000 per connection during ingestion (see processor.rs).
-#[tauri::command]
 pub fn get_connection_packets(
     connection_id: String,
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<Vec<PacketSummary>, String> {
     let capture = state.capture.read().map_err(|e| e.to_string())?;
     Ok(capture
@@ -262,10 +265,9 @@ pub fn get_connection_packets(
 ///
 /// Returns Modbus/DNP3 details including function codes, unit IDs,
 /// register ranges, device identification, and polling intervals.
-#[tauri::command]
 pub fn get_deep_parse_info(
     ip_address: String,
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<Option<DeepParseInfo>, String> {
     let inventory = state.inventory.read().map_err(|e| e.to_string())?;
     Ok(inventory.deep_parse_info.get(&ip_address).cloned())
@@ -275,9 +277,8 @@ pub fn get_deep_parse_info(
 ///
 /// Returns aggregated function code stats for the protocol stats view,
 /// showing which function codes are most used across the network.
-#[tauri::command]
 pub fn get_function_code_stats(
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<HashMap<String, Vec<FunctionCodeStat>>, String> {
     let inventory = state.inventory.read().map_err(|e| e.to_string())?;
 
@@ -346,8 +347,7 @@ pub struct TimelineRange {
 /// Returns the earliest and latest timestamps from all connections,
 /// used by the timeline scrubber to set slider bounds.
 /// Scans all connections (not capped) to ensure accurate bounds.
-#[tauri::command]
-pub fn get_timeline_range(state: State<'_, AppState>) -> Result<TimelineRange, String> {
+pub fn get_timeline_range(state: &AppState) -> Result<TimelineRange, String> {
     let capture = state.capture.read().map_err(|e| e.to_string())?;
 
     let mut earliest: Option<&str> = None;

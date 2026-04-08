@@ -4,8 +4,6 @@
 //! They construct AnalysisInput from AppState, run analysis, and
 //! store results back into AppState.
 
-use tauri::State;
-
 use std::collections::{HashMap, HashSet};
 
 use gm_analysis::{
@@ -406,8 +404,7 @@ const MAX_ANOMALIES: usize = 500;
 /// Results are stored in AppState and returned to the frontend.
 ///
 /// Lock order: capture (read) → inventory (write) → analysis (write)
-#[tauri::command]
-pub fn run_analysis(state: State<'_, AppState>) -> Result<AnalysisResult, String> {
+pub fn run_analysis(state: &AppState) -> Result<AnalysisResult, String> {
     let capture = state.capture.read().map_err(|e| e.to_string())?;
     let mut inventory = state.inventory.write().map_err(|e| e.to_string())?;
     let mut analysis = state.analysis.write().map_err(|e| e.to_string())?;
@@ -441,8 +438,7 @@ pub fn run_analysis(state: State<'_, AppState>) -> Result<AnalysisResult, String
 }
 
 /// Get findings from the last analysis run (capped at MAX_FINDINGS = 1 000).
-#[tauri::command]
-pub fn get_findings(state: State<'_, AppState>) -> Result<Vec<Finding>, String> {
+pub fn get_findings(state: &AppState) -> Result<Vec<Finding>, String> {
     let analysis = state.analysis.read().map_err(|e| e.to_string())?;
     if analysis.findings.len() <= MAX_FINDINGS {
         return Ok(analysis.findings.clone());
@@ -451,15 +447,13 @@ pub fn get_findings(state: State<'_, AppState>) -> Result<Vec<Finding>, String> 
 }
 
 /// Get Purdue level assignments from the last analysis run.
-#[tauri::command]
-pub fn get_purdue_assignments(state: State<'_, AppState>) -> Result<Vec<PurdueAssignment>, String> {
+pub fn get_purdue_assignments(state: &AppState) -> Result<Vec<PurdueAssignment>, String> {
     let analysis = state.analysis.read().map_err(|e| e.to_string())?;
     Ok(analysis.purdue_assignments.clone())
 }
 
 /// Get anomaly scores from the last analysis run (capped at MAX_ANOMALIES = 500).
-#[tauri::command]
-pub fn get_anomalies(state: State<'_, AppState>) -> Result<Vec<AnomalyScore>, String> {
+pub fn get_anomalies(state: &AppState) -> Result<Vec<AnomalyScore>, String> {
     let analysis = state.analysis.read().map_err(|e| e.to_string())?;
     if analysis.anomalies.len() <= MAX_ANOMALIES {
         return Ok(analysis.anomalies.clone());
@@ -470,10 +464,7 @@ pub fn get_anomalies(state: State<'_, AppState>) -> Result<Vec<AnomalyScore>, St
 /// Get credential warnings for all discovered devices.
 ///
 /// Checks vendor+product strings against the default credential database.
-#[tauri::command]
-pub fn get_credential_warnings(
-    state: State<'_, AppState>,
-) -> Result<Vec<DefaultCredential>, String> {
+pub fn get_credential_warnings(state: &AppState) -> Result<Vec<DefaultCredential>, String> {
     let inventory = state.inventory.read().map_err(|e| e.to_string())?;
 
     let checker = CredentialChecker::new()?;
@@ -493,8 +484,7 @@ pub fn get_credential_warnings(
 }
 
 /// Assess criticality for all discovered assets.
-#[tauri::command]
-pub fn get_criticality(state: State<'_, AppState>) -> Result<Vec<CriticalityAssessment>, String> {
+pub fn get_criticality(state: &AppState) -> Result<Vec<CriticalityAssessment>, String> {
     let capture = state.capture.read().map_err(|e| e.to_string())?;
     let inventory = state.inventory.read().map_err(|e| e.to_string())?;
     let input = build_analysis_input(&capture, &inventory);
@@ -502,8 +492,7 @@ pub fn get_criticality(state: State<'_, AppState>) -> Result<Vec<CriticalityAsse
 }
 
 /// Get naming suggestions for all discovered assets.
-#[tauri::command]
-pub fn get_naming_suggestions(state: State<'_, AppState>) -> Result<Vec<NamingSuggestion>, String> {
+pub fn get_naming_suggestions(state: &AppState) -> Result<Vec<NamingSuggestion>, String> {
     let capture = state.capture.read().map_err(|e| e.to_string())?;
     let inventory = state.inventory.read().map_err(|e| e.to_string())?;
     let input = build_analysis_input(&capture, &inventory);
@@ -516,9 +505,8 @@ pub fn get_naming_suggestions(state: State<'_, AppState>) -> Result<Vec<NamingSu
 /// and default credential matches to produce actionable switch security findings.
 ///
 /// Lock order: capture (read) → inventory (read)
-#[tauri::command]
 pub fn get_switch_security_findings(
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<Vec<SwitchSecurityFinding>, String> {
     let capture = state.capture.read().map_err(|e| e.to_string())?;
     let inventory = state.inventory.read().map_err(|e| e.to_string())?;
@@ -604,8 +592,7 @@ pub fn get_switch_security_findings(
 /// (multi-protocol reconnaissance), and Industroyer2 (IEC 104 burst commands).
 ///
 /// Lock order: capture (read) → inventory (read) → analysis (read)
-#[tauri::command]
-pub fn get_malware_findings(state: State<'_, AppState>) -> Result<Vec<MalwareFinding>, String> {
+pub fn get_malware_findings(state: &AppState) -> Result<Vec<MalwareFinding>, String> {
     let capture = state.capture.read().map_err(|e| e.to_string())?;
     let inventory = state.inventory.read().map_err(|e| e.to_string())?;
     let analysis = state.analysis.read().map_err(|e| e.to_string())?;
@@ -673,8 +660,7 @@ pub fn get_malware_findings(state: State<'_, AppState>) -> Result<Vec<MalwareFin
 ///
 /// Checks vendor, model, and firmware (extracted from LLDP or SNMP deep parse
 /// data) against the bundled OT infrastructure CVE database.
-#[tauri::command]
-pub fn get_cve_warnings(ip: String, state: State<'_, AppState>) -> Result<Vec<CveMatch>, String> {
+pub fn get_cve_warnings(ip: String, state: &AppState) -> Result<Vec<CveMatch>, String> {
     let inventory = state.inventory.read().map_err(|e| e.to_string())?;
 
     // Priority for vendor/model/firmware: LLDP > SNMP > asset info
@@ -722,9 +708,8 @@ pub fn get_cve_warnings(ip: String, state: State<'_, AppState>) -> Result<Vec<Cv
 /// `framework` must be one of: `"iec62443"`, `"nist80082"`, `"nerccip"`.
 ///
 /// Lock order: capture (read) → inventory (read) → analysis (read)
-#[tauri::command]
 pub fn get_compliance_report(
-    state: State<'_, AppState>,
+    state: &AppState,
     framework: String,
 ) -> Result<Vec<ComplianceMapping>, String> {
     if !["iec62443", "nist80082", "nerccip"].contains(&framework.as_str()) {
