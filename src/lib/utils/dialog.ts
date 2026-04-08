@@ -1,5 +1,3 @@
-import { isTauriRuntime } from '$lib/api';
-
 export interface DialogFilter {
 	name: string;
 	extensions: string[];
@@ -30,11 +28,6 @@ function promptLabel(kind: 'open' | 'save', options?: { title?: string; multiple
 }
 
 export async function openPathDialog(options?: OpenDialogOptions): Promise<string | string[] | null> {
-	if (isTauriRuntime()) {
-		const { open } = await import('@tauri-apps/plugin-dialog');
-		return open(options as Parameters<typeof open>[0]);
-	}
-
 	const raw = window.prompt(promptLabel('open', options));
 	if (!raw) return null;
 	if (options?.multiple) {
@@ -48,10 +41,6 @@ export async function openPathDialog(options?: OpenDialogOptions): Promise<strin
 }
 
 export async function savePathDialog(options?: SaveDialogOptions): Promise<string | null> {
-	if (isTauriRuntime()) {
-		const { save } = await import('@tauri-apps/plugin-dialog');
-		return save(options as Parameters<typeof save>[0]);
-	}
 	const raw = window.prompt(
 		promptLabel('save', options) + (options?.defaultPath ? ` (default: ${options.defaultPath})` : '')
 	);

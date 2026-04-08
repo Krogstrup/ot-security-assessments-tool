@@ -3,8 +3,7 @@
  */
 
 import type { LiveAttackAlert } from '$lib/types/analysis';
-import { listen } from '@tauri-apps/api/event';
-import { invokeCompat, isTauriRuntime } from './core';
+import { invokeCompat } from './core';
 import type { CorrelatedAlert } from '$lib/types/analysis';
 
 export async function getCorrelatedAlerts(): Promise<CorrelatedAlert[]> {
@@ -20,11 +19,8 @@ export async function clearAlerts(): Promise<void> {
 }
 
 export async function onLiveAttackAlert(
-	callback: (alert: LiveAttackAlert) => void
+	_callback: (alert: LiveAttackAlert) => void
 ): Promise<() => void> {
-	if (!isTauriRuntime()) {
-		return () => {};
-	}
-	return listen<LiveAttackAlert>('live_attack_alert', (event) => callback(event.payload));
+	// No SSE equivalent for live attack alerts in web runtime.
+	return () => {};
 }
-

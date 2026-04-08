@@ -2,9 +2,14 @@
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
+use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
+use std::convert::Infallible;
+use tokio::sync::broadcast;
+use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::{Stream, StreamExt as _};
 use clap::Parser;
 use gm_capture::{list_interfaces, LiveCaptureConfig, ParsedPacket, PcapReader};
 use gm_topology::TopologyGraph;
@@ -226,7 +231,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let frontend_dist = resolve_frontend_dist(cli.frontend_dist);
     let index_path = frontend_dist.join("index.html");
 
-    let state: SharedState = Arc::new(AppState::new(commands::resource_paths::ResourcePaths::from_env()));
+    let (event_tx, _) = broadcast::channel::<(String, serde_json::Value)>(256);
+    let mut app = AppState::new(commands::resource_paths::ResourcePaths::from_env());
+    app.event_tx = Some(event_tx.clone());
+    let state: SharedState = Arc::new(app);
 
     let api = Router::new()
         .route("/health", get(health))
@@ -246,10 +254,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(get_connection_packets),
         )
         // v1 resource endpoints — projects
-        // NOTE: /v1/projects/active must be registered before /v1/projects/:id
+        // NOTE: /v1/projects/active must be registered before /v1/projects/{id}
         .route("/v1/projects", get(list_projects_handler).post(create_project_handler))
         .route("/v1/projects/active", put(set_active_project_handler).delete(clear_active_project_handler))
-        .route("/v1/projects/:id", get(get_project_handler).put(update_project_handler).delete(delete_project_handler));
+        .route("/v1/projects/{id}", get(get_project_handler).put(update_project_handler).delete(delete_project_handler))
+        // v1 resource endpoints — sessions
+        // NOTE: static sub-paths (/import, /compare) must be registered before /sessions/{id}
+        .route("/v1/sessions", get(list_sessions_handler).post(save_session_handler))
+        .route("/v1/sessions/import", post(import_session_handler))
+        .route("/v1/sessions/compare", post(compare_sessions_handler))
+        .route("/v1/sessions/{id}/load", post(load_session_handler))
+        .route("/v1/sessions/{id}/export", post(export_session_handler))
+        .route("/v1/sessions/{id}", delete(delete_session_handler))
+        // v1 resource endpoints — analysis
+        .route("/v1/analysis/run", post(run_analysis_handler))
+        .route("/v1/analysis/findings", get(get_findings_handler))
+        .route("/v1/analysis/purdue", get(get_purdue_handler))
+        .route("/v1/analysis/anomalies", get(get_anomalies_handler))
+        .route("/v1/analysis/credentials", get(get_credentials_handler))
+        .route("/v1/analysis/criticality", get(get_criticality_handler))
+        .route("/v1/analysis/naming-suggestions", get(get_naming_suggestions_handler))
+        .route("/v1/analysis/malware", get(get_malware_handler))
+        .route("/v1/analysis/switch-security", get(get_switch_security_handler))
+        .route("/v1/analysis/compliance", get(get_compliance_handler))
+        .route("/v1/analysis/cve", get(get_cve_handler))
+        // v1 SSE event stream
+        .route("/v1/events", get(events_handler));
 
     let static_files = ServeDir::new(&frontend_dist).not_found_service(ServeFile::new(index_path));
 
@@ -525,10 +555,28 @@ async fn import_pcap(
                     processor.process_packet(packet);
                 }
                 per_file_results.push(FileImportResult {
-                    filename,
+                    filename: filename.clone(),
                     packet_count: packets.len(),
                     status: "ok".to_string(),
                 });
+                if let Some(tx) = &state.event_tx {
+                    let file_index = per_file_results.len() - 1;
+                    let file_count = paths.len();
+                    let progress = (file_index + 1) as f64 / file_count as f64 * 100.0;
+                    let _ = tx.send((
+                        "import_progress".to_string(),
+                        json!({
+                            "current_file": filename,
+                            "file_index": file_index,
+                            "file_count": file_count,
+                            "packets_processed": packets.len(),
+                            "bytes_processed": 0,
+                            "file_size": 0,
+                            "progress_percent": progress,
+                            "elapsed_secs": start.elapsed().as_secs_f64(),
+                        }),
+                    ));
+                }
             }
             Err(e) => {
                 per_file_results.push(FileImportResult {
@@ -969,6 +1017,23 @@ fn flush_batch_headless(
         analysis.connection_stats = connection_stats;
         analysis.pattern_anomalies = pattern_anomalies;
     }
+
+    // Emit capture_stats event for SSE subscribers
+    if let Some(tx) = &state.event_tx {
+        let asset_count = state.inventory.read().map(|inv| inv.assets.len()).unwrap_or(0);
+        let connection_count = state.capture.read().map(|cap| cap.connections.len()).unwrap_or(0);
+        let _ = tx.send((
+            "capture_stats".to_string(),
+            json!({
+                "packets_captured": 0,
+                "packets_per_second": 0,
+                "bytes_captured": 0,
+                "active_connections": connection_count,
+                "asset_count": asset_count,
+                "elapsed_seconds": 0.0,
+            }),
+        ));
+    }
 }
 
 async fn start_capture_headless(
@@ -1105,6 +1170,234 @@ async fn clear_active_project_handler(
     Ok(Json(json!({})))
 }
 
+// ── /api/v1/sessions ─────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveSessionRequest {
+    name: String,
+    description: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportSessionRequest {
+    output_path: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportSessionRequest {
+    archive_path: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CompareSessionsRequest {
+    baseline_session_id: String,
+}
+
+async fn list_sessions_handler(
+    State(state): State<SharedState>,
+) -> Result<Json<Value>, ApiError> {
+    let sessions = commands::session::list_sessions(state_ref(&state))
+        .await
+        .map_err(ApiError::bad_request)?;
+    to_json(sessions)
+}
+
+async fn save_session_handler(
+    State(state): State<SharedState>,
+    Json(body): Json<SaveSessionRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let session = commands::session::save_session(body.name, body.description, state_ref(&state))
+        .await
+        .map_err(ApiError::bad_request)?;
+    to_json(session)
+}
+
+async fn load_session_handler(
+    Path(id): Path<String>,
+    State(state): State<SharedState>,
+) -> Result<Json<Value>, ApiError> {
+    let session = commands::session::load_session(id, state_ref(&state))
+        .await
+        .map_err(ApiError::bad_request)?;
+    to_json(session)
+}
+
+async fn delete_session_handler(
+    Path(id): Path<String>,
+    State(state): State<SharedState>,
+) -> Result<Json<Value>, ApiError> {
+    commands::session::delete_session(id, state_ref(&state))
+        .await
+        .map_err(ApiError::bad_request)?;
+    Ok(Json(json!({})))
+}
+
+async fn export_session_handler(
+    Path(id): Path<String>,
+    State(state): State<SharedState>,
+    Json(body): Json<ExportSessionRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let output_path = resolve_export_output_path(&body.output_path, "session.kkj")?;
+    let path = commands::session::export_session_archive(id, output_path, state_ref(&state))
+        .await
+        .map_err(ApiError::bad_request)?;
+    to_json(path)
+}
+
+async fn import_session_handler(
+    State(state): State<SharedState>,
+    Json(body): Json<ImportSessionRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let archive_path = resolve_import_input_path(&body.archive_path, ImportKind::SessionArchive)?;
+    let session = commands::session::import_session_archive(archive_path, state_ref(&state))
+        .await
+        .map_err(ApiError::bad_request)?;
+    to_json(session)
+}
+
+async fn compare_sessions_handler(
+    State(state): State<SharedState>,
+    Json(body): Json<CompareSessionsRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let diff =
+        commands::baseline::compare_sessions(body.baseline_session_id, state_ref(&state))
+            .map_err(ApiError::bad_request)?;
+    to_json(diff)
+}
+
+// ── /api/v1/analysis ─────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+struct ComplianceQuery {
+    framework: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct CveQuery {
+    ip: String,
+}
+
+async fn run_analysis_handler(
+    State(state): State<SharedState>,
+) -> Result<Json<Value>, ApiError> {
+    let result = commands::analysis::run_analysis(state_ref(&state)).map_err(ApiError::bad_request)?;
+    to_json(result)
+}
+
+async fn get_findings_handler(
+    State(state): State<SharedState>,
+) -> Result<Json<Value>, ApiError> {
+    to_json(commands::analysis::get_findings(state_ref(&state)).map_err(ApiError::bad_request)?)
+}
+
+async fn get_purdue_handler(
+    State(state): State<SharedState>,
+) -> Result<Json<Value>, ApiError> {
+    to_json(
+        commands::analysis::get_purdue_assignments(state_ref(&state))
+            .map_err(ApiError::bad_request)?,
+    )
+}
+
+async fn get_anomalies_handler(
+    State(state): State<SharedState>,
+) -> Result<Json<Value>, ApiError> {
+    to_json(commands::analysis::get_anomalies(state_ref(&state)).map_err(ApiError::bad_request)?)
+}
+
+async fn get_credentials_handler(
+    State(state): State<SharedState>,
+) -> Result<Json<Value>, ApiError> {
+    to_json(
+        commands::analysis::get_credential_warnings(state_ref(&state))
+            .map_err(ApiError::bad_request)?,
+    )
+}
+
+async fn get_criticality_handler(
+    State(state): State<SharedState>,
+) -> Result<Json<Value>, ApiError> {
+    to_json(
+        commands::analysis::get_criticality(state_ref(&state)).map_err(ApiError::bad_request)?,
+    )
+}
+
+async fn get_naming_suggestions_handler(
+    State(state): State<SharedState>,
+) -> Result<Json<Value>, ApiError> {
+    to_json(
+        commands::analysis::get_naming_suggestions(state_ref(&state))
+            .map_err(ApiError::bad_request)?,
+    )
+}
+
+async fn get_malware_handler(
+    State(state): State<SharedState>,
+) -> Result<Json<Value>, ApiError> {
+    to_json(
+        commands::analysis::get_malware_findings(state_ref(&state))
+            .map_err(ApiError::bad_request)?,
+    )
+}
+
+async fn get_switch_security_handler(
+    State(state): State<SharedState>,
+) -> Result<Json<Value>, ApiError> {
+    to_json(
+        commands::analysis::get_switch_security_findings(state_ref(&state))
+            .map_err(ApiError::bad_request)?,
+    )
+}
+
+async fn get_compliance_handler(
+    State(state): State<SharedState>,
+    Query(query): Query<ComplianceQuery>,
+) -> Result<Json<Value>, ApiError> {
+    to_json(
+        commands::analysis::get_compliance_report(state_ref(&state), query.framework)
+            .map_err(ApiError::bad_request)?,
+    )
+}
+
+async fn get_cve_handler(
+    State(state): State<SharedState>,
+    Query(query): Query<CveQuery>,
+) -> Result<Json<Value>, ApiError> {
+    to_json(
+        commands::analysis::get_cve_warnings(query.ip, state_ref(&state))
+            .map_err(ApiError::bad_request)?,
+    )
+}
+
+// ── /api/v1/events (SSE) ─────────────────────────────────────────────────────
+
+/// Server-Sent Events stream for real-time capture and import progress updates.
+///
+/// Each message is an SSE event with:
+///   - `event:` field set to the event type (`capture_stats`, `import_progress`)
+///   - `data:` field containing JSON-serialized payload matching the TypeScript interface
+async fn events_handler(
+    State(state): State<SharedState>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let rx = state
+        .event_tx
+        .as_ref()
+        .expect("event_tx always set in web mode")
+        .subscribe();
+    let stream = BroadcastStream::new(rx).filter_map(|msg| match msg {
+        Ok((event_type, data)) => {
+            let data_str = serde_json::to_string(&data).ok()?;
+            Some(Ok(Event::default().event(event_type).data(data_str)))
+        }
+        Err(_) => None, // lagged receiver — drop silently
+    });
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
 async fn invoke_command(
     Path(command): Path<String>,
     State(state): State<SharedState>,
@@ -1181,36 +1474,6 @@ async fn invoke_command(
                 .await
                 .map_err(ApiError::bad_request)?,
         )?,
-        "save_session" => {
-            let name: String = arg(&payload, &["name"])?;
-            let description: Option<String> = arg_opt(&payload, &["description"])?;
-            to_json(
-                commands::session::save_session(name, description, state_ref(&state))
-                    .await
-                    .map_err(ApiError::bad_request)?,
-            )?
-        }
-        "load_session" => {
-            let session_id: String = arg(&payload, &["sessionId", "session_id"])?;
-            to_json(
-                commands::session::load_session(session_id, state_ref(&state))
-                    .await
-                    .map_err(ApiError::bad_request)?,
-            )?
-        }
-        "list_sessions" => to_json(
-            commands::session::list_sessions(state_ref(&state))
-                .await
-                .map_err(ApiError::bad_request)?,
-        )?,
-        "delete_session" => {
-            let session_id: String = arg(&payload, &["sessionId", "session_id"])?;
-            to_json(
-                commands::session::delete_session(session_id, state_ref(&state))
-                    .await
-                    .map_err(ApiError::bad_request)?,
-            )?
-        }
         "update_asset" => {
             let asset_id: String = arg(&payload, &["assetId", "asset_id"])?;
             let updates: commands::session::AssetUpdate = arg(&payload, &["updates"])?;
@@ -1226,37 +1489,6 @@ async fn invoke_command(
             to_json(
                 commands::session::bulk_update_assets(asset_ids, updates, state_ref(&state))
                     .await
-                    .map_err(ApiError::bad_request)?,
-            )?
-        }
-        "export_session_archive" => {
-            let session_id: String = arg(&payload, &["sessionId", "session_id"])?;
-            let output_path: String = arg(&payload, &["outputPath", "output_path"])?;
-            let output_path = resolve_export_output_path(&output_path, "session.kkj")?;
-            to_json(
-                commands::session::export_session_archive(
-                    session_id,
-                    output_path,
-                    state_ref(&state),
-                )
-                .await
-                .map_err(ApiError::bad_request)?,
-            )?
-        }
-        "import_session_archive" => {
-            let archive_path: String = arg(&payload, &["archivePath", "archive_path"])?;
-            let archive_path = resolve_import_input_path(&archive_path, ImportKind::SessionArchive)?;
-            to_json(
-                commands::session::import_session_archive(archive_path, state_ref(&state))
-                    .await
-                    .map_err(ApiError::bad_request)?,
-            )?
-        }
-        "compare_sessions" => {
-            let baseline_session_id: String =
-                arg(&payload, &["baselineSessionId", "baseline_session_id"])?;
-            to_json(
-                commands::baseline::compare_sessions(baseline_session_id, state_ref(&state))
                     .map_err(ApiError::bad_request)?,
             )?
         }
@@ -1548,53 +1780,6 @@ async fn invoke_command(
                 .map_err(ApiError::bad_request)?,
             )?
         }
-        "run_analysis" => to_json(
-            commands::analysis::run_analysis(state_ref(&state)).map_err(ApiError::bad_request)?,
-        )?,
-        "get_findings" => to_json(
-            commands::analysis::get_findings(state_ref(&state)).map_err(ApiError::bad_request)?,
-        )?,
-        "get_purdue_assignments" => to_json(
-            commands::analysis::get_purdue_assignments(state_ref(&state))
-                .map_err(ApiError::bad_request)?,
-        )?,
-        "get_anomalies" => to_json(
-            commands::analysis::get_anomalies(state_ref(&state)).map_err(ApiError::bad_request)?,
-        )?,
-        "get_credential_warnings" => to_json(
-            commands::analysis::get_credential_warnings(state_ref(&state))
-                .map_err(ApiError::bad_request)?,
-        )?,
-        "get_criticality" => to_json(
-            commands::analysis::get_criticality(state_ref(&state))
-                .map_err(ApiError::bad_request)?,
-        )?,
-        "get_naming_suggestions" => to_json(
-            commands::analysis::get_naming_suggestions(state_ref(&state))
-                .map_err(ApiError::bad_request)?,
-        )?,
-        "get_switch_security_findings" => to_json(
-            commands::analysis::get_switch_security_findings(state_ref(&state))
-                .map_err(ApiError::bad_request)?,
-        )?,
-        "get_malware_findings" => to_json(
-            commands::analysis::get_malware_findings(state_ref(&state))
-                .map_err(ApiError::bad_request)?,
-        )?,
-        "get_compliance_report" => {
-            let framework: String = arg(&payload, &["framework"])?;
-            to_json(
-                commands::analysis::get_compliance_report(state_ref(&state), framework)
-                    .map_err(ApiError::bad_request)?,
-            )?
-        }
-        "get_cve_warnings" => {
-            let ip: String = arg(&payload, &["ip"])?;
-            to_json(
-                commands::analysis::get_cve_warnings(ip, state_ref(&state))
-                    .map_err(ApiError::bad_request)?,
-            )?
-        }
         "get_settings" => {
             to_json(commands::system::get_settings().map_err(ApiError::bad_request)?)?
         }
@@ -1618,94 +1803,6 @@ async fn invoke_command(
         )?,
         "get_redundancy_protocols" => to_json(
             commands::patterns::get_redundancy_protocols(state_ref(&state))
-                .map_err(ApiError::bad_request)?,
-        )?,
-        "create_project" => {
-            let name: String = arg(&payload, &["name"])?;
-            let client_name: Option<String> = arg_opt(&payload, &["clientName", "client_name"])?;
-            let site_name: Option<String> = arg_opt(&payload, &["siteName", "site_name"])?;
-            let assessor_name: Option<String> =
-                arg_opt(&payload, &["assessorName", "assessor_name"])?;
-            let engagement_start: Option<String> =
-                arg_opt(&payload, &["engagementStart", "engagement_start"])?;
-            let engagement_end: Option<String> =
-                arg_opt(&payload, &["engagementEnd", "engagement_end"])?;
-            let notes: Option<String> = arg_opt(&payload, &["notes"])?;
-            to_json(
-                commands::projects::create_project(
-                    state_ref(&state),
-                    name,
-                    client_name,
-                    site_name,
-                    assessor_name,
-                    engagement_start,
-                    engagement_end,
-                    notes,
-                )
-                .await
-                .map_err(ApiError::bad_request)?,
-            )?
-        }
-        "list_projects" => to_json(
-            commands::projects::list_projects(state_ref(&state))
-                .await
-                .map_err(ApiError::bad_request)?,
-        )?,
-        "get_project" => {
-            let id: i64 = arg(&payload, &["id"])?;
-            to_json(
-                commands::projects::get_project(state_ref(&state), id)
-                    .await
-                    .map_err(ApiError::bad_request)?,
-            )?
-        }
-        "update_project" => {
-            let id: i64 = arg(&payload, &["id"])?;
-            let name: String = arg(&payload, &["name"])?;
-            let client_name: Option<String> = arg_opt(&payload, &["clientName", "client_name"])?;
-            let site_name: Option<String> = arg_opt(&payload, &["siteName", "site_name"])?;
-            let assessor_name: Option<String> =
-                arg_opt(&payload, &["assessorName", "assessor_name"])?;
-            let engagement_start: Option<String> =
-                arg_opt(&payload, &["engagementStart", "engagement_start"])?;
-            let engagement_end: Option<String> =
-                arg_opt(&payload, &["engagementEnd", "engagement_end"])?;
-            let notes: Option<String> = arg_opt(&payload, &["notes"])?;
-            to_json(
-                commands::projects::update_project(
-                    state_ref(&state),
-                    id,
-                    name,
-                    client_name,
-                    site_name,
-                    assessor_name,
-                    engagement_start,
-                    engagement_end,
-                    notes,
-                )
-                .await
-                .map_err(ApiError::bad_request)?,
-            )?
-        }
-        "delete_project" => {
-            let id: i64 = arg(&payload, &["id"])?;
-            to_json(
-                commands::projects::delete_project(state_ref(&state), id)
-                    .await
-                    .map_err(ApiError::bad_request)?,
-            )?
-        }
-        "set_active_project" => {
-            let id: i64 = arg(&payload, &["id"])?;
-            to_json(
-                commands::projects::set_active_project(state_ref(&state), id)
-                    .await
-                    .map_err(ApiError::bad_request)?,
-            )?
-        }
-        "clear_active_project" => to_json(
-            commands::projects::clear_active_project(state_ref(&state))
-                .await
                 .map_err(ApiError::bad_request)?,
         )?,
         "get_correlated_alerts" => to_json(

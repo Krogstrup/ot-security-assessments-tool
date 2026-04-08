@@ -41,6 +41,7 @@ use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::JoinHandle;
+use tokio::sync::broadcast;
 
 // ── Domain state structs ─────────────────────────────────────────────────────
 //
@@ -134,6 +135,9 @@ pub struct AppState {
     /// domain lock so it can be written by the cancel command without
     /// acquiring the heavy capture lock.
     pub import_cancelled: Arc<AtomicBool>,
+    /// Optional SSE broadcast channel for real-time web event streaming.
+    /// Set by the web binary; None in the Tauri desktop binary.
+    pub event_tx: Option<broadcast::Sender<(String, serde_json::Value)>>,
 }
 
 impl AppState {
@@ -199,6 +203,7 @@ impl AppState {
 
         AppState {
             import_cancelled: Arc::new(AtomicBool::new(false)),
+            event_tx: None,
             capture: RwLock::new(CaptureState {
                 topology: TopologyGraph::default(),
                 connections: Vec::new(),

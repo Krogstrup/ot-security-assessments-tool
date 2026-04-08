@@ -3,21 +3,15 @@
  */
 
 import type { UserSettings, TimelineRange, PluginManifest } from '$lib/types/analysis';
-import { invokeCompat, httpJson, isTauriRuntime } from './core';
+import { invokeCompat, httpJson } from './core';
 import type { NetworkInterface } from '$lib/types';
 
 export async function listInterfaces(): Promise<NetworkInterface[]> {
-	if (!isTauriRuntime()) {
-		return httpJson<NetworkInterface[]>('/api/system/interfaces');
-	}
-	return invokeCompat<NetworkInterface[]>('list_interfaces');
+	return httpJson<NetworkInterface[]>('/api/system/interfaces');
 }
 
 export async function getAppInfo(): Promise<{ version: string; rust_version: string }> {
-	if (!isTauriRuntime()) {
-		return httpJson<{ version: string; rust_version: string }>('/api/system/app-info');
-	}
-	return invokeCompat('get_app_info');
+	return httpJson<{ version: string; rust_version: string }>('/api/system/app-info');
 }
 
 export async function getSettings(): Promise<UserSettings> {
@@ -75,9 +69,6 @@ export interface HeadlessImportPcapList {
 }
 
 export async function listHeadlessImportFiles(kind: HeadlessImportKind): Promise<HeadlessImportPcapList> {
-	if (isTauriRuntime()) {
-		throw new Error('Server-side import file list is only available in web/headless mode');
-	}
 	return httpJson<HeadlessImportPcapList>(`/api/system/import-files/${encodeURIComponent(kind)}`);
 }
 

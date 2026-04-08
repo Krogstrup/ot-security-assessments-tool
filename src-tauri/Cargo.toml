@@ -2,7 +2,7 @@
 name = "kusanaginokajiki"
 version = "1.5.1"
 edition = "2021"
-default-run = "kusanaginokajiki"
+default-run = "kusanaginokajiki_web"
 description = "Modern ICS/SCADA passive network discovery tool"
 license = "Apache-2.0"
 authors = ["David"]
@@ -26,10 +26,9 @@ members = [
 ]
 
 [dependencies]
-# Tauri core
+# Tauri State type — used by command handlers via state_ref() in web binary.
+# TODO: refactor command signatures to Arc<AppState> and remove this dependency.
 tauri = { version = "2", features = [] }
-tauri-plugin-dialog = "2"
-tauri-plugin-shell = "2"
 
 # Workspace crates
 gm-constants = { path = "crates/gm-constants" }
@@ -52,6 +51,7 @@ serde_yaml = "0.9"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
 axum = "0.8"
 tower-http = { version = "0.6", features = ["fs"] }
 
@@ -82,12 +82,6 @@ clap = { version = "4", features = ["derive"] }
 # TypeScript type generation from Rust structs
 ts-rs = { version = "10", features = ["chrono-impl", "uuid-impl"] }
 
-[build-dependencies]
-tauri-build = { version = "2", features = [] }
-
-[features]
-default = ["custom-protocol"]
-custom-protocol = ["tauri/custom-protocol"]
 
 [profile.release]
 strip = true

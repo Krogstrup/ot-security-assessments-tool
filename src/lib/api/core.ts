@@ -1,20 +1,10 @@
 /**
- * Core IPC utilities shared by all API modules.
+ * Core HTTP utilities shared by all API modules.
  *
- * Provides typed invocation, HTTP fallback, and error handling.
+ * All API calls go through the HTTP server; there is no Tauri/desktop path.
  */
 
-import { invoke } from '@tauri-apps/api/core';
 import type { AppError } from '$lib/types';
-
-function isBrowserRuntime(): boolean {
-	return typeof window !== 'undefined';
-}
-
-export function isTauriRuntime(): boolean {
-	if (!isBrowserRuntime()) return false;
-	return '__TAURI_INTERNALS__' in window;
-}
 
 /**
  * Type guard: checks if a thrown value is a structured AppError.
@@ -50,10 +40,10 @@ export async function httpJson<T>(path: string, init?: RequestInit): Promise<T> 
 	return response.json() as Promise<T>;
 }
 
+/**
+ * Call a backend command via the /api/invoke/{command} passthrough endpoint.
+ */
 export async function invokeCompat<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-	if (isTauriRuntime()) {
-		return invoke<T>(command, args);
-	}
 	return httpJson<T>(`/api/invoke/${command}`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
@@ -62,10 +52,7 @@ export async function invokeCompat<T>(command: string, args?: Record<string, unk
 }
 
 /**
- * Invoke a command and validate the response against a Zod schema.
- *
- * Throws ZodError if response does not match, surfacing field mismatches
- * as observable failures instead of silent undefined values.
+ * Call a command and validate the response against a Zod schema.
  */
 export async function invokeValidated<T>(
 	schema: import('zod').ZodSchema<T>,
@@ -79,8 +66,7 @@ export async function invokeValidated<T>(
 /**
  * Fetch a resource endpoint and validate the response against a Zod schema.
  *
- * Use this for WebUI-first resource endpoints (e.g. GET /api/v1/projects).
- * Throws ZodError on shape mismatch, surfacing contract drift at runtime.
+ * Use this for versioned resource endpoints (e.g. GET /api/v1/projects).
  */
 export async function httpValidated<T>(
 	schema: import('zod').ZodSchema<T>,

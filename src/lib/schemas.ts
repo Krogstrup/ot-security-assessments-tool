@@ -106,7 +106,7 @@ export type PurdueAssignmentSchema = z.infer<typeof purdueAssignmentSchema>;
 // ─── AnomalyScore ─────────────────────────────────────────────────────────────
 
 export const anomalyScoreSchema = z.object({
-	anomaly_type: z.string(),
+	anomaly_type: z.enum(['polling_deviation', 'role_reversal', 'new_device', 'unexpected_public_ip']),
 	severity: severitySchema,
 	confidence: z.number(),
 	affected_asset: z.string(),
@@ -162,3 +162,187 @@ export const projectSummarySchema = z.object({
 });
 
 export type ProjectSummarySchema = z.infer<typeof projectSummarySchema>;
+
+// ─── Session ──────────────────────────────────────────────────────────────────
+
+export const sessionInfoSchema = z.object({
+	id: z.string(),
+	name: z.string(),
+	description: z.string(),
+	created_at: z.string(),
+	updated_at: z.string(),
+	asset_count: z.number(),
+	connection_count: z.number()
+});
+
+export type SessionInfoSchema = z.infer<typeof sessionInfoSchema>;
+
+// ─── BaselineDiff ─────────────────────────────────────────────────────────────
+
+const driftAssetSchema = z.object({
+	ip_address: z.string(),
+	mac_address: z.string().nullable(),
+	device_type: z.string(),
+	vendor: z.string().nullable(),
+	protocols: z.array(z.string()),
+	confidence: z.number()
+});
+
+const assetChangeSchema = z.object({
+	field: z.string(),
+	baseline_value: z.string(),
+	current_value: z.string()
+});
+
+const changedAssetSchema = z.object({
+	ip_address: z.string(),
+	changes: z.array(assetChangeSchema)
+});
+
+const driftConnectionSchema = z.object({
+	src_ip: z.string(),
+	dst_ip: z.string(),
+	src_port: z.number(),
+	dst_port: z.number(),
+	protocol: z.string()
+});
+
+const driftSummarySchema = z.object({
+	total_baseline_assets: z.number(),
+	total_current_assets: z.number(),
+	new_asset_count: z.number(),
+	missing_asset_count: z.number(),
+	changed_asset_count: z.number(),
+	new_connection_count: z.number(),
+	missing_connection_count: z.number(),
+	drift_score: z.number()
+});
+
+export const baselineDiffSchema = z.object({
+	baseline_session_name: z.string(),
+	new_assets: z.array(driftAssetSchema),
+	missing_assets: z.array(driftAssetSchema),
+	changed_assets: z.array(changedAssetSchema),
+	new_connections: z.array(driftConnectionSchema),
+	missing_connections: z.array(driftConnectionSchema),
+	summary: driftSummarySchema
+});
+
+export type BaselineDiffSchema = z.infer<typeof baselineDiffSchema>;
+
+// ─── AnalysisResult ───────────────────────────────────────────────────────────
+
+const analysisSummarySchema = z.object({
+	total_findings: z.number(),
+	critical_count: z.number(),
+	high_count: z.number(),
+	medium_count: z.number(),
+	low_count: z.number(),
+	info_count: z.number(),
+	purdue_violations: z.number(),
+	anomaly_count: z.number(),
+	assets_analyzed: z.number(),
+	connections_analyzed: z.number(),
+	unencrypted_ot_percent: z.number()
+});
+
+export const analysisResultSchema = z.object({
+	findings: z.array(findingSchema),
+	purdue_assignments: z.array(purdueAssignmentSchema),
+	anomalies: z.array(anomalyScoreSchema),
+	summary: analysisSummarySchema
+});
+
+export type AnalysisResultSchema = z.infer<typeof analysisResultSchema>;
+
+// ─── DefaultCredential ────────────────────────────────────────────────────────
+
+export const defaultCredentialSchema = z.object({
+	vendor: z.string(),
+	product_pattern: z.string(),
+	protocol: z.string(),
+	username: z.string(),
+	password: z.string(),
+	source: z.string(),
+	severity: z.string()
+});
+
+export type DefaultCredentialSchema = z.infer<typeof defaultCredentialSchema>;
+
+// ─── CriticalityAssessment ────────────────────────────────────────────────────
+
+export const criticalityAssessmentSchema = z.object({
+	ip_address: z.string(),
+	level: z.enum(['critical', 'high', 'medium', 'low', 'unknown']),
+	reason: z.string()
+});
+
+export type CriticalityAssessmentSchema = z.infer<typeof criticalityAssessmentSchema>;
+
+// ─── NamingSuggestion ─────────────────────────────────────────────────────────
+
+export const namingSuggestionSchema = z.object({
+	ip_address: z.string(),
+	suggested_name: z.string(),
+	reason: z.string()
+});
+
+export type NamingSuggestionSchema = z.infer<typeof namingSuggestionSchema>;
+
+// ─── MalwareFinding ───────────────────────────────────────────────────────────
+
+export const malwareFindingSchema = z.object({
+	malware_name: z.string(),
+	confidence: z.string(),
+	severity: z.string(),
+	source_ip: z.string(),
+	target_ips: z.array(z.string()),
+	evidence: z.string(),
+	attack_techniques: z.array(z.string()),
+	pattern_description: z.string()
+});
+
+export type MalwareFindingSchema = z.infer<typeof malwareFindingSchema>;
+
+// ─── CveMatch ─────────────────────────────────────────────────────────────────
+
+export const cveMatchSchema = z.object({
+	cve_id: z.string(),
+	cvss: z.number(),
+	description: z.string(),
+	advisory: z.string(),
+	remediation: z.string(),
+	matched_product: z.string(),
+	matched_firmware: z.string().nullable(),
+	confidence: z.string(),
+	severity_label: z.string()
+});
+
+export type CveMatchSchema = z.infer<typeof cveMatchSchema>;
+
+// ─── ComplianceMapping ────────────────────────────────────────────────────────
+
+export const complianceMappingSchema = z.object({
+	framework: z.string(),
+	requirement_id: z.string(),
+	requirement_name: z.string(),
+	status: z.enum(['gap', 'partial', 'met', 'not_assessed']),
+	evidence: z.string(),
+	description: z.string()
+});
+
+export type ComplianceMappingSchema = z.infer<typeof complianceMappingSchema>;
+
+// ─── SwitchSecurityFinding ────────────────────────────────────────────────────
+
+export const switchSecurityFindingSchema = z.object({
+	finding_type: z.string(),
+	title: z.string(),
+	severity: z.enum(['info', 'low', 'medium', 'high', 'critical']),
+	description: z.string(),
+	affected_assets: z.array(z.string()),
+	evidence: z.string(),
+	remediation: z.string()
+});
+
+export type SwitchSecurityFindingSchema = z.infer<typeof switchSecurityFindingSchema>;

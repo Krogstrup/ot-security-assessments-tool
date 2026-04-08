@@ -1,35 +1,45 @@
 /**
  * Session management: save, load, list, delete, export, import.
+ *
+ * Web runtime → /api/v1/sessions/* with Zod runtime validation
  */
 
+import { z } from 'zod';
+import { sessionInfoSchema, baselineDiffSchema } from '$lib/schemas';
+import { httpValidated } from './core';
 import type { BaselineDiff } from '$lib/types/analysis';
-import { invokeCompat } from './core';
 import type { SessionInfo } from '$lib/types';
 
+const json = (body: unknown): RequestInit => ({
+	method: 'POST',
+	headers: { 'Content-Type': 'application/json' },
+	body: JSON.stringify(body)
+});
+
 export async function saveSession(name: string, description?: string): Promise<SessionInfo> {
-	return invokeCompat<SessionInfo>('save_session', { name, description: description ?? null });
+	return httpValidated(sessionInfoSchema, '/api/v1/sessions', json({ name, description }));
 }
 
 export async function loadSession(sessionId: string): Promise<SessionInfo> {
-	return invokeCompat<SessionInfo>('load_session', { sessionId });
+	return httpValidated(sessionInfoSchema, `/api/v1/sessions/${sessionId}/load`, { method: 'POST' });
 }
 
 export async function listSessions(): Promise<SessionInfo[]> {
-	return invokeCompat<SessionInfo[]>('list_sessions');
+	return httpValidated(z.array(sessionInfoSchema), '/api/v1/sessions');
 }
 
 export async function deleteSession(sessionId: string): Promise<void> {
-	return invokeCompat('delete_session', { sessionId });
+	await httpValidated(z.unknown(), `/api/v1/sessions/${sessionId}`, { method: 'DELETE' });
 }
 
 export async function exportSessionArchive(sessionId: string, outputPath: string): Promise<string> {
-	return invokeCompat<string>('export_session_archive', { sessionId, outputPath });
+	return httpValidated(z.string(), `/api/v1/sessions/${sessionId}/export`, json({ outputPath }));
 }
 
 export async function importSessionArchive(archivePath: string): Promise<SessionInfo> {
-	return invokeCompat<SessionInfo>('import_session_archive', { archivePath });
+	return httpValidated(sessionInfoSchema, '/api/v1/sessions/import', json({ archivePath }));
 }
 
 export async function compareSessions(baselineSessionId: string): Promise<BaselineDiff> {
-	return invokeCompat<BaselineDiff>('compare_sessions', { baselineSessionId });
+	return httpValidated(baselineDiffSchema, '/api/v1/sessions/compare', json({ baselineSessionId }));
 }

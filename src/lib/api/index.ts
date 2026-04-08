@@ -7,7 +7,7 @@
  */
 
 // Core utilities
-export { invokeCompat, httpJson, isTauriRuntime, isAppError, invokeValidated } from './core';
+export { invokeCompat, httpJson, isAppError, invokeValidated } from './core';
 
 // Domain modules
 export * from './system';

@@ -6,23 +6,16 @@ import type { Asset } from '$lib/types/assets';
 import type { DeepParseInfo, FunctionCodeStat } from '$lib/types/deep-parse';
 import type { AssetUpdate } from '$lib/types/operations';
 import type { TopologyGraph } from '$lib/types/topology';
-import { invokeCompat, httpJson, isTauriRuntime } from './core';
+import { invokeCompat, httpJson } from './core';
 import type { AssetPage } from '$lib/types';
 
 export async function getAssets(page = 0, pageSize = 200, sortBy?: string): Promise<AssetPage> {
-	if (!isTauriRuntime()) {
-		const params = new URLSearchParams({
-			page: String(page),
-			pageSize: String(pageSize)
-		});
-		if (sortBy) params.set('sortBy', sortBy);
-		return httpJson<AssetPage>(`/api/data/assets?${params.toString()}`);
-	}
-	return invokeCompat<AssetPage>('get_assets', {
-		page,
-		pageSize,
-		sortBy: sortBy ?? null
+	const params = new URLSearchParams({
+		page: String(page),
+		pageSize: String(pageSize)
 	});
+	if (sortBy) params.set('sortBy', sortBy);
+	return httpJson<AssetPage>(`/api/data/assets?${params.toString()}`);
 }
 
 export async function updateAsset(assetId: string, updates: AssetUpdate): Promise<Asset> {
@@ -42,8 +35,5 @@ export async function getFunctionCodeStats(): Promise<Record<string, FunctionCod
 }
 
 export async function getTopology(): Promise<TopologyGraph> {
-	if (!isTauriRuntime()) {
-		return httpJson<TopologyGraph>('/api/data/topology');
-	}
-	return invokeCompat<TopologyGraph>('get_topology');
+	return httpJson<TopologyGraph>('/api/data/topology');
 }
