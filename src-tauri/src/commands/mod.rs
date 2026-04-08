@@ -1,4 +1,5 @@
 pub mod analysis;
+pub mod analysis_builders;
 pub mod baseline;
 pub mod capture;
 pub mod correlation;
