@@ -24,12 +24,14 @@ pub mod context_attacks;
 pub mod cve_matcher;
 pub mod default_creds;
 pub mod error;
+pub(crate) mod helpers;
 pub mod infrastructure;
 pub mod malware_patterns;
 pub mod naming;
 pub mod purdue;
 pub mod risk;
 pub mod switch_security;
+pub(crate) mod thresholds;
 
 pub use context_attacks::CaptureContext;
 
@@ -458,22 +460,7 @@ pub fn run_full_analysis(input: &AnalysisInput, ctx: &CaptureContext) -> Analysi
 
 /// Check if a protocol string represents an OT protocol.
 fn is_ot_protocol(proto: &str) -> bool {
-    matches!(
-        proto,
-        "Modbus"
-            | "Dnp3"
-            | "EthernetIp"
-            | "Bacnet"
-            | "S7comm"
-            | "OpcUa"
-            | "Profinet"
-            | "Iec104"
-            | "Mqtt"
-            | "HartIp"
-            | "FoundationFieldbus"
-            | "GeSrtp"
-            | "WonderwareSuitelink"
-    )
+    helpers::is_ot_protocol_name(proto)
 }
 
 #[cfg(test)]

@@ -7,6 +7,7 @@
 //! - **New device**: Previously unseen device on OT subnet
 //! - **Unexpected public IP**: Public routable IP on OT network
 
+use crate::thresholds;
 use crate::{AnalysisInput, AnomalyScore, AnomalyType, Finding, FindingType, Severity};
 
 /// Run anomaly detection on the analysis input.
@@ -58,16 +59,16 @@ fn detect_polling_deviations(input: &AnalysisInput) -> (Vec<AnomalyScore>, Vec<F
             let range = pi.max_interval_ms - pi.min_interval_ms;
             let cv = range / pi.avg_interval_ms;
 
-            if cv > 0.5 {
+            if cv > thresholds::POLLING_CV_THRESHOLD {
                 // High variation — flag as anomaly
-                let confidence = if cv > 2.0 {
+                let confidence = if cv > thresholds::POLLING_CV_HIGH_THRESHOLD {
                     0.9
-                } else if cv > 1.0 {
+                } else if cv > thresholds::POLLING_CV_FINDING_THRESHOLD {
                     0.7
                 } else {
                     0.5
                 };
-                let severity = if cv > 2.0 {
+                let severity = if cv > thresholds::POLLING_CV_HIGH_THRESHOLD {
                     Severity::High
                 } else {
                     Severity::Medium
@@ -84,7 +85,7 @@ fn detect_polling_deviations(input: &AnalysisInput) -> (Vec<AnomalyScore>, Vec<F
                     ),
                 });
 
-                if cv > 1.0 {
+                if cv > thresholds::POLLING_CV_FINDING_THRESHOLD {
                     findings.push(Finding::new(
                         FindingType::Anomaly,
                         severity,
