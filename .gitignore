@@ -3,6 +3,7 @@ node_modules/
 .npm
 dist/
 build/
+release/
 
 # ─── SvelteKit ──────────────────────────────────────
 .svelte-kit/
