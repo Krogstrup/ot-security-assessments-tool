@@ -9,6 +9,7 @@
     "web:dev": "vite dev",
     "web:start": "cargo run --manifest-path src-tauri/Cargo.toml --bin kusanaginokajiki_web --",
     "build": "vite build && cargo build --manifest-path src-tauri/Cargo.toml --bin kusanaginokajiki_web --release",
+    "release:package": "bash scripts/package-release.sh",
     "web": "concurrently -n frontend,backend -c cyan,yellow \"npm run web:dev\" \"npm run web:start\"",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
   },
