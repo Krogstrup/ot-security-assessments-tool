@@ -11,7 +11,7 @@
 use serde::Serialize;
 use std::path::PathBuf;
 
-use super::AppState;
+use super::{support::read_state, AppState};
 
 /// Result of detecting Wireshark installation.
 #[derive(Serialize)]
@@ -67,7 +67,7 @@ pub async fn open_in_wireshark(connection_id: String, state: &AppState) -> Resul
 
     // Get connection info and build display filter
     let (filter, pcap_files) = {
-        let capture = state.capture.read().map_err(|e| e.to_string())?;
+        let capture = read_state(&state.capture, "capture")?;
         let conn = capture
             .connections
             .iter()
@@ -137,7 +137,7 @@ pub async fn get_connection_frames(
     connection_id: String,
     state: &AppState,
 ) -> Result<Vec<FrameRow>, String> {
-    let capture = state.capture.read().map_err(|e| e.to_string())?;
+    let capture = read_state(&state.capture, "capture")?;
 
     let packets = capture
         .packet_summaries
@@ -166,7 +166,7 @@ pub async fn get_connection_frames(
 
 /// Export connection frames as CSV text.
 pub async fn export_frames_csv(connection_id: String, state: &AppState) -> Result<String, String> {
-    let capture = state.capture.read().map_err(|e| e.to_string())?;
+    let capture = read_state(&state.capture, "capture")?;
 
     let packets = capture
         .packet_summaries

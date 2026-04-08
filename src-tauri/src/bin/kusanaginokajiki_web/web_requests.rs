@@ -1,4 +1,5 @@
 use crate::commands;
+use crate::commands::data::{AssetSortBy, ConnectionSortBy, ProtocolStatsSortBy};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -36,12 +37,27 @@ pub(crate) struct SetActiveProjectRequest {
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct PagingQuery {
+pub(crate) struct AssetPagingQuery {
     pub(crate) page: Option<usize>,
     #[serde(alias = "pageSize")]
     pub(crate) page_size: Option<usize>,
     #[serde(alias = "sortBy")]
-    pub(crate) sort_by: Option<String>,
+    pub(crate) sort_by: Option<AssetSortBy>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ConnectionPagingQuery {
+    pub(crate) page: Option<usize>,
+    #[serde(alias = "pageSize")]
+    pub(crate) page_size: Option<usize>,
+    #[serde(alias = "sortBy")]
+    pub(crate) sort_by: Option<ConnectionSortBy>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ProtocolStatsQuery {
+    #[serde(alias = "sortBy")]
+    pub(crate) sort_by: Option<ProtocolStatsSortBy>,
 }
 
 #[derive(Debug, Deserialize)]

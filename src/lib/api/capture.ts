@@ -8,6 +8,7 @@ import type { CaptureStatusInfo, StopCaptureResult, PacketEvent, CaptureStatsEve
 import { httpJson } from './core';
 import type { ImportResult } from '$lib/types/capture';
 import { getProtocolStats as getProtocolStatsFromConnections } from './connections';
+import type { ProtocolStatsSortBy } from './contracts';
 
 export async function importPcap(paths: string[]): Promise<ImportResult> {
 	return httpJson<ImportResult>('/api/capture/import-pcap', {
@@ -62,8 +63,8 @@ export async function stopCapture(savePath?: string): Promise<StopCaptureResult>
 	});
 }
 
-export async function getProtocolStats() {
-	return getProtocolStatsFromConnections();
+export async function getProtocolStats(sortBy?: ProtocolStatsSortBy) {
+	return getProtocolStatsFromConnections(sortBy);
 }
 
 export async function pauseCapture(): Promise<void> {

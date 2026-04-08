@@ -8,6 +8,7 @@
 
 // Core utilities
 export { httpJson, isAppError, httpValidated } from './core';
+export * from './contracts';
 
 // Domain modules
 export * from './system';

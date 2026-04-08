@@ -8,8 +8,13 @@ import type { AssetUpdate } from '$lib/types/operations';
 import type { TopologyGraph } from '$lib/types/topology';
 import { httpJson } from './core';
 import type { AssetPage } from '$lib/types';
+import { DEFAULT_ASSET_PAGE_SIZE, type AssetSortBy } from './contracts';
 
-export async function getAssets(page = 0, pageSize = 200, sortBy?: string): Promise<AssetPage> {
+export async function getAssets(
+	page = 0,
+	pageSize = DEFAULT_ASSET_PAGE_SIZE,
+	sortBy?: AssetSortBy
+): Promise<AssetPage> {
 	const params = new URLSearchParams({
 		page: String(page),
 		pageSize: String(pageSize)

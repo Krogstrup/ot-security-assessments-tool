@@ -169,8 +169,8 @@ fn compute_and_apply_import_state(
 ) -> Result<(usize, usize, Vec<String>), String> {
     let deep_parse_info = processor.build_deep_parse_info();
     let (assets, sig_results) = {
-        let sigs = state.signatures.read().map_err(|e| e.to_string())?;
-        let inv = state.inventory.read().map_err(|e| e.to_string())?;
+        let sigs = read_state(&state.signatures, "signatures")?;
+        let inv = read_state(&state.inventory, "inventory")?;
         processor.build_assets(
             &sigs.signature_engine,
             &deep_parse_info,
@@ -197,7 +197,7 @@ fn compute_and_apply_import_state(
         .collect();
 
     {
-        let mut cap = state.capture.write().map_err(|e| e.to_string())?;
+        let mut cap = write_state(&state.capture, "capture")?;
         cap.topology = topology;
         cap.connections = connection_list;
         cap.packet_summaries = packet_summaries;
@@ -207,12 +207,12 @@ fn compute_and_apply_import_state(
         cap.imported_files.dedup();
     }
     {
-        let mut inv = state.inventory.write().map_err(|e| e.to_string())?;
+        let mut inv = write_state(&state.inventory, "inventory")?;
         inv.assets = assets;
         inv.deep_parse_info = deep_parse_info;
     }
     {
-        let mut analysis = state.analysis.write().map_err(|e| e.to_string())?;
+        let mut analysis = write_state(&state.analysis, "analysis")?;
         analysis.connection_stats = connection_stats;
         analysis.pattern_anomalies = pattern_anomalies;
     }

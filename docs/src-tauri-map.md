@@ -50,6 +50,19 @@ Runtime flow:
 Critical state rule:
 - Lock order in `AppState` must stay: `capture -> inventory -> analysis -> session -> physical -> segmentation -> signatures`.
 
+## Recent Refactor Notes (2026-04-08)
+
+- `src-tauri/src/bin/web_*.rs` helper files were moved under `src-tauri/src/bin/kusanaginokajiki_web/`.
+  - Why: files directly under `src/bin/*.rs` are auto-discovered by Cargo as standalone binaries.
+  - Maintain: keep helper modules under `src/bin/kusanaginokajiki_web/` and reference them from `kusanaginokajiki_web.rs` with explicit `#[path = "..."]` attributes.
+- Route path literals are centralized in `src-tauri/src/bin/kusanaginokajiki_web/web_api_paths.rs`.
+  - Maintain: add/update endpoint paths there first, then consume constants in `web_routes_*`.
+- Shared command helpers are centralized in `src-tauri/src/commands/support.rs`.
+  - Maintain: use `read_state` / `write_state` / `mutex_state` for lock access and `app_data_dir()` for `~/.kusanaginokajiki` paths.
+- Sort contracts for data endpoints are now explicit enums in `src-tauri/src/commands/data.rs`:
+  - `AssetSortBy`, `ConnectionSortBy`, `ProtocolStatsSortBy`.
+  - Maintain: keep these enum variants aligned with frontend API constants in `src/lib/api/contracts.ts`.
+
 ---
 
 ## Root Files

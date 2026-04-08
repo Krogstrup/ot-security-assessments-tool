@@ -4,10 +4,15 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use gm_db::{AssetRow, ConnectionRow};
-use gm_topology::TopologyBuilder;
+use gm_db::{AssetRow, ConnectionRow, Database, SessionRow};
+use gm_topology::{TopologyBuilder, TopologyGraph};
 
-use super::{AppState, AssetInfo, ConnectionInfo, DeepParseInfo};
+use super::{
+    support::{mutex_state, read_state, write_state},
+    AppState, AssetInfo, ConnectionInfo, DeepParseInfo, SessionState,
+};
+
+const DATABASE_NOT_AVAILABLE: &str = "Database not available";
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -40,6 +45,111 @@ struct SessionMetadata {
     imported_files: Vec<String>,
 }
 
+fn db_from_session(session: &SessionState) -> Result<&Database, String> {
+    session
+        .db
+        .as_ref()
+        .ok_or_else(|| DATABASE_NOT_AVAILABLE.to_string())
+}
+
+fn parse_session_metadata(metadata: &str) -> SessionMetadata {
+    serde_json::from_str(metadata).unwrap_or(SessionMetadata {
+        deep_parse_info: HashMap::new(),
+        imported_files: Vec::new(),
+    })
+}
+
+fn build_topology_from_connections(connections: &[ConnectionInfo]) -> TopologyGraph {
+    let mut topo_builder = TopologyBuilder::new();
+    for conn in connections {
+        let protocol = gm_parsers::IcsProtocol::from_name(&conn.protocol);
+        topo_builder.add_connection(
+            &conn.src_ip,
+            &conn.dst_ip,
+            conn.src_mac.as_deref(),
+            conn.dst_mac.as_deref(),
+            protocol,
+            conn.byte_count,
+        );
+    }
+    topo_builder.snapshot()
+}
+
+fn apply_loaded_session_state(
+    state: &AppState,
+    session_id: String,
+    session_name: String,
+    topology: TopologyGraph,
+    connections: Vec<ConnectionInfo>,
+    assets: Vec<AssetInfo>,
+    metadata: SessionMetadata,
+) -> Result<(), String> {
+    {
+        let mut cap = write_state(&state.capture, "capture")?;
+        cap.topology = topology;
+        cap.connections = connections;
+        cap.packet_summaries = HashMap::new();
+        cap.imported_files = metadata.imported_files;
+    }
+    {
+        let mut inv = write_state(&state.inventory, "inventory")?;
+        inv.assets = assets;
+        inv.deep_parse_info = metadata.deep_parse_info;
+    }
+    {
+        let mut sess = mutex_state(&state.session, "session")?;
+        sess.current_session_id = Some(session_id);
+        sess.current_session_name = Some(session_name);
+    }
+    Ok(())
+}
+
+fn session_info_from_row(row: SessionRow) -> SessionInfo {
+    SessionInfo {
+        id: row.id,
+        name: row.name,
+        description: row.description,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        asset_count: row.asset_count,
+        connection_count: row.connection_count,
+    }
+}
+
+fn normalize_hostname(hostname: &str) -> Option<String> {
+    if hostname.is_empty() {
+        None
+    } else {
+        Some(hostname.to_string())
+    }
+}
+
+fn normalize_purdue_level(level: u8) -> Option<u8> {
+    if level > 5 {
+        None
+    } else {
+        Some(level)
+    }
+}
+
+fn apply_asset_update(asset: &mut AssetInfo, updates: &AssetUpdate) {
+    if let Some(ref dt) = updates.device_type {
+        asset.device_type = dt.clone();
+    }
+    if let Some(ref hostname) = updates.hostname {
+        asset.hostname = normalize_hostname(hostname);
+    }
+    if let Some(ref notes) = updates.notes {
+        asset.notes = notes.clone();
+    }
+    if let Some(level) = updates.purdue_level {
+        asset.purdue_level = normalize_purdue_level(level);
+    }
+    if let Some(ref tags) = updates.tags {
+        asset.tags = tags.clone();
+    }
+}
+
 // ─── Session Commands ───────────────────────────────────────
 
 /// Save the current state as a named session.
@@ -50,8 +160,8 @@ pub async fn save_session(
 ) -> Result<SessionInfo, String> {
     // Snapshot capture + inventory data before locking the DB (lock order: capture → inventory)
     let (connections_snap, assets_snap, deep_parse_snap, imported_files_snap) = {
-        let cap = state.capture.read().map_err(|e| e.to_string())?;
-        let inv = state.inventory.read().map_err(|e| e.to_string())?;
+        let cap = read_state(&state.capture, "capture")?;
+        let inv = read_state(&state.inventory, "inventory")?;
         (
             cap.connections.clone(),
             inv.assets.clone(),
@@ -68,8 +178,8 @@ pub async fn save_session(
     };
     let metadata_json = serde_json::to_string(&metadata).map_err(|e| e.to_string())?;
 
-    let sess = state.session.lock().map_err(|e| e.to_string())?;
-    let db = sess.db.as_ref().ok_or("Database not available")?;
+    let sess = mutex_state(&state.session, "session")?;
+    let db = db_from_session(&sess)?;
 
     let session_row = db
         .create_session(&session_id, &name, &desc, &metadata_json)
@@ -105,30 +215,21 @@ pub async fn save_session(
         connections_snap.len()
     );
 
-    Ok(SessionInfo {
-        id: session_row.id,
-        name: session_row.name,
-        description: session_row.description,
-        created_at: session_row.created_at,
-        updated_at: session_row.updated_at,
-        asset_count: assets_snap.len() as i64,
-        connection_count: connections_snap.len() as i64,
-    })
+    let mut info = session_info_from_row(session_row);
+    info.asset_count = assets_snap.len() as i64;
+    info.connection_count = connections_snap.len() as i64;
+    Ok(info)
 }
 
 /// Load a session by ID, replacing the current state.
 pub async fn load_session(session_id: String, state: &AppState) -> Result<SessionInfo, String> {
     // Step 1: load all data from DB (session domain only)
     let (session_row, metadata, assets, connections) = {
-        let sess = state.session.lock().map_err(|e| e.to_string())?;
-        let db = sess.db.as_ref().ok_or("Database not available")?;
+        let sess = mutex_state(&state.session, "session")?;
+        let db = db_from_session(&sess)?;
 
         let session_row = db.get_session(&session_id).map_err(|e| e.to_string())?;
-        let metadata: SessionMetadata =
-            serde_json::from_str(&session_row.metadata).unwrap_or(SessionMetadata {
-                deep_parse_info: HashMap::new(),
-                imported_files: Vec::new(),
-            });
+        let metadata = parse_session_metadata(&session_row.metadata);
         let assets: Vec<AssetInfo> = db
             .list_assets(&session_id)
             .map_err(|e| e.to_string())?
@@ -144,57 +245,26 @@ pub async fn load_session(session_id: String, state: &AppState) -> Result<Sessio
         (session_row, metadata, assets, connections)
     };
 
-    // Step 2: rebuild topology (no state access needed)
-    let mut topo_builder = TopologyBuilder::new();
-    for conn in &connections {
-        let protocol = gm_parsers::IcsProtocol::from_name(&conn.protocol);
-        topo_builder.add_connection(
-            &conn.src_ip,
-            &conn.dst_ip,
-            conn.src_mac.as_deref(),
-            conn.dst_mac.as_deref(),
-            protocol,
-            conn.byte_count,
-        );
-    }
-    let topology = topo_builder.snapshot();
-
-    // Step 3: write to each domain (capture → inventory → session)
-    {
-        let mut cap = state.capture.write().map_err(|e| e.to_string())?;
-        cap.topology = topology;
-        cap.connections = connections;
-        cap.packet_summaries = HashMap::new(); // Not persisted (too large)
-        cap.imported_files = metadata.imported_files;
-    }
-    {
-        let mut inv = state.inventory.write().map_err(|e| e.to_string())?;
-        inv.assets = assets;
-        inv.deep_parse_info = metadata.deep_parse_info;
-    }
-    {
-        let mut sess = state.session.lock().map_err(|e| e.to_string())?;
-        sess.current_session_id = Some(session_id.clone());
-        sess.current_session_name = Some(session_row.name.clone());
-    }
+    let topology = build_topology_from_connections(&connections);
+    apply_loaded_session_state(
+        state,
+        session_id.clone(),
+        session_row.name.clone(),
+        topology,
+        connections,
+        assets,
+        metadata,
+    )?;
 
     log::info!("Loaded session '{}' ({})", session_row.name, session_id);
 
-    Ok(SessionInfo {
-        id: session_row.id,
-        name: session_row.name,
-        description: session_row.description,
-        created_at: session_row.created_at,
-        updated_at: session_row.updated_at,
-        asset_count: session_row.asset_count,
-        connection_count: session_row.connection_count,
-    })
+    Ok(session_info_from_row(session_row))
 }
 
 /// List saved sessions. When a project is active, returns only that project's sessions.
 pub async fn list_sessions(state: &AppState) -> Result<Vec<SessionInfo>, String> {
-    let sess = state.session.lock().map_err(|e| e.to_string())?;
-    let db = sess.db.as_ref().ok_or("Database not available")?;
+    let sess = mutex_state(&state.session, "session")?;
+    let db = db_from_session(&sess)?;
 
     let rows = match sess.current_project_id {
         Some(project_id) => db
@@ -203,24 +273,13 @@ pub async fn list_sessions(state: &AppState) -> Result<Vec<SessionInfo>, String>
         None => db.list_sessions().map_err(|e| e.to_string())?,
     };
 
-    Ok(rows
-        .into_iter()
-        .map(|r| SessionInfo {
-            id: r.id,
-            name: r.name,
-            description: r.description,
-            created_at: r.created_at,
-            updated_at: r.updated_at,
-            asset_count: r.asset_count,
-            connection_count: r.connection_count,
-        })
-        .collect())
+    Ok(rows.into_iter().map(session_info_from_row).collect())
 }
 
 /// Delete a session by ID.
 pub async fn delete_session(session_id: String, state: &AppState) -> Result<(), String> {
-    let sess = state.session.lock().map_err(|e| e.to_string())?;
-    let db = sess.db.as_ref().ok_or("Database not available")?;
+    let sess = mutex_state(&state.session, "session")?;
+    let db = db_from_session(&sess)?;
     db.delete_session(&session_id).map_err(|e| e.to_string())?;
     log::info!("Deleted session {}", session_id);
     Ok(())
@@ -236,37 +295,18 @@ pub async fn update_asset(
 ) -> Result<AssetInfo, String> {
     // Step 1: update asset in inventory domain
     let updated = {
-        let mut inv = state.inventory.write().map_err(|e| e.to_string())?;
+        let mut inv = write_state(&state.inventory, "inventory")?;
         let asset = inv
             .assets
             .iter_mut()
             .find(|a| a.id == asset_id)
             .ok_or_else(|| format!("Asset {} not found", asset_id))?;
-
-        if let Some(ref dt) = updates.device_type {
-            asset.device_type = dt.clone();
-        }
-        if let Some(ref hostname) = updates.hostname {
-            asset.hostname = if hostname.is_empty() {
-                None
-            } else {
-                Some(hostname.clone())
-            };
-        }
-        if let Some(ref notes) = updates.notes {
-            asset.notes = notes.clone();
-        }
-        if let Some(level) = updates.purdue_level {
-            asset.purdue_level = if level > 5 { None } else { Some(level) };
-        }
-        if let Some(ref tags) = updates.tags {
-            asset.tags = tags.clone();
-        }
+        apply_asset_update(asset, &updates);
         asset.clone()
     };
 
     // Step 2: persist to DB if a session is loaded (session domain)
-    let sess = state.session.lock().map_err(|e| e.to_string())?;
+    let sess = mutex_state(&state.session, "session")?;
     if let (Some(ref db), Some(ref _session_id)) = (&sess.db, &sess.current_session_id) {
         if let Some(ref dt) = updates.device_type {
             let _ = db.update_asset_field(&asset_id, "device_type", dt);
@@ -295,31 +335,16 @@ pub async fn bulk_update_assets(
     updates: AssetUpdate,
     state: &AppState,
 ) -> Result<usize, String> {
+    let asset_id_set: std::collections::HashSet<&str> =
+        asset_ids.iter().map(String::as_str).collect();
+
     // Step 1: update assets in inventory domain
     let count = {
-        let mut inv = state.inventory.write().map_err(|e| e.to_string())?;
+        let mut inv = write_state(&state.inventory, "inventory")?;
         let mut count = 0;
         for asset in &mut inv.assets {
-            if asset_ids.contains(&asset.id) {
-                if let Some(ref dt) = updates.device_type {
-                    asset.device_type = dt.clone();
-                }
-                if let Some(ref hostname) = updates.hostname {
-                    asset.hostname = if hostname.is_empty() {
-                        None
-                    } else {
-                        Some(hostname.clone())
-                    };
-                }
-                if let Some(ref notes) = updates.notes {
-                    asset.notes = notes.clone();
-                }
-                if let Some(level) = updates.purdue_level {
-                    asset.purdue_level = if level > 5 { None } else { Some(level) };
-                }
-                if let Some(ref tags) = updates.tags {
-                    asset.tags = tags.clone();
-                }
+            if asset_id_set.contains(asset.id.as_str()) {
+                apply_asset_update(asset, &updates);
                 count += 1;
             }
         }
@@ -327,7 +352,7 @@ pub async fn bulk_update_assets(
     };
 
     // Step 2: persist to DB if session is loaded (session domain)
-    let sess = state.session.lock().map_err(|e| e.to_string())?;
+    let sess = mutex_state(&state.session, "session")?;
     if let (Some(ref db), Some(ref _session_id)) = (&sess.db, &sess.current_session_id) {
         if let Some(ref dt) = updates.device_type {
             let _ = db.bulk_update_asset_field(&asset_ids, "device_type", dt);
@@ -348,8 +373,8 @@ pub async fn export_session_archive(
     output_path: String,
     state: &AppState,
 ) -> Result<String, String> {
-    let sess = state.session.lock().map_err(|e| e.to_string())?;
-    let db = sess.db.as_ref().ok_or("Database not available")?;
+    let sess = mutex_state(&state.session, "session")?;
+    let db = db_from_session(&sess)?;
 
     // Load session data from DB
     let session = db.get_session(&session_id).map_err(|e| e.to_string())?;
@@ -451,8 +476,8 @@ pub async fn import_session_archive(
 
     // Save to database and load data back (session domain only)
     let (new_session_id, session_row, asset_count, conn_count, metadata, assets_vec, conns_vec) = {
-        let sess = state.session.lock().map_err(|e| e.to_string())?;
-        let db = sess.db.as_ref().ok_or("Database not available")?;
+        let sess = mutex_state(&state.session, "session")?;
+        let db = db_from_session(&sess)?;
 
         let new_session_id = uuid::Uuid::new_v4().to_string();
         db.create_session(&new_session_id, &session_name, &session_desc, &metadata_str)
@@ -479,11 +504,7 @@ pub async fn import_session_archive(
         db.update_session_counts(&new_session_id, asset_count, conn_count)
             .map_err(|e| e.to_string())?;
 
-        let metadata: SessionMetadata =
-            serde_json::from_str(&metadata_str).unwrap_or(SessionMetadata {
-                deep_parse_info: HashMap::new(),
-                imported_files: Vec::new(),
-            });
+        let metadata = parse_session_metadata(&metadata_str);
         let assets_vec: Vec<AssetInfo> = loaded_assets.into_iter().map(row_to_asset_info).collect();
         let conns_vec: Vec<ConnectionInfo> = loaded_conns
             .into_iter()
@@ -500,38 +521,16 @@ pub async fn import_session_archive(
         )
     };
 
-    // Rebuild topology (no state access)
-    let mut topo_builder = TopologyBuilder::new();
-    for conn in &conns_vec {
-        let protocol = gm_parsers::IcsProtocol::from_name(&conn.protocol);
-        topo_builder.add_connection(
-            &conn.src_ip,
-            &conn.dst_ip,
-            conn.src_mac.as_deref(),
-            conn.dst_mac.as_deref(),
-            protocol,
-            conn.byte_count,
-        );
-    }
-
-    // Write to each domain (capture → inventory → session)
-    {
-        let mut cap = state.capture.write().map_err(|e| e.to_string())?;
-        cap.topology = topo_builder.snapshot();
-        cap.connections = conns_vec;
-        cap.packet_summaries = HashMap::new();
-        cap.imported_files = metadata.imported_files;
-    }
-    {
-        let mut inv = state.inventory.write().map_err(|e| e.to_string())?;
-        inv.assets = assets_vec;
-        inv.deep_parse_info = metadata.deep_parse_info;
-    }
-    {
-        let mut sess = state.session.lock().map_err(|e| e.to_string())?;
-        sess.current_session_id = Some(new_session_id);
-        sess.current_session_name = Some(session_name.clone());
-    }
+    let topology = build_topology_from_connections(&conns_vec);
+    apply_loaded_session_state(
+        state,
+        new_session_id,
+        session_name.clone(),
+        topology,
+        conns_vec,
+        assets_vec,
+        metadata,
+    )?;
 
     log::info!(
         "Imported session archive '{}' from {}",
@@ -539,15 +538,10 @@ pub async fn import_session_archive(
         archive_path
     );
 
-    Ok(SessionInfo {
-        id: session_row.id,
-        name: session_row.name,
-        description: session_row.description,
-        created_at: session_row.created_at,
-        updated_at: session_row.updated_at,
-        asset_count,
-        connection_count: conn_count,
-    })
+    let mut info = session_info_from_row(session_row);
+    info.asset_count = asset_count;
+    info.connection_count = conn_count;
+    Ok(info)
 }
 
 // ─── Conversion Helpers ─────────────────────────────────────

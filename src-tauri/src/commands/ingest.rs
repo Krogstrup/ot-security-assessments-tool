@@ -12,7 +12,10 @@ use std::collections::HashMap;
 use gm_ingest::{IngestResult, IngestSource, IngestedAlert, IngestedAsset};
 use gm_parsers::IcsProtocol;
 
-use super::{AppState, AssetInfo, ConnectionInfo, DeviceZeekEvents, StoredAlert, ZeekEventSummary};
+use super::{
+    support::{read_state, write_state},
+    AppState, AssetInfo, ConnectionInfo, DeviceZeekEvents, StoredAlert, ZeekEventSummary,
+};
 
 /// Result returned to the frontend from an ingest operation.
 #[derive(Serialize)]
@@ -160,8 +163,8 @@ fn merge_ingest_result(
     state: &AppState,
     start: Instant,
 ) -> Result<IngestImportResult, String> {
-    let mut capture = state.capture.write().map_err(|e| e.to_string())?;
-    let mut inventory = state.inventory.write().map_err(|e| e.to_string())?;
+    let mut capture = write_state(&state.capture, "capture")?;
+    let mut inventory = write_state(&state.inventory, "inventory")?;
 
     let source_name = ingest
         .source
@@ -534,7 +537,7 @@ pub async fn get_device_zeek_events(
     device_ip: String,
     state: &AppState,
 ) -> Result<DeviceZeekEvents, String> {
-    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
+    let inventory = read_state(&state.inventory, "inventory")?;
     Ok(inventory
         .zeek_device_events
         .get(&device_ip)

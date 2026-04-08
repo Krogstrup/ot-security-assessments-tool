@@ -3,8 +3,8 @@ use axum::Json;
 use serde_json::{json, Value};
 
 use super::web_requests::{
-    BulkUpdateAssetsRequest, PagingQuery, StartCaptureRequest, StopCaptureRequest,
-    TestSignatureRequest, UpdateAssetRequest,
+    AssetPagingQuery, BulkUpdateAssetsRequest, ConnectionPagingQuery, ProtocolStatsQuery,
+    StartCaptureRequest, StopCaptureRequest, TestSignatureRequest, UpdateAssetRequest,
 };
 use super::web_runtime::{start_capture_headless, to_json};
 use super::web_support::{resolve_export_output_path, ApiError};
@@ -23,7 +23,7 @@ pub(super) async fn get_topology(
 
 pub(super) async fn get_assets(
     State(state): State<SharedState>,
-    Query(query): Query<PagingQuery>,
+    Query(query): Query<AssetPagingQuery>,
 ) -> Result<Json<AssetPage>, ApiError> {
     let page =
         commands::data::get_assets(state.as_ref(), query.page, query.page_size, query.sort_by)
@@ -33,7 +33,7 @@ pub(super) async fn get_assets(
 
 pub(super) async fn get_connections(
     State(state): State<SharedState>,
-    Query(query): Query<PagingQuery>,
+    Query(query): Query<ConnectionPagingQuery>,
 ) -> Result<Json<ConnectionPage>, ApiError> {
     let page =
         commands::data::get_connections(state.as_ref(), query.page, query.page_size, query.sort_by)
@@ -50,9 +50,10 @@ pub(super) async fn get_counts(
 
 pub(super) async fn get_protocol_stats(
     State(state): State<SharedState>,
+    Query(query): Query<ProtocolStatsQuery>,
 ) -> Result<Json<Vec<ProtocolStatInfo>>, ApiError> {
-    let stats =
-        commands::data::get_protocol_stats(state.as_ref()).map_err(ApiError::bad_request)?;
+    let stats = commands::data::get_protocol_stats(state.as_ref(), query.sort_by)
+        .map_err(ApiError::bad_request)?;
     Ok(Json(stats))
 }
 

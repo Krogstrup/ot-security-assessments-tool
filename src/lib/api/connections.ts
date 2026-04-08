@@ -9,8 +9,17 @@ import type { DataCounts } from '$lib/types/pagination';
 import type { ProtocolStats } from '$lib/types/protocols';
 import { httpJson } from './core';
 import type { ConnectionPage } from '$lib/types';
+import {
+	DEFAULT_CONNECTION_PAGE_SIZE,
+	type ConnectionSortBy,
+	type ProtocolStatsSortBy
+} from './contracts';
 
-export async function getConnections(page = 0, pageSize = 500, sortBy?: string): Promise<ConnectionPage> {
+export async function getConnections(
+	page = 0,
+	pageSize = DEFAULT_CONNECTION_PAGE_SIZE,
+	sortBy?: ConnectionSortBy
+): Promise<ConnectionPage> {
 	const params = new URLSearchParams({
 		page: String(page),
 		pageSize: String(pageSize)
@@ -29,8 +38,11 @@ export async function getConnectionPackets(connectionId: string): Promise<Packet
 	);
 }
 
-export async function getProtocolStats(): Promise<ProtocolStats[]> {
-	return httpJson<ProtocolStats[]>('/api/data/protocol-stats');
+export async function getProtocolStats(sortBy?: ProtocolStatsSortBy): Promise<ProtocolStats[]> {
+	const params = new URLSearchParams();
+	if (sortBy) params.set('sortBy', sortBy);
+	const query = params.toString();
+	return httpJson<ProtocolStats[]>(query ? `/api/data/protocol-stats?${query}` : '/api/data/protocol-stats');
 }
 
 export async function getConnectionStats(): Promise<ConnectionStats[]> {

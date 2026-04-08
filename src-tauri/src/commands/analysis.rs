@@ -16,27 +16,16 @@ use gm_analysis::{
     SwitchSecurityInput,
 };
 
-use super::{AnalysisState, AppState, CaptureState, InventoryState};
+use super::{
+    support::{read_state, write_state},
+    AnalysisState, AppState, CaptureState, InventoryState,
+};
 
 // ─── Input builders ───────────────────────────────────────────────────────────
 
 /// Build AnalysisInput from capture + inventory domain slices.
 fn build_analysis_input(capture: &CaptureState, inventory: &InventoryState) -> AnalysisInput {
-    let assets: Vec<AssetSnapshot> = inventory
-        .assets
-        .iter()
-        .map(|a| AssetSnapshot {
-            ip_address: a.ip_address.clone(),
-            device_type: a.device_type.clone(),
-            protocols: a.protocols.clone(),
-            purdue_level: a.purdue_level,
-            is_public_ip: a.is_public_ip,
-            tags: a.tags.clone(),
-            vendor: a.vendor.clone(),
-            hostname: a.hostname.clone(),
-            product_family: a.product_family.clone(),
-        })
-        .collect();
+    let assets = asset_snapshots(inventory);
 
     let connections: Vec<ConnectionSnapshot> = capture
         .connections
@@ -161,6 +150,24 @@ fn build_analysis_input(capture: &CaptureState, inventory: &InventoryState) -> A
         connections,
         deep_parse,
     }
+}
+
+fn asset_snapshots(inventory: &InventoryState) -> Vec<AssetSnapshot> {
+    inventory
+        .assets
+        .iter()
+        .map(|a| AssetSnapshot {
+            ip_address: a.ip_address.clone(),
+            device_type: a.device_type.clone(),
+            protocols: a.protocols.clone(),
+            purdue_level: a.purdue_level,
+            is_public_ip: a.is_public_ip,
+            tags: a.tags.clone(),
+            vendor: a.vendor.clone(),
+            hostname: a.hostname.clone(),
+            product_family: a.product_family.clone(),
+        })
+        .collect()
 }
 
 /// Build a [`CaptureContext`] from domain state slices for Phase 14C detections.
@@ -391,6 +398,63 @@ fn build_capture_context(
     }
 }
 
+fn build_malware_deep_parse(
+    inventory: &InventoryState,
+) -> HashMap<String, gm_analysis::DeepParseSnapshot> {
+    let mut deep_parse = HashMap::new();
+    for (ip, dp) in &inventory.deep_parse_info {
+        let modbus = dp.modbus.as_ref().map(|m| gm_analysis::ModbusSnapshot {
+            role: m.role.clone(),
+            unit_ids: m.unit_ids.clone(),
+            function_codes: m
+                .function_codes
+                .iter()
+                .map(|fc| gm_analysis::FcSnapshot {
+                    code: fc.code,
+                    count: fc.count,
+                    is_write: fc.is_write,
+                })
+                .collect(),
+            relationships: m
+                .relationships
+                .iter()
+                .map(|r| gm_analysis::RelationshipSnapshot {
+                    remote_ip: r.remote_ip.clone(),
+                    remote_role: r.remote_role.clone(),
+                    packet_count: r.packet_count,
+                })
+                .collect(),
+            polling_intervals: m
+                .polling_intervals
+                .iter()
+                .map(|pi| gm_analysis::PollingSnapshot {
+                    remote_ip: pi.remote_ip.clone(),
+                    function_code: pi.function_code,
+                    avg_interval_ms: pi.avg_interval_ms,
+                    min_interval_ms: pi.min_interval_ms,
+                    max_interval_ms: pi.max_interval_ms,
+                    sample_count: pi.sample_count,
+                })
+                .collect(),
+        });
+        let iec104 = dp.iec104.as_ref().map(|i| gm_analysis::Iec104Snapshot {
+            role: i.role.clone(),
+            has_control_commands: i.has_control_commands,
+            has_reset_process: i.has_reset_process,
+            has_interrogation: i.has_interrogation,
+        });
+        deep_parse.insert(
+            ip.clone(),
+            gm_analysis::DeepParseSnapshot {
+                modbus,
+                iec104,
+                ..Default::default()
+            },
+        );
+    }
+    deep_parse
+}
+
 // ─── Commands ─────────────────────────────────────────────────────────────────
 
 /// Maximum findings returned by get_findings — nobody reads 50 000 findings.
@@ -398,29 +462,16 @@ const MAX_FINDINGS: usize = 1_000;
 /// Maximum anomaly scores returned by get_anomalies.
 const MAX_ANOMALIES: usize = 500;
 
-/// Run the full security analysis pipeline.
-///
-/// Detects ATT&CK techniques, auto-assigns Purdue levels, scores anomalies.
-/// Results are stored in AppState and returned to the frontend.
-///
-/// Lock order: capture (read) → inventory (write) → analysis (write)
-pub fn run_analysis(state: &AppState) -> Result<AnalysisResult, String> {
-    let capture = state.capture.read().map_err(|e| e.to_string())?;
-    let mut inventory = state.inventory.write().map_err(|e| e.to_string())?;
-    let mut analysis = state.analysis.write().map_err(|e| e.to_string())?;
-
-    let input = build_analysis_input(&capture, &inventory);
-    let ctx = build_capture_context(&capture, &inventory, &analysis);
-    let result = gm_analysis::run_full_analysis(&input, &ctx);
-
-    // Store results in AppState
+fn persist_analysis_result(
+    result: &AnalysisResult,
+    inventory: &mut InventoryState,
+    analysis: &mut AnalysisState,
+) {
     analysis.findings = result.findings.clone();
     analysis.purdue_assignments = result.purdue_assignments.clone();
     analysis.anomalies = result.anomalies.clone();
 
-    // Apply auto-assigned Purdue levels to assets (only where not manually set).
-    // Build a lookup map first so this is O(assignments) not O(assets × assignments).
-    let purdue_map: std::collections::HashMap<&str, u8> = result
+    let purdue_map: HashMap<&str, u8> = result
         .purdue_assignments
         .iter()
         .map(|a| (a.ip_address.as_str(), a.level))
@@ -433,13 +484,31 @@ pub fn run_analysis(state: &AppState) -> Result<AnalysisResult, String> {
             }
         }
     }
+}
+
+/// Run the full security analysis pipeline.
+///
+/// Detects ATT&CK techniques, auto-assigns Purdue levels, scores anomalies.
+/// Results are stored in AppState and returned to the frontend.
+///
+/// Lock order: capture (read) → inventory (write) → analysis (write)
+pub fn run_analysis(state: &AppState) -> Result<AnalysisResult, String> {
+    let capture = read_state(&state.capture, "capture")?;
+    let mut inventory = write_state(&state.inventory, "inventory")?;
+    let mut analysis = write_state(&state.analysis, "analysis")?;
+
+    let input = build_analysis_input(&capture, &inventory);
+    let ctx = build_capture_context(&capture, &inventory, &analysis);
+    let result = gm_analysis::run_full_analysis(&input, &ctx);
+
+    persist_analysis_result(&result, &mut inventory, &mut analysis);
 
     Ok(result)
 }
 
 /// Get findings from the last analysis run (capped at MAX_FINDINGS = 1 000).
 pub fn get_findings(state: &AppState) -> Result<Vec<Finding>, String> {
-    let analysis = state.analysis.read().map_err(|e| e.to_string())?;
+    let analysis = read_state(&state.analysis, "analysis")?;
     if analysis.findings.len() <= MAX_FINDINGS {
         return Ok(analysis.findings.clone());
     }
@@ -448,13 +517,13 @@ pub fn get_findings(state: &AppState) -> Result<Vec<Finding>, String> {
 
 /// Get Purdue level assignments from the last analysis run.
 pub fn get_purdue_assignments(state: &AppState) -> Result<Vec<PurdueAssignment>, String> {
-    let analysis = state.analysis.read().map_err(|e| e.to_string())?;
+    let analysis = read_state(&state.analysis, "analysis")?;
     Ok(analysis.purdue_assignments.clone())
 }
 
 /// Get anomaly scores from the last analysis run (capped at MAX_ANOMALIES = 500).
 pub fn get_anomalies(state: &AppState) -> Result<Vec<AnomalyScore>, String> {
-    let analysis = state.analysis.read().map_err(|e| e.to_string())?;
+    let analysis = read_state(&state.analysis, "analysis")?;
     if analysis.anomalies.len() <= MAX_ANOMALIES {
         return Ok(analysis.anomalies.clone());
     }
@@ -465,7 +534,7 @@ pub fn get_anomalies(state: &AppState) -> Result<Vec<AnomalyScore>, String> {
 ///
 /// Checks vendor+product strings against the default credential database.
 pub fn get_credential_warnings(state: &AppState) -> Result<Vec<DefaultCredential>, String> {
-    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
+    let inventory = read_state(&state.inventory, "inventory")?;
 
     let checker = CredentialChecker::new()?;
     let mut results = Vec::new();
@@ -485,16 +554,16 @@ pub fn get_credential_warnings(state: &AppState) -> Result<Vec<DefaultCredential
 
 /// Assess criticality for all discovered assets.
 pub fn get_criticality(state: &AppState) -> Result<Vec<CriticalityAssessment>, String> {
-    let capture = state.capture.read().map_err(|e| e.to_string())?;
-    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
+    let capture = read_state(&state.capture, "capture")?;
+    let inventory = read_state(&state.inventory, "inventory")?;
     let input = build_analysis_input(&capture, &inventory);
     Ok(gm_analysis::assess_criticality_all(&input.assets))
 }
 
 /// Get naming suggestions for all discovered assets.
 pub fn get_naming_suggestions(state: &AppState) -> Result<Vec<NamingSuggestion>, String> {
-    let capture = state.capture.read().map_err(|e| e.to_string())?;
-    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
+    let capture = read_state(&state.capture, "capture")?;
+    let inventory = read_state(&state.inventory, "inventory")?;
     let input = build_analysis_input(&capture, &inventory);
     Ok(gm_analysis::suggest_names_all(&input.assets))
 }
@@ -508,25 +577,10 @@ pub fn get_naming_suggestions(state: &AppState) -> Result<Vec<NamingSuggestion>,
 pub fn get_switch_security_findings(
     state: &AppState,
 ) -> Result<Vec<SwitchSecurityFinding>, String> {
-    let capture = state.capture.read().map_err(|e| e.to_string())?;
-    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
+    let capture = read_state(&state.capture, "capture")?;
+    let inventory = read_state(&state.inventory, "inventory")?;
 
-    // Build asset snapshots
-    let assets: Vec<AssetSnapshot> = inventory
-        .assets
-        .iter()
-        .map(|a| AssetSnapshot {
-            ip_address: a.ip_address.clone(),
-            device_type: a.device_type.clone(),
-            protocols: a.protocols.clone(),
-            purdue_level: a.purdue_level,
-            is_public_ip: a.is_public_ip,
-            tags: a.tags.clone(),
-            vendor: a.vendor.clone(),
-            hostname: a.hostname.clone(),
-            product_family: a.product_family.clone(),
-        })
-        .collect();
+    let assets = asset_snapshots(&inventory);
 
     // Build protocols_by_ip from asset protocol lists
     let protocols_by_ip = inventory
@@ -593,65 +647,13 @@ pub fn get_switch_security_findings(
 ///
 /// Lock order: capture (read) → inventory (read) → analysis (read)
 pub fn get_malware_findings(state: &AppState) -> Result<Vec<MalwareFinding>, String> {
-    let capture = state.capture.read().map_err(|e| e.to_string())?;
-    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
-    let analysis = state.analysis.read().map_err(|e| e.to_string())?;
+    let capture = read_state(&state.capture, "capture")?;
+    let inventory = read_state(&state.inventory, "inventory")?;
+    let analysis = read_state(&state.analysis, "analysis")?;
 
     let ctx = build_capture_context(&capture, &inventory, &analysis);
     let connections = build_analysis_input(&capture, &inventory).connections;
-
-    // Build deep parse snapshot map
-    let mut deep_parse = std::collections::HashMap::new();
-    for (ip, dp) in &inventory.deep_parse_info {
-        let modbus = dp.modbus.as_ref().map(|m| gm_analysis::ModbusSnapshot {
-            role: m.role.clone(),
-            unit_ids: m.unit_ids.clone(),
-            function_codes: m
-                .function_codes
-                .iter()
-                .map(|fc| gm_analysis::FcSnapshot {
-                    code: fc.code,
-                    count: fc.count,
-                    is_write: fc.is_write,
-                })
-                .collect(),
-            relationships: m
-                .relationships
-                .iter()
-                .map(|r| gm_analysis::RelationshipSnapshot {
-                    remote_ip: r.remote_ip.clone(),
-                    remote_role: r.remote_role.clone(),
-                    packet_count: r.packet_count,
-                })
-                .collect(),
-            polling_intervals: m
-                .polling_intervals
-                .iter()
-                .map(|pi| gm_analysis::PollingSnapshot {
-                    remote_ip: pi.remote_ip.clone(),
-                    function_code: pi.function_code,
-                    avg_interval_ms: pi.avg_interval_ms,
-                    min_interval_ms: pi.min_interval_ms,
-                    max_interval_ms: pi.max_interval_ms,
-                    sample_count: pi.sample_count,
-                })
-                .collect(),
-        });
-        let iec104 = dp.iec104.as_ref().map(|i| gm_analysis::Iec104Snapshot {
-            role: i.role.clone(),
-            has_control_commands: i.has_control_commands,
-            has_reset_process: i.has_reset_process,
-            has_interrogation: i.has_interrogation,
-        });
-        deep_parse.insert(
-            ip.clone(),
-            gm_analysis::DeepParseSnapshot {
-                modbus,
-                iec104,
-                ..Default::default()
-            },
-        );
-    }
+    let deep_parse = build_malware_deep_parse(&inventory);
 
     Ok(detect_malware_patterns(&ctx, &connections, &deep_parse))
 }
@@ -661,7 +663,7 @@ pub fn get_malware_findings(state: &AppState) -> Result<Vec<MalwareFinding>, Str
 /// Checks vendor, model, and firmware (extracted from LLDP or SNMP deep parse
 /// data) against the bundled OT infrastructure CVE database.
 pub fn get_cve_warnings(ip: String, state: &AppState) -> Result<Vec<CveMatch>, String> {
-    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
+    let inventory = read_state(&state.inventory, "inventory")?;
 
     // Priority for vendor/model/firmware: LLDP > SNMP > asset info
     let dp = inventory.deep_parse_info.get(&ip);
@@ -719,9 +721,9 @@ pub fn get_compliance_report(
         ));
     }
 
-    let capture = state.capture.read().map_err(|e| e.to_string())?;
-    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
-    let analysis = state.analysis.read().map_err(|e| e.to_string())?;
+    let capture = read_state(&state.capture, "capture")?;
+    let inventory = read_state(&state.inventory, "inventory")?;
+    let analysis = read_state(&state.analysis, "analysis")?;
 
     let input = build_analysis_input(&capture, &inventory);
     Ok(generate_compliance_report(

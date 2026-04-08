@@ -9,7 +9,10 @@ use std::path::Path;
 use gm_physical::inference::{AssetSnapshot as InfAssetSnapshot, ConnSnapshot, InferenceInput};
 use gm_physical::{aruba, cisco, inference, juniper, InferredTopology, PhysicalTopology};
 
-use super::AppState;
+use super::{
+    support::{read_state, write_state},
+    AppState,
+};
 
 /// Import a Cisco IOS running-config file.
 ///
@@ -19,7 +22,7 @@ pub fn import_cisco_config(path: String, state: &AppState) -> Result<PhysicalTop
     let file_path = Path::new(&path);
     let switch = cisco::parse_running_config_file(file_path).map_err(|e| e.to_string())?;
 
-    let mut physical = state.physical.write().map_err(|e| e.to_string())?;
+    let mut physical = write_state(&state.physical, "physical")?;
 
     // Check if a switch with this hostname already exists; if so, replace it
     let hostname = switch.hostname.clone();
@@ -55,7 +58,7 @@ pub fn import_mac_table(
     let file_path = Path::new(&path);
     let entries = cisco::parse_mac_table_file(file_path).map_err(|e| e.to_string())?;
 
-    let mut physical = state.physical.write().map_err(|e| e.to_string())?;
+    let mut physical = write_state(&state.physical, "physical")?;
 
     // Check the switch exists
     if !physical
@@ -98,7 +101,7 @@ pub fn import_cdp_neighbors(
     let file_path = Path::new(&path);
     let neighbors = cisco::parse_cdp_neighbors_file(file_path).map_err(|e| e.to_string())?;
 
-    let mut physical = state.physical.write().map_err(|e| e.to_string())?;
+    let mut physical = write_state(&state.physical, "physical")?;
 
     if !physical
         .physical_topology
@@ -137,7 +140,7 @@ pub fn import_arp_table(path: String, state: &AppState) -> Result<PhysicalTopolo
     let file_path = Path::new(&path);
     let entries = cisco::parse_arp_table_file(file_path).map_err(|e| e.to_string())?;
 
-    let mut physical = state.physical.write().map_err(|e| e.to_string())?;
+    let mut physical = write_state(&state.physical, "physical")?;
 
     let count = entries.len();
     physical.physical_topology.apply_arp_entries(&entries);
@@ -152,13 +155,13 @@ pub fn import_arp_table(path: String, state: &AppState) -> Result<PhysicalTopolo
 
 /// Get the current physical topology.
 pub fn get_physical_topology(state: &AppState) -> Result<PhysicalTopology, String> {
-    let physical = state.physical.read().map_err(|e| e.to_string())?;
+    let physical = read_state(&state.physical, "physical")?;
     Ok(physical.physical_topology.clone())
 }
 
 /// Clear all physical topology data.
 pub fn clear_physical_topology(state: &AppState) -> Result<(), String> {
-    let mut physical = state.physical.write().map_err(|e| e.to_string())?;
+    let mut physical = write_state(&state.physical, "physical")?;
     physical.physical_topology = PhysicalTopology::default();
     log::info!("Cleared physical topology");
     Ok(())
@@ -189,7 +192,7 @@ pub fn import_network_config(path: String, state: &AppState) -> Result<PhysicalT
         cisco::parse_running_config_file(file_path).map_err(|e| e.to_string())?
     };
 
-    let mut physical = state.physical.write().map_err(|e| e.to_string())?;
+    let mut physical = write_state(&state.physical, "physical")?;
     let hostname = switch.hostname.clone();
     physical
         .physical_topology
@@ -232,7 +235,7 @@ pub fn import_mac_table_auto(
             cisco::parse_mac_table_file(file_path).map_err(|e| e.to_string())?
         };
 
-    let mut physical = state.physical.write().map_err(|e| e.to_string())?;
+    let mut physical = write_state(&state.physical, "physical")?;
 
     if !physical
         .physical_topology
@@ -286,7 +289,7 @@ pub fn import_neighbor_table(
         cisco::parse_cdp_neighbors_file(file_path).map_err(|e| e.to_string())?
     };
 
-    let mut physical = state.physical.write().map_err(|e| e.to_string())?;
+    let mut physical = write_state(&state.physical, "physical")?;
 
     if !physical
         .physical_topology
@@ -322,8 +325,8 @@ pub fn import_neighbor_table(
 ///
 /// Lock order: capture → inventory → physical
 pub fn run_topology_inference(state: &AppState) -> Result<InferredTopology, String> {
-    let capture = state.capture.read().map_err(|e| e.to_string())?;
-    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
+    let capture = read_state(&state.capture, "capture")?;
+    let inventory = read_state(&state.inventory, "inventory")?;
 
     let input = InferenceInput {
         assets: inventory
@@ -359,13 +362,13 @@ pub fn run_topology_inference(state: &AppState) -> Result<InferredTopology, Stri
     drop(capture);
     drop(inventory);
 
-    let mut physical = state.physical.write().map_err(|e| e.to_string())?;
+    let mut physical = write_state(&state.physical, "physical")?;
     physical.inferred_topology = Some(result.clone());
     Ok(result)
 }
 
 /// Get the last computed inferred topology (or None if not yet run).
 pub fn get_inferred_topology(state: &AppState) -> Result<Option<InferredTopology>, String> {
-    let physical = state.physical.read().map_err(|e| e.to_string())?;
+    let physical = read_state(&state.physical, "physical")?;
     Ok(physical.inferred_topology.clone())
 }

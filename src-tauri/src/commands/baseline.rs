@@ -6,7 +6,10 @@
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 
-use super::{AppState, AssetInfo};
+use super::{
+    support::{mutex_state, read_state},
+    AppState, AssetInfo,
+};
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -93,23 +96,13 @@ pub fn compare_sessions(
     state: &AppState,
 ) -> Result<BaselineDiff, String> {
     // Step 1: snapshot current assets and connections (no locks held after scope).
-    let current_assets_vec: Vec<AssetInfo> = state
-        .inventory
-        .read()
-        .map_err(|e| e.to_string())?
-        .assets
-        .clone();
-
-    let current_connections_vec = state
-        .capture
-        .read()
-        .map_err(|e| e.to_string())?
-        .connections
-        .clone();
+    let current_assets_vec: Vec<AssetInfo> =
+        read_state(&state.inventory, "inventory")?.assets.clone();
+    let current_connections_vec = read_state(&state.capture, "capture")?.connections.clone();
 
     // Step 2: load baseline from the database.
     let (baseline_session_name, baseline_asset_rows, baseline_conn_rows) = {
-        let session = state.session.lock().map_err(|e| e.to_string())?;
+        let session = mutex_state(&state.session, "session")?;
         let db = session.db.as_ref().ok_or("Database not available")?;
         let session_row = db
             .get_session(&baseline_session_id)

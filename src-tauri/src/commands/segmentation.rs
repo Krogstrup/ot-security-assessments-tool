@@ -11,7 +11,10 @@ use gm_segmentation::{
     SecurityFinding, SegmentationInput, SegmentationReport,
 };
 
-use super::{AnalysisState, AppState, CaptureState, InventoryState};
+use super::{
+    support::{read_state, write_state},
+    AnalysisState, AppState, CaptureState, InventoryState,
+};
 
 // ── Input builder ─────────────────────────────────────────────────────────────
 
@@ -284,9 +287,9 @@ fn compute_subnet_24(ip: &str) -> Option<String> {
 ///
 /// Lock order: capture → inventory → analysis (read), then segmentation (write).
 pub fn run_segmentation(state: &AppState) -> Result<SegmentationReport, String> {
-    let capture = state.capture.read().map_err(|e| e.to_string())?;
-    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
-    let analysis = state.analysis.read().map_err(|e| e.to_string())?;
+    let capture = read_state(&state.capture, "capture")?;
+    let inventory = read_state(&state.inventory, "inventory")?;
+    let analysis = read_state(&state.analysis, "analysis")?;
 
     let input = build_segmentation_input(&capture, &inventory, &analysis);
     let report = run_segmentation_analysis(&input);
@@ -296,7 +299,7 @@ pub fn run_segmentation(state: &AppState) -> Result<SegmentationReport, String> 
     drop(analysis);
 
     // Cache the report.
-    let mut seg = state.segmentation.write().map_err(|e| e.to_string())?;
+    let mut seg = write_state(&state.segmentation, "segmentation")?;
     seg.segmentation_report = Some(report.clone());
 
     log::info!(
@@ -315,7 +318,7 @@ pub fn run_segmentation(state: &AppState) -> Result<SegmentationReport, String> 
 /// Returns the full text content of the generated configuration file.
 /// Returns an error if `run_segmentation` has not been called yet in this session.
 pub fn export_enforcement_config(format: String, state: &AppState) -> Result<String, String> {
-    let seg = state.segmentation.read().map_err(|e| e.to_string())?;
+    let seg = read_state(&state.segmentation, "segmentation")?;
 
     let report = seg.segmentation_report.as_ref().ok_or_else(|| {
         "No segmentation report available. Run segmentation analysis first.".to_string()
