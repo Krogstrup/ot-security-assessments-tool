@@ -42,7 +42,7 @@
 		display: grid;
 		grid-template-columns: 1fr 50px 70px 1fr;
 		gap: 4px;
-		font-size: 8px;
+	
 		color: var(--gm-text-muted);
 		text-transform: uppercase;
 		letter-spacing: 0.5px;

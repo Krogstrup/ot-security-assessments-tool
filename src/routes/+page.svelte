@@ -44,30 +44,32 @@
 
 {#if $activeTab === 'projects'}
 	<ProjectsView />
-{:else if $connections.length > 0 && ($activeTab === 'topology' || $activeTab === 'inventory')}
+{:else if $connections.length > 0 && ($activeTab === 'topology' )} 
 	<div class="split-layout">
-		{#if showTree}
-			<div class="tree-panel">
-				<ConnectionTree />
-			</div>
-			<button class="tree-toggle collapse" onclick={() => (showTree = false)} title="Hide connection tree">
-				&#x2039;
-			</button>
-		{:else}
-			<button class="tree-toggle expand" onclick={() => (showTree = true)} title="Show connection tree">
-				&#x203A;
-			</button>
+			{#if showTree}
+				<div class="tree-panel">
+					<ConnectionTree />		
+				</div>	
 		{/if}
 		<div class="main-panel">
+			
 			{#if $activeTab === 'topology'}
 				<!-- Topology sub-tab bar -->
 				<div class="topo-tab-bar">
+				{#if showTree}
+				<button class="tree-toggle" onclick={() => (showTree = false)} title="Hide connection tree">
+					&#x2039;
+				</button>	
+			{:else}
+				<button class="tree-toggle" onclick={() => (showTree = true)} title="Show connection tree">
+					&#x203A;
+				</button>	
+			{/if}
 					{#each $topologyTabs as tab}
 						<button
 							class="topo-tab"
 							class:active={$activeTopologyTabId === tab.id}
-							onclick={() => selectTab(tab.id)}
-						>
+							onclick={() => selectTab(tab.id)}>
 							<span class="topo-tab-label">{tab.label}</span>
 							{#if tab.closeable}
 								<span
@@ -97,50 +99,10 @@
 						{/if}
 					{/each}
 				</div>
-			{:else if $activeTab === 'inventory'}
-				<InventoryView />
 			{/if}
 		</div>
 	</div>
-{:else if $activeTab === 'topology'}
-	<!-- No connections yet — show topology with tab bar but no tree -->
-	<div class="full-layout">
-		<div class="topo-tab-bar">
-			{#each $topologyTabs as tab}
-				<button
-					class="topo-tab"
-					class:active={$activeTopologyTabId === tab.id}
-					onclick={() => selectTab(tab.id)}
-				>
-					<span class="topo-tab-label">{tab.label}</span>
-					{#if tab.closeable}
-						<span
-							class="topo-tab-close"
-							role="button"
-							tabindex="0"
-							onclick={(e) => handleCloseTab(e, tab.id)}
-							onkeydown={(e) => { if (e.key === 'Enter') handleCloseTab(e, tab.id); }}
-						>&times;</span>
-					{/if}
-				</button>
-			{/each}
-		</div>
-		<div class="topo-content">
-			{#each $topologyTabs as tab}
-				{#if $activeTopologyTabId === tab.id}
-					{#if tab.type === 'logical'}
-						<LogicalView />
-					{:else if tab.type === 'mesh'}
-						<MeshView />
-					{:else if tab.type === 'filtered'}
-						<FilteredView tabId={tab.id} />
-					{:else if tab.type === 'watch'}
-						<WatchTab tabId={tab.id} />
-					{/if}
-				{/if}
-			{/each}
-		</div>
-	</div>
+
 {:else if $activeTab === 'physical'}
 	<PhysicalView />
 {:else if $activeTab === 'inventory'}
@@ -172,11 +134,9 @@
 	}
 
 	.tree-panel {
-		width: 340px;
-		min-width: 260px;
-		max-width: 480px;
-		flex-shrink: 0;
-		overflow: hidden;
+		min-width: 20%;
+		max-width: 380px;
+		font-size: 12px;
 	}
 
 	.main-panel {
@@ -187,18 +147,11 @@
 		flex-direction: column;
 	}
 
-	.full-layout {
-		display: flex;
-		flex-direction: column;
-		height: 100%;
-		width: 100%;
-	}
 
 	.tree-toggle {
 		position: absolute;
 		z-index: 10;
 		top: 50%;
-		transform: translateY(-50%);
 		width: 16px;
 		height: 48px;
 		background: var(--gm-bg-panel);
@@ -206,26 +159,19 @@
 		color: var(--gm-text-muted);
 		font-size: 12px;
 		cursor: pointer;
-		display: flex;
 		align-items: center;
 		justify-content: center;
 		transition: all 0.15s;
+		overflow: hidden;
 	}
 
 	.tree-toggle:hover {
 		background: var(--gm-bg-hover);
 		color: var(--gm-text-primary);
 	}
+	
 
-	.tree-toggle.collapse {
-		left: 340px;
-		border-radius: 0 4px 4px 0;
-	}
 
-	.tree-toggle.expand {
-		left: 0;
-		border-radius: 0 4px 4px 0;
-	}
 
 	/* ── Topology Sub-Tab Bar ──────────────────────── */
 
@@ -234,7 +180,7 @@
 		align-items: stretch;
 		background: var(--gm-bg-secondary);
 		border-bottom: 1px solid var(--gm-border);
-		overflow-x: auto;
+		overflow-x: hidden;
 		flex-shrink: 0;
 	}
 
@@ -242,7 +188,7 @@
 		display: flex;
 		align-items: center;
 		gap: 6px;
-		padding: 7px 14px;
+		padding: 8.3px 14px;
 		background: transparent;
 		border: none;
 		border-bottom: 2px solid transparent;
@@ -257,7 +203,7 @@
 
 	.topo-tab:hover {
 		color: var(--gm-text-secondary);
-		background: rgba(255, 255, 255, 0.02);
+		background: var(--gm-bg-hover);
 	}
 
 	.topo-tab.active {
@@ -279,7 +225,7 @@
 	}
 
 	.topo-tab-close:hover {
-		background: rgba(239, 68, 68, 0.2);
+		background: var(--gm-bg-hover);
 		color: #ef4444;
 	}
 

@@ -72,7 +72,7 @@
 		border: none;
 		color: var(--gm-text-secondary);
 		font-family: inherit;
-		font-size: 10px;
+		font-size: 13px;
 		cursor: pointer;
 		text-align: left;
 		transition: background 0.1s;
@@ -114,12 +114,12 @@
 	.conn-details {
 		padding: 4px 8px 8px 28px;
 		background: rgba(0, 0, 0, 0.1);
+		font-size: 13px;
 	}
 
 	.conn-meta-row {
 		display: flex;
 		justify-content: space-between;
-		font-size: 9px;
 		padding: 2px 0;
 	}
 

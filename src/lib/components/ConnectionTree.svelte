@@ -206,7 +206,6 @@
 		height: 100%;
 		background: var(--gm-bg-secondary);
 		border-right: 1px solid var(--gm-border);
-		width: 100%;
 	}
 
 	.tree-header {
@@ -233,11 +232,12 @@
 		flex: 1;
 		overflow-y: auto;
 		padding: 4px 0;
+		font-size: 15px;
 	}
 
 	.tree-empty {
 		padding: 20px 12px;
-		font-size: 11px;
+		font-size: 12px;
 		color: var(--gm-text-muted);
 		text-align: center;
 		line-height: 1.5;

@@ -88,7 +88,7 @@
 		border: none;
 		color: var(--gm-text-primary);
 		font-family: inherit;
-		font-size: 11px;
+		font-size: 13px;
 		cursor: pointer;
 		text-align: left;
 		transition: background 0.1s;
@@ -103,7 +103,7 @@
 	}
 
 	.expand-icon {
-		font-size: 8px;
+		font-size: 18px;
 		width: 12px;
 		color: var(--gm-text-muted);
 		flex-shrink: 0;
