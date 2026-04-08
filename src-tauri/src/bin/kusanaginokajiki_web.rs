@@ -10,6 +10,8 @@ use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::{Stream, StreamExt as _};
 use tower_http::services::{ServeDir, ServeFile};
 
+#[path = "../application/mod.rs"]
+mod application;
 #[path = "../commands/mod.rs"]
 mod commands;
 #[path = "kusanaginokajiki_web/web_api_paths.rs"]

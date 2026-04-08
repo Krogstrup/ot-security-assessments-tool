@@ -1,13 +1,12 @@
 use serde::Serialize;
 use serde_json::json;
-use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use super::processor::PacketProcessor;
 use super::{support::read_state, support::write_state, AppState};
+use crate::application::services::capture_pipeline_commit::commit_capture_pipeline_state;
 use gm_capture::PcapReader;
-use gm_topology::TopologyGraph;
 
 #[derive(Serialize)]
 pub struct ImportResult {
@@ -167,77 +166,19 @@ fn compute_and_apply_import_state(
     per_file_results: &[FileImportResult],
     state: &AppState,
 ) -> Result<(usize, usize, Vec<String>), String> {
-    let deep_parse_info = processor.build_deep_parse_info();
-    let (assets, sig_results) = {
-        let sigs = read_state(&state.signatures, "signatures")?;
-        let inv = read_state(&state.inventory, "inventory")?;
-        processor.build_assets(
-            &sigs.signature_engine,
-            &deep_parse_info,
-            &inv.oui_lookup,
-            &inv.geoip_lookup,
-        )
-    };
-
-    let mut topology = processor.topo_builder.snapshot();
-    enrich_topology_with_signatures(&mut topology, &sig_results);
-
-    let connection_list = processor.get_connections();
-    let packet_summaries = processor.get_packet_summaries();
-    let (connection_stats, pattern_anomalies) = processor.build_pattern_results();
-    let redundancy_protocols = processor.build_redundancy_info();
-    let protocols_detected = processor.get_protocols_detected();
-
-    let asset_count = assets.len();
-    let connection_count = connection_list.len();
     let imported_files: Vec<String> = per_file_results
         .iter()
         .filter(|f| f.status == "ok")
         .map(|f| f.filename.clone())
         .collect();
 
-    {
-        let mut cap = write_state(&state.capture, "capture")?;
-        cap.topology = topology;
-        cap.connections = connection_list;
-        cap.packet_summaries = packet_summaries;
-        cap.redundancy_protocols = redundancy_protocols;
-        cap.imported_files.extend(imported_files);
-        cap.imported_files.sort();
-        cap.imported_files.dedup();
-    }
-    {
-        let mut inv = write_state(&state.inventory, "inventory")?;
-        inv.assets = assets;
-        inv.deep_parse_info = deep_parse_info;
-    }
-    {
-        let mut analysis = write_state(&state.analysis, "analysis")?;
-        analysis.connection_stats = connection_stats;
-        analysis.pattern_anomalies = pattern_anomalies;
-    }
+    let result = commit_capture_pipeline_state(state, &mut processor, &imported_files)?;
 
-    Ok((connection_count, asset_count, protocols_detected))
-}
-
-fn enrich_topology_with_signatures(
-    topology: &mut TopologyGraph,
-    sig_results: &HashMap<String, Vec<super::AssetSignatureMatch>>,
-) {
-    for node in &mut topology.nodes {
-        if let Some(sig_matches) = sig_results.get(&node.ip_address) {
-            if let Some(best) = sig_matches.first() {
-                if let Some(ref v) = best.vendor {
-                    node.vendor = Some(v.clone());
-                }
-                if let Some(ref dt) = best.device_type {
-                    if best.confidence >= 3 {
-                        node.device_type = dt.clone();
-                    }
-                }
-            }
-        }
-    }
+    Ok((
+        result.connection_count,
+        result.asset_count,
+        result.protocols_detected,
+    ))
 }
 
 #[cfg(test)]

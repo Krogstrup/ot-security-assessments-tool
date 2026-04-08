@@ -1,5 +1,6 @@
 use super::web_support::ApiError;
 use super::SharedState;
+use crate::application::services::capture_pipeline_commit::commit_capture_pipeline_state;
 use crate::commands::processor::PacketProcessor;
 use axum::Json;
 use gm_capture::{LiveCaptureConfig, ParsedPacket};
@@ -60,64 +61,9 @@ fn flush_batch_headless(
         processor.process_packet(&packet);
     }
 
-    let deep_parse_info = processor.build_deep_parse_info();
-    let (assets, sig_results) = {
-        let sigs = match state.signatures.read() {
-            Ok(v) => v,
-            Err(e) => {
-                log::error!("capture flush signatures lock error: {}", e);
-                return;
-            }
-        };
-        let inv = match state.inventory.read() {
-            Ok(v) => v,
-            Err(e) => {
-                log::error!("capture flush inventory lock error: {}", e);
-                return;
-            }
-        };
-        processor.build_assets(
-            &sigs.signature_engine,
-            &deep_parse_info,
-            &inv.oui_lookup,
-            &inv.geoip_lookup,
-        )
-    };
-
-    let mut topology = processor.topo_builder.snapshot();
-    for node in &mut topology.nodes {
-        if let Some(sig_matches) = sig_results.get(&node.ip_address) {
-            if let Some(best) = sig_matches.first() {
-                if let Some(ref v) = best.vendor {
-                    node.vendor = Some(v.clone());
-                }
-                if let Some(ref dt) = best.device_type {
-                    if best.confidence >= 3 {
-                        node.device_type = dt.clone();
-                    }
-                }
-            }
-        }
-    }
-
-    let connections = processor.get_connections();
-    let packet_summaries = processor.get_packet_summaries();
-    let (connection_stats, pattern_anomalies) = processor.build_pattern_results();
-    let redundancy_protocols = processor.build_redundancy_info();
-
-    if let Ok(mut cap) = state.capture.write() {
-        cap.topology = topology;
-        cap.connections = connections;
-        cap.packet_summaries = packet_summaries;
-        cap.redundancy_protocols = redundancy_protocols;
-    }
-    if let Ok(mut inv) = state.inventory.write() {
-        inv.assets = assets;
-        inv.deep_parse_info = deep_parse_info;
-    }
-    if let Ok(mut analysis) = state.analysis.write() {
-        analysis.connection_stats = connection_stats;
-        analysis.pattern_anomalies = pattern_anomalies;
+    if let Err(err) = commit_capture_pipeline_state(state.as_ref(), processor, &[]) {
+        log::error!("capture flush commit error: {}", err);
+        return;
     }
 
     // Emit capture_stats event for SSE subscribers
