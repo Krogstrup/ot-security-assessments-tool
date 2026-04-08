@@ -3,7 +3,7 @@
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use clap::Parser;
 use gm_capture::{list_interfaces, LiveCaptureConfig, ParsedPacket, PcapReader};
@@ -82,6 +82,35 @@ impl IntoResponse for ApiError {
 #[derive(Debug, Deserialize)]
 struct ImportPcapRequest {
     paths: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateProjectRequest {
+    name: String,
+    client_name: Option<String>,
+    site_name: Option<String>,
+    assessor_name: Option<String>,
+    engagement_start: Option<String>,
+    engagement_end: Option<String>,
+    notes: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateProjectRequest {
+    name: String,
+    client_name: Option<String>,
+    site_name: Option<String>,
+    assessor_name: Option<String>,
+    engagement_start: Option<String>,
+    engagement_end: Option<String>,
+    notes: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SetActiveProjectRequest {
+    id: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -215,7 +244,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route(
             "/data/connection-packets/{connection_id}",
             get(get_connection_packets),
-        );
+        )
+        // v1 resource endpoints — projects
+        // NOTE: /v1/projects/active must be registered before /v1/projects/:id
+        .route("/v1/projects", get(list_projects_handler).post(create_project_handler))
+        .route("/v1/projects/active", put(set_active_project_handler).delete(clear_active_project_handler))
+        .route("/v1/projects/:id", get(get_project_handler).put(update_project_handler).delete(delete_project_handler));
 
     let static_files = ServeDir::new(&frontend_dist).not_found_service(ServeFile::new(index_path));
 
@@ -979,6 +1013,96 @@ async fn start_capture_headless(
         bpf_filter
     );
     Ok(())
+}
+
+// ── /api/v1/projects ─────────────────────────────────────────────────────────
+
+async fn list_projects_handler(
+    State(state): State<SharedState>,
+) -> Result<Json<Value>, ApiError> {
+    let projects = commands::projects::list_projects(state_ref(&state))
+        .await
+        .map_err(ApiError::bad_request)?;
+    to_json(projects)
+}
+
+async fn create_project_handler(
+    State(state): State<SharedState>,
+    Json(body): Json<CreateProjectRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let project = commands::projects::create_project(
+        state_ref(&state),
+        body.name,
+        body.client_name,
+        body.site_name,
+        body.assessor_name,
+        body.engagement_start,
+        body.engagement_end,
+        body.notes,
+    )
+    .await
+    .map_err(ApiError::bad_request)?;
+    to_json(project)
+}
+
+async fn get_project_handler(
+    Path(id): Path<i64>,
+    State(state): State<SharedState>,
+) -> Result<Json<Value>, ApiError> {
+    let project = commands::projects::get_project(state_ref(&state), id)
+        .await
+        .map_err(ApiError::bad_request)?;
+    to_json(project)
+}
+
+async fn update_project_handler(
+    Path(id): Path<i64>,
+    State(state): State<SharedState>,
+    Json(body): Json<UpdateProjectRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let project = commands::projects::update_project(
+        state_ref(&state),
+        id,
+        body.name,
+        body.client_name,
+        body.site_name,
+        body.assessor_name,
+        body.engagement_start,
+        body.engagement_end,
+        body.notes,
+    )
+    .await
+    .map_err(ApiError::bad_request)?;
+    to_json(project)
+}
+
+async fn delete_project_handler(
+    Path(id): Path<i64>,
+    State(state): State<SharedState>,
+) -> Result<Json<Value>, ApiError> {
+    commands::projects::delete_project(state_ref(&state), id)
+        .await
+        .map_err(ApiError::bad_request)?;
+    Ok(Json(json!({})))
+}
+
+async fn set_active_project_handler(
+    State(state): State<SharedState>,
+    Json(body): Json<SetActiveProjectRequest>,
+) -> Result<Json<Value>, ApiError> {
+    let project = commands::projects::set_active_project(state_ref(&state), body.id)
+        .await
+        .map_err(ApiError::bad_request)?;
+    to_json(project)
+}
+
+async fn clear_active_project_handler(
+    State(state): State<SharedState>,
+) -> Result<Json<Value>, ApiError> {
+    commands::projects::clear_active_project(state_ref(&state))
+        .await
+        .map_err(ApiError::bad_request)?;
+    Ok(Json(json!({})))
 }
 
 async fn invoke_command(
