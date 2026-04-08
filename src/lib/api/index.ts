@@ -7,7 +7,7 @@
  */
 
 // Core utilities
-export { invokeCompat, httpJson, isAppError, invokeValidated } from './core';
+export { httpJson, isAppError, httpValidated } from './core';
 
 // Domain modules
 export * from './system';

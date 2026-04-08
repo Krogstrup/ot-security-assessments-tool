@@ -4,51 +4,91 @@
 
 import type { FilteredPcapResult, AllowlistEntry } from '$lib/types/analysis';
 import type { EnforcementFormat, SegmentationReport } from '$lib/types/segmentation';
-import { invokeCompat } from './core';
+import { httpJson } from './core';
 import type { ReportConfig } from '$lib/types';
 
 export async function exportAssetsCsv(outputPath: string): Promise<string> {
-	return invokeCompat<string>('export_assets_csv', { outputPath });
+	return httpJson<string>('/api/v1/exports/assets/csv', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ outputPath })
+	});
 }
 
 export async function exportConnectionsCsv(outputPath: string): Promise<string> {
-	return invokeCompat<string>('export_connections_csv', { outputPath });
+	return httpJson<string>('/api/v1/exports/connections/csv', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ outputPath })
+	});
 }
 
 export async function exportTopologyJson(outputPath: string): Promise<string> {
-	return invokeCompat<string>('export_topology_json', { outputPath });
+	return httpJson<string>('/api/v1/exports/topology/json', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ outputPath })
+	});
 }
 
 export async function exportAssetsJson(outputPath: string): Promise<string> {
-	return invokeCompat<string>('export_assets_json', { outputPath });
+	return httpJson<string>('/api/v1/exports/assets/json', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ outputPath })
+	});
 }
 
 export async function generatePdfReport(config: ReportConfig, outputPath: string): Promise<string> {
-	return invokeCompat<string>('generate_pdf_report', { config, outputPath });
+	return httpJson<string>('/api/v1/exports/report/pdf', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ config, outputPath })
+	});
 }
 
 export async function exportSbom(format: 'csv' | 'json', outputPath: string): Promise<string> {
-	return invokeCompat<string>('export_sbom', { format, outputPath });
+	return httpJson<string>('/api/v1/exports/sbom', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ format, outputPath })
+	});
 }
 
 export async function exportStixBundle(outputPath: string): Promise<string> {
-	return invokeCompat<string>('export_stix_bundle', { outputPath });
+	return httpJson<string>('/api/v1/exports/stix', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ outputPath })
+	});
 }
 
 export async function saveTopologyImage(imageData: string, outputPath: string): Promise<string> {
-	return invokeCompat<string>('save_topology_image', { imageData, outputPath });
+	return httpJson<string>('/api/v1/exports/topology/image', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ imageData, outputPath })
+	});
 }
 
 export async function generateCommunicationAllowlist(): Promise<AllowlistEntry[]> {
-	return invokeCompat<AllowlistEntry[]>('generate_communication_allowlist');
+	return httpJson<AllowlistEntry[]>('/api/v1/exports/allowlist');
 }
 
 export async function exportAllowlistCsv(outputPath: string): Promise<string> {
-	return invokeCompat<string>('export_allowlist_csv', { outputPath });
+	return httpJson<string>('/api/v1/exports/allowlist/csv', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ outputPath })
+	});
 }
 
 export async function exportFirewallRules(outputPath: string): Promise<string> {
-	return invokeCompat<string>('export_firewall_rules', { outputPath });
+	return httpJson<string>('/api/v1/exports/firewall-rules', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ outputPath })
+	});
 }
 
 export async function exportFilteredPcap(
@@ -56,17 +96,25 @@ export async function exportFilteredPcap(
 	filterPorts: number[],
 	outputPath: string
 ): Promise<FilteredPcapResult> {
-	return invokeCompat<FilteredPcapResult>('export_filtered_pcap', {
-		filterIps,
-		filterPorts,
-		outputPath
+	return httpJson<FilteredPcapResult>('/api/v1/exports/pcap/filtered', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({
+			filterIps,
+			filterPorts,
+			outputPath
+		})
 	});
 }
 
 export async function runSegmentation(): Promise<SegmentationReport> {
-	return invokeCompat<SegmentationReport>('run_segmentation');
+	return httpJson<SegmentationReport>('/api/v1/segmentation/run', { method: 'POST' });
 }
 
 export async function exportEnforcementConfig(format: EnforcementFormat): Promise<string> {
-	return invokeCompat<string>('export_enforcement_config', { format });
+	return httpJson<string>('/api/v1/segmentation/enforcement-config', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ format })
+	});
 }

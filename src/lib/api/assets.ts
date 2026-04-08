@@ -6,7 +6,7 @@ import type { Asset } from '$lib/types/assets';
 import type { DeepParseInfo, FunctionCodeStat } from '$lib/types/deep-parse';
 import type { AssetUpdate } from '$lib/types/operations';
 import type { TopologyGraph } from '$lib/types/topology';
-import { invokeCompat, httpJson } from './core';
+import { httpJson } from './core';
 import type { AssetPage } from '$lib/types';
 
 export async function getAssets(page = 0, pageSize = 200, sortBy?: string): Promise<AssetPage> {
@@ -19,19 +19,27 @@ export async function getAssets(page = 0, pageSize = 200, sortBy?: string): Prom
 }
 
 export async function updateAsset(assetId: string, updates: AssetUpdate): Promise<Asset> {
-	return invokeCompat<Asset>('update_asset', { assetId, updates });
+	return httpJson<Asset>(`/api/v1/assets/${encodeURIComponent(assetId)}`, {
+		method: 'PUT',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ updates })
+	});
 }
 
 export async function bulkUpdateAssets(assetIds: string[], updates: AssetUpdate): Promise<number> {
-	return invokeCompat<number>('bulk_update_assets', { assetIds, updates });
+	return httpJson<number>('/api/v1/assets/bulk-update', {
+		method: 'PUT',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ assetIds, updates })
+	});
 }
 
 export async function getDeepParseInfo(ipAddress: string): Promise<DeepParseInfo | null> {
-	return invokeCompat<DeepParseInfo | null>('get_deep_parse_info', { ipAddress });
+	return httpJson<DeepParseInfo | null>(`/api/v1/data/deep-parse/${encodeURIComponent(ipAddress)}`);
 }
 
 export async function getFunctionCodeStats(): Promise<Record<string, FunctionCodeStat[]>> {
-	return invokeCompat<Record<string, FunctionCodeStat[]>>('get_function_code_stats');
+	return httpJson<Record<string, FunctionCodeStat[]>>('/api/v1/data/function-code-stats');
 }
 
 export async function getTopology(): Promise<TopologyGraph> {

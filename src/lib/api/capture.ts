@@ -9,14 +9,6 @@ import { httpJson } from './core';
 import type { ImportResult } from '$lib/types/capture';
 import { getProtocolStats as getProtocolStatsFromConnections } from './connections';
 
-function invokeHttp<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-	return httpJson<T>(`/api/invoke/${command}`, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(args ?? {})
-	});
-}
-
 export async function importPcap(paths: string[]): Promise<ImportResult> {
 	return httpJson<ImportResult>('/api/capture/import-pcap', {
 		method: 'POST',
@@ -26,7 +18,7 @@ export async function importPcap(paths: string[]): Promise<ImportResult> {
 }
 
 export async function cancelImport(): Promise<void> {
-	await invokeHttp('cancel_import');
+	await httpJson('/api/v1/capture/cancel', { method: 'POST' });
 }
 
 export interface ImportProgressEvent {
@@ -55,11 +47,19 @@ export async function onImportProgress(
 }
 
 export async function startCapture(interfaceName: string, bpfFilter?: string): Promise<void> {
-	await invokeHttp('start_capture', { interfaceName, bpfFilter: bpfFilter ?? null });
+	await httpJson('/api/v1/capture/start', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ interfaceName, bpfFilter: bpfFilter ?? null })
+	});
 }
 
 export async function stopCapture(savePath?: string): Promise<StopCaptureResult> {
-	return invokeHttp<StopCaptureResult>('stop_capture', { savePath: savePath ?? null });
+	return httpJson<StopCaptureResult>('/api/v1/capture/stop', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ savePath: savePath ?? null })
+	});
 }
 
 export async function getProtocolStats() {
@@ -67,15 +67,15 @@ export async function getProtocolStats() {
 }
 
 export async function pauseCapture(): Promise<void> {
-	await invokeHttp('pause_capture');
+	await httpJson('/api/v1/capture/pause', { method: 'POST' });
 }
 
 export async function resumeCapture(): Promise<void> {
-	await invokeHttp('resume_capture');
+	await httpJson('/api/v1/capture/resume', { method: 'POST' });
 }
 
 export async function getCaptureStatus(): Promise<CaptureStatusInfo> {
-	return invokeHttp<CaptureStatusInfo>('get_capture_status');
+	return httpJson<CaptureStatusInfo>('/api/v1/capture/status');
 }
 
 export async function onPacketEvent(_callback: (event: PacketEvent) => void): Promise<() => void> {

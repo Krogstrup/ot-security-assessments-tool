@@ -5,17 +5,21 @@
 //! from gm-analysis.
 
 use serde::Deserialize;
-use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 use gm_analysis::{
     allowlist_to_csv, format_firewall_rules, generate_allowlist, AllowlistEntry, AssetSnapshot,
-    ConnectionSnapshot,
+    ConnectionSnapshot, ConnectionStats as AnalysisConnectionStats,
 };
 use gm_report::{
     ExportAsset, ExportConnection, ExportFinding, ExportProtocolStat, ReportConfig, ReportData,
 };
 
-use super::{AppState, CaptureState, InventoryState};
+use super::{
+    data::protocol_stats_from_connections,
+    support::{mutex_state, read_state, write_bytes_file, write_text_file},
+    AppState, CaptureState, InventoryState,
+};
 
 // ─── Conversion Helpers ──────────────────────────────────────
 
@@ -68,38 +72,16 @@ fn state_connections_to_export(capture: &CaptureState) -> Vec<ExportConnection> 
 
 /// Compute protocol stats from connections.
 fn compute_protocol_stats(capture: &CaptureState) -> Vec<ExportProtocolStat> {
-    let mut stats: HashMap<String, ExportProtocolStat> = HashMap::new();
-
-    for conn in &capture.connections {
-        let entry = stats
-            .entry(conn.protocol.clone())
-            .or_insert_with(|| ExportProtocolStat {
-                protocol: conn.protocol.clone(),
-                packet_count: 0,
-                byte_count: 0,
-                connection_count: 0,
-                unique_devices: 0,
-            });
-        entry.packet_count += conn.packet_count;
-        entry.byte_count += conn.byte_count;
-        entry.connection_count += 1;
-    }
-
-    // Count unique devices per protocol
-    for (proto, stat) in &mut stats {
-        let mut devices: HashSet<String> = HashSet::new();
-        for conn in &capture.connections {
-            if &conn.protocol == proto {
-                devices.insert(conn.src_ip.clone());
-                devices.insert(conn.dst_ip.clone());
-            }
-        }
-        stat.unique_devices = devices.len() as u64;
-    }
-
-    let mut result: Vec<ExportProtocolStat> = stats.into_values().collect();
-    result.sort_by(|a, b| b.packet_count.cmp(&a.packet_count));
-    result
+    protocol_stats_from_connections(&capture.connections)
+        .into_iter()
+        .map(|stat| ExportProtocolStat {
+            protocol: stat.protocol,
+            packet_count: stat.packet_count,
+            byte_count: stat.byte_count,
+            connection_count: stat.connection_count,
+            unique_devices: stat.unique_devices,
+        })
+        .collect()
 }
 
 /// Build a complete ReportData from current state.
@@ -152,11 +134,32 @@ fn state_connections_to_snapshots(capture: &CaptureState) -> Vec<ConnectionSnaps
         .collect()
 }
 
+fn build_allowlist_inputs(
+    state: &AppState,
+) -> Result<
+    (
+        Vec<AssetSnapshot>,
+        Vec<ConnectionSnapshot>,
+        Vec<AnalysisConnectionStats>,
+    ),
+    String,
+> {
+    let capture = read_state(&state.capture, "capture")?;
+    let inventory = read_state(&state.inventory, "inventory")?;
+    let comm_stats = read_state(&state.analysis, "analysis")?
+        .connection_stats
+        .clone();
+
+    let assets = state_assets_to_snapshots(&inventory);
+    let connections = state_connections_to_snapshots(&capture);
+    Ok((assets, connections, comm_stats))
+}
+
 // ─── CSV Export Commands ─────────────────────────────────────
 
 /// Export all assets as CSV, writing to the specified file path.
 pub async fn export_assets_csv(output_path: String, state: &AppState) -> Result<String, String> {
-    let inv = state.inventory.read().map_err(|e| e.to_string())?;
+    let inv = read_state(&state.inventory, "inventory")?;
     let assets = state_assets_to_export(&inv);
     let csv = gm_report::csv_export::assets_to_csv(&assets).map_err(|e| e.to_string())?;
     gm_report::csv_export::write_csv_file(&output_path, &csv).map_err(|e| e.to_string())?;
@@ -169,7 +172,7 @@ pub async fn export_connections_csv(
     output_path: String,
     state: &AppState,
 ) -> Result<String, String> {
-    let cap = state.capture.read().map_err(|e| e.to_string())?;
+    let cap = read_state(&state.capture, "capture")?;
     let connections = state_connections_to_export(&cap);
     let csv = gm_report::csv_export::connections_to_csv(&connections).map_err(|e| e.to_string())?;
     gm_report::csv_export::write_csv_file(&output_path, &csv).map_err(|e| e.to_string())?;
@@ -186,9 +189,9 @@ pub async fn export_connections_csv(
 /// Export the full topology (assets + connections + stats) as JSON.
 pub async fn export_topology_json(output_path: String, state: &AppState) -> Result<String, String> {
     // Lock order: capture → inventory → session
-    let capture = state.capture.read().map_err(|e| e.to_string())?;
-    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
-    let session = state.session.lock().map_err(|e| e.to_string())?;
+    let capture = read_state(&state.capture, "capture")?;
+    let inventory = read_state(&state.inventory, "inventory")?;
+    let session = mutex_state(&state.session, "session")?;
 
     let assets = state_assets_to_export(&inventory);
     let connections = state_connections_to_export(&capture);
@@ -205,7 +208,7 @@ pub async fn export_topology_json(output_path: String, state: &AppState) -> Resu
 
 /// Export all assets as JSON.
 pub async fn export_assets_json(output_path: String, state: &AppState) -> Result<String, String> {
-    let inv = state.inventory.read().map_err(|e| e.to_string())?;
+    let inv = read_state(&state.inventory, "inventory")?;
     let assets = state_assets_to_export(&inv);
     let json = gm_report::json_export::assets_to_json(&assets).map_err(|e| e.to_string())?;
     gm_report::json_export::write_json_file(&output_path, &json).map_err(|e| e.to_string())?;
@@ -236,12 +239,9 @@ pub async fn generate_pdf_report(
     state: &AppState,
 ) -> Result<String, String> {
     // Lock order: capture → inventory → session
-    let capture = state.capture.read().map_err(|e| e.to_string())?;
-    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
-    let session_name = state
-        .session
-        .lock()
-        .map_err(|e| e.to_string())?
+    let capture = read_state(&state.capture, "capture")?;
+    let inventory = read_state(&state.inventory, "inventory")?;
+    let session_name = mutex_state(&state.session, "session")?
         .current_session_name
         .clone();
 
@@ -277,7 +277,7 @@ pub async fn export_sbom(
     output_path: String,
     state: &AppState,
 ) -> Result<String, String> {
-    let inv = state.inventory.read().map_err(|e| e.to_string())?;
+    let inv = read_state(&state.inventory, "inventory")?;
     let assets = state_assets_to_export(&inv);
     let entries = gm_report::sbom::assets_to_sbom(&assets);
 
@@ -292,7 +292,7 @@ pub async fn export_sbom(
         }
     };
 
-    std::fs::write(&output_path, content).map_err(|e| e.to_string())?;
+    write_text_file(Path::new(&output_path), &content)?;
     log::info!(
         "Exported SBOM ({}) with {} entries to: {}",
         format,
@@ -306,8 +306,8 @@ pub async fn export_sbom(
 
 /// Export as STIX 2.1 bundle (JSON).
 pub async fn export_stix_bundle(output_path: String, state: &AppState) -> Result<String, String> {
-    let capture = state.capture.read().map_err(|e| e.to_string())?;
-    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
+    let capture = read_state(&state.capture, "capture")?;
+    let inventory = read_state(&state.inventory, "inventory")?;
 
     let assets = state_assets_to_export(&inventory);
     let connections = state_connections_to_export(&capture);
@@ -315,7 +315,7 @@ pub async fn export_stix_bundle(output_path: String, state: &AppState) -> Result
 
     let json = gm_report::stix::generate_stix_bundle(&assets, &connections, &findings)
         .map_err(|e| e.to_string())?;
-    std::fs::write(&output_path, json).map_err(|e| e.to_string())?;
+    write_text_file(Path::new(&output_path), &json)?;
 
     log::info!("Exported STIX 2.1 bundle to: {}", output_path);
     Ok(output_path)
@@ -346,10 +346,7 @@ pub async fn export_filtered_pcap(
     output_path: String,
     state: &AppState,
 ) -> Result<FilteredPcapResult, String> {
-    let input_paths = state
-        .capture
-        .read()
-        .map_err(|e| e.to_string())?
+    let input_paths = read_state(&state.capture, "capture")?
         .imported_files
         .clone();
 
@@ -389,14 +386,14 @@ pub async fn save_topology_image(
         // Decode base64 PNG
         let bytes =
             base64_decode(base64_data).map_err(|e| format!("Invalid base64 data: {}", e))?;
-        std::fs::write(&output_path, bytes).map_err(|e| e.to_string())?;
+        write_bytes_file(Path::new(&output_path), &bytes)?;
     } else if image_data.starts_with("<?xml") || image_data.starts_with("<svg") {
         // SVG content
-        std::fs::write(&output_path, &image_data).map_err(|e| e.to_string())?;
+        write_text_file(Path::new(&output_path), &image_data)?;
     } else {
         // Assume raw base64 PNG without data: prefix
         let bytes = base64_decode(&image_data).map_err(|e| format!("Invalid image data: {}", e))?;
-        std::fs::write(&output_path, bytes).map_err(|e| e.to_string())?;
+        write_bytes_file(Path::new(&output_path), &bytes)?;
     }
 
     log::info!("Saved topology image to: {}", output_path);
@@ -412,40 +409,16 @@ pub async fn save_topology_image(
 pub async fn generate_communication_allowlist(
     state: &AppState,
 ) -> Result<Vec<AllowlistEntry>, String> {
-    // Lock order: capture → inventory → analysis
-    let capture = state.capture.read().map_err(|e| e.to_string())?;
-    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
-    let comm_stats = state
-        .analysis
-        .read()
-        .map_err(|e| e.to_string())?
-        .connection_stats
-        .clone();
-
-    let assets = state_assets_to_snapshots(&inventory);
-    let connections = state_connections_to_snapshots(&capture);
-
+    let (assets, connections, comm_stats) = build_allowlist_inputs(state)?;
     Ok(generate_allowlist(&connections, &assets, &comm_stats))
 }
 
 /// Export the communication allowlist as a CSV file.
 pub async fn export_allowlist_csv(output_path: String, state: &AppState) -> Result<String, String> {
-    // Lock order: capture → inventory → analysis
-    let capture = state.capture.read().map_err(|e| e.to_string())?;
-    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
-    let comm_stats = state
-        .analysis
-        .read()
-        .map_err(|e| e.to_string())?
-        .connection_stats
-        .clone();
-
-    let assets = state_assets_to_snapshots(&inventory);
-    let connections = state_connections_to_snapshots(&capture);
-
+    let (assets, connections, comm_stats) = build_allowlist_inputs(state)?;
     let entries = generate_allowlist(&connections, &assets, &comm_stats);
     let csv = allowlist_to_csv(&entries);
-    std::fs::write(&output_path, csv).map_err(|e| e.to_string())?;
+    write_text_file(Path::new(&output_path), &csv)?;
     log::info!(
         "Exported communication allowlist ({} entries) to CSV: {}",
         entries.len(),
@@ -459,22 +432,10 @@ pub async fn export_firewall_rules(
     output_path: String,
     state: &AppState,
 ) -> Result<String, String> {
-    // Lock order: capture → inventory → analysis
-    let capture = state.capture.read().map_err(|e| e.to_string())?;
-    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
-    let comm_stats = state
-        .analysis
-        .read()
-        .map_err(|e| e.to_string())?
-        .connection_stats
-        .clone();
-
-    let assets = state_assets_to_snapshots(&inventory);
-    let connections = state_connections_to_snapshots(&capture);
-
+    let (assets, connections, comm_stats) = build_allowlist_inputs(state)?;
     let entries = generate_allowlist(&connections, &assets, &comm_stats);
     let rules = format_firewall_rules(&entries);
-    std::fs::write(&output_path, rules).map_err(|e| e.to_string())?;
+    write_text_file(Path::new(&output_path), &rules)?;
     log::info!(
         "Exported firewall rule suggestions ({} rules) to: {}",
         entries.len(),

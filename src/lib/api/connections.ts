@@ -7,7 +7,7 @@ import type { PacketSummary } from '$lib/types/connections';
 import type { RedundancyInfo } from '$lib/types/deep-parse';
 import type { DataCounts } from '$lib/types/pagination';
 import type { ProtocolStats } from '$lib/types/protocols';
-import { invokeCompat, httpJson } from './core';
+import { httpJson } from './core';
 import type { ConnectionPage } from '$lib/types';
 
 export async function getConnections(page = 0, pageSize = 500, sortBy?: string): Promise<ConnectionPage> {
@@ -34,13 +34,13 @@ export async function getProtocolStats(): Promise<ProtocolStats[]> {
 }
 
 export async function getConnectionStats(): Promise<ConnectionStats[]> {
-	return invokeCompat<ConnectionStats[]>('get_connection_stats');
+	return httpJson<ConnectionStats[]>('/api/v1/patterns/connection-stats');
 }
 
 export async function getPatternAnomalies(): Promise<PatternAnomaly[]> {
-	return invokeCompat<PatternAnomaly[]>('get_pattern_anomalies');
+	return httpJson<PatternAnomaly[]>('/api/v1/patterns/anomalies');
 }
 
 export async function getRedundancyProtocols(): Promise<RedundancyInfo[]> {
-	return invokeCompat<RedundancyInfo[]>('get_redundancy_protocols');
+	return httpJson<RedundancyInfo[]>('/api/v1/patterns/redundancy-protocols');
 }

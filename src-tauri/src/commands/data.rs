@@ -2,8 +2,8 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 
 use super::{
-    AppState, AssetInfo, ConnectionInfo, DeepParseInfo, FunctionCodeStat, PacketSummary,
-    ProtocolStatInfo,
+    support::read_state, AppState, AssetInfo, ConnectionInfo, DeepParseInfo, FunctionCodeStat,
+    PacketSummary, ProtocolStatInfo,
 };
 use gm_topology::TopologyGraph;
 
@@ -20,7 +20,7 @@ const MAX_TOPOLOGY_EDGES: usize = 20_000;
 /// and capped at MAX_TOPOLOGY_EDGES (20 000) by packet_count descending.
 /// For smaller datasets the full graph is returned unchanged.
 pub fn get_topology(state: &AppState) -> Result<TopologyGraph, String> {
-    let capture = state.capture.read().map_err(|e| e.to_string())?;
+    let capture = read_state(&state.capture, "capture")?;
     let topo = &capture.topology;
 
     if topo.nodes.len() <= MAX_TOPOLOGY_NODES && topo.edges.len() <= MAX_TOPOLOGY_EDGES {
@@ -89,7 +89,7 @@ pub fn get_assets(
     page_size: Option<usize>,
     sort_by: Option<String>,
 ) -> Result<AssetPage, String> {
-    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
+    let inventory = read_state(&state.inventory, "inventory")?;
 
     let page = page.unwrap_or(0);
     let page_size = page_size.unwrap_or(200);
@@ -141,7 +141,7 @@ pub fn get_connections(
     page_size: Option<usize>,
     sort_by: Option<String>,
 ) -> Result<ConnectionPage, String> {
-    let capture = state.capture.read().map_err(|e| e.to_string())?;
+    let capture = read_state(&state.capture, "capture")?;
 
     let page = page.unwrap_or(0);
     let page_size = page_size.unwrap_or(500);
@@ -184,18 +184,8 @@ pub fn get_connections(
 ///
 /// This avoids serializing the full dataset just to show totals.
 pub fn get_data_counts(state: &AppState) -> Result<DataCounts, String> {
-    let asset_count = state
-        .inventory
-        .read()
-        .map_err(|e| e.to_string())?
-        .assets
-        .len();
-    let connection_count = state
-        .capture
-        .read()
-        .map_err(|e| e.to_string())?
-        .connections
-        .len();
+    let asset_count = read_state(&state.inventory, "inventory")?.assets.len();
+    let connection_count = read_state(&state.capture, "capture")?.connections.len();
     Ok(DataCounts {
         asset_count,
         connection_count,
@@ -208,13 +198,19 @@ pub fn get_data_counts(state: &AppState) -> Result<DataCounts, String> {
 /// all protocols in one loop, avoiding the previous O(protocols × connections)
 /// double-loop.
 pub fn get_protocol_stats(state: &AppState) -> Result<Vec<ProtocolStatInfo>, String> {
-    let capture = state.capture.read().map_err(|e| e.to_string())?;
+    let capture = read_state(&state.capture, "capture")?;
+    Ok(protocol_stats_from_connections(&capture.connections))
+}
 
+/// Shared protocol-stat computation used by both API reads and export paths.
+pub(crate) fn protocol_stats_from_connections(
+    connections: &[ConnectionInfo],
+) -> Vec<ProtocolStatInfo> {
     let mut stats: HashMap<String, ProtocolStatInfo> = HashMap::new();
     // Track unique devices per protocol in the same pass.
     let mut devices_per_proto: HashMap<String, HashSet<String>> = HashMap::new();
 
-    for conn in &capture.connections {
+    for conn in connections {
         let entry = stats
             .entry(conn.protocol.clone())
             .or_insert_with(|| ProtocolStatInfo {
@@ -243,7 +239,7 @@ pub fn get_protocol_stats(state: &AppState) -> Result<Vec<ProtocolStatInfo>, Str
     let mut result: Vec<ProtocolStatInfo> = stats.into_values().collect();
     result.sort_by(|a, b| b.packet_count.cmp(&a.packet_count));
 
-    Ok(result)
+    result
 }
 
 /// Get packet summaries for a specific connection (for the connection tree detail view).
@@ -253,7 +249,7 @@ pub fn get_connection_packets(
     connection_id: String,
     state: &AppState,
 ) -> Result<Vec<PacketSummary>, String> {
-    let capture = state.capture.read().map_err(|e| e.to_string())?;
+    let capture = read_state(&state.capture, "capture")?;
     Ok(capture
         .packet_summaries
         .get(&connection_id)
@@ -269,7 +265,7 @@ pub fn get_deep_parse_info(
     ip_address: String,
     state: &AppState,
 ) -> Result<Option<DeepParseInfo>, String> {
-    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
+    let inventory = read_state(&state.inventory, "inventory")?;
     Ok(inventory.deep_parse_info.get(&ip_address).cloned())
 }
 
@@ -280,7 +276,7 @@ pub fn get_deep_parse_info(
 pub fn get_function_code_stats(
     state: &AppState,
 ) -> Result<HashMap<String, Vec<FunctionCodeStat>>, String> {
-    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
+    let inventory = read_state(&state.inventory, "inventory")?;
 
     let mut modbus_fcs: HashMap<u8, u64> = HashMap::new();
     let mut dnp3_fcs: HashMap<u8, u64> = HashMap::new();
@@ -348,7 +344,7 @@ pub struct TimelineRange {
 /// used by the timeline scrubber to set slider bounds.
 /// Scans all connections (not capped) to ensure accurate bounds.
 pub fn get_timeline_range(state: &AppState) -> Result<TimelineRange, String> {
-    let capture = state.capture.read().map_err(|e| e.to_string())?;
+    let capture = read_state(&state.capture, "capture")?;
 
     let mut earliest: Option<&str> = None;
     let mut latest: Option<&str> = None;

@@ -3,29 +3,41 @@
  */
 
 import type { FrameRow } from '$lib/types/operations';
-import { invokeCompat } from './core';
+import { httpJson } from './core';
 import type { WiresharkInfo } from '$lib/types';
 
 export async function detectWireshark(): Promise<WiresharkInfo> {
-	return invokeCompat<WiresharkInfo>('detect_wireshark');
+	return httpJson<WiresharkInfo>('/api/v1/wireshark/info');
 }
 
 export async function openInWireshark(connectionId: string): Promise<void> {
-	return invokeCompat('open_in_wireshark', { connectionId });
+	await httpJson('/api/v1/wireshark/open-connection', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ connectionId })
+	});
 }
 
 export async function openWiresharkForNode(ipAddress: string): Promise<void> {
-	return invokeCompat('open_wireshark_for_node', { ipAddress });
+	await httpJson('/api/v1/wireshark/open-node', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ipAddress })
+	});
 }
 
 export async function getConnectionFrames(connectionId: string): Promise<FrameRow[]> {
-	return invokeCompat<FrameRow[]>('get_connection_frames', { connectionId });
+	return httpJson<FrameRow[]>(`/api/v1/wireshark/frames/${encodeURIComponent(connectionId)}`);
 }
 
 export async function exportFramesCsv(connectionId: string): Promise<string> {
-	return invokeCompat<string>('export_frames_csv', { connectionId });
+	return httpJson<string>(`/api/v1/wireshark/frames/${encodeURIComponent(connectionId)}/csv`);
 }
 
 export async function saveFramesCsv(connectionId: string, outputPath: string): Promise<void> {
-	return invokeCompat('save_frames_csv', { connectionId, outputPath });
+	await httpJson(`/api/v1/wireshark/frames/${encodeURIComponent(connectionId)}/csv`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ outputPath })
+	});
 }

@@ -6,7 +6,10 @@ use serde::Serialize;
 
 use gm_signatures::{PacketData, Signature};
 
-use super::AppState;
+use super::{
+    support::{read_state, write_state},
+    AppState,
+};
 
 /// Information about a loaded signature, for the frontend.
 #[derive(Debug, Clone, Serialize)]
@@ -64,7 +67,7 @@ pub struct TestResultInfo {
 
 /// Get all loaded signatures.
 pub fn get_signatures(state: &AppState) -> Result<SignatureSummary, String> {
-    let sigs_state = state.signatures.read().map_err(|e| e.to_string())?;
+    let sigs_state = read_state(&state.signatures, "signatures")?;
     let sigs: Vec<SignatureInfo> = sigs_state
         .signature_engine
         .signatures()
@@ -80,7 +83,7 @@ pub fn get_signatures(state: &AppState) -> Result<SignatureSummary, String> {
 
 /// Reload signatures from disk.
 pub fn reload_signatures(state: &AppState) -> Result<usize, String> {
-    let mut sigs_state = state.signatures.write().map_err(|e| e.to_string())?;
+    let mut sigs_state = write_state(&state.signatures, "signatures")?;
     let count = sigs_state
         .signature_engine
         .reload()
@@ -96,8 +99,8 @@ pub fn reload_signatures(state: &AppState) -> Result<usize, String> {
 pub fn test_signature(yaml: String, state: &AppState) -> Result<SignatureTestResult, String> {
     // Lock order: capture → signatures (no shared lock ordering issue since
     // signatures is always acquired after capture in all command paths)
-    let capture = state.capture.read().map_err(|e| e.to_string())?;
-    let sigs_state = state.signatures.read().map_err(|e| e.to_string())?;
+    let capture = read_state(&state.capture, "capture")?;
+    let sigs_state = read_state(&state.signatures, "signatures")?;
 
     // Build PacketData from stored connections for testing.
     // We don't have full payload data in packet summaries (they're lightweight),

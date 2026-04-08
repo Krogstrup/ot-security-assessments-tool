@@ -16,6 +16,7 @@ pub mod resource_paths;
 pub mod segmentation;
 pub mod session;
 pub mod signatures;
+pub mod support;
 pub mod system;
 pub mod wireshark;
 
@@ -186,9 +187,9 @@ impl AppState {
         });
 
         // Open SQLite database at ~/.kusanaginokajiki/data.db
-        let db = match dirs::home_dir() {
-            Some(home) => {
-                let db_path = home.join(".kusanaginokajiki").join("data.db");
+        let db = match support::app_data_dir() {
+            Ok(data_dir) => {
+                let db_path = data_dir.join("data.db");
                 match Database::open(&db_path) {
                     Ok(db) => Some(db),
                     Err(e) => {
@@ -197,8 +198,8 @@ impl AppState {
                     }
                 }
             }
-            None => {
-                log::warn!("Could not determine home directory for database");
+            Err(e) => {
+                log::warn!("{} for database", e);
                 None
             }
         };

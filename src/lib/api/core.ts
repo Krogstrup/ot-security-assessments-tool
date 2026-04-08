@@ -41,29 +41,6 @@ export async function httpJson<T>(path: string, init?: RequestInit): Promise<T> 
 }
 
 /**
- * Call a backend command via the /api/invoke/{command} passthrough endpoint.
- */
-export async function invokeCompat<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-	return httpJson<T>(`/api/invoke/${command}`, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify(args ?? {})
-	});
-}
-
-/**
- * Call a command and validate the response against a Zod schema.
- */
-export async function invokeValidated<T>(
-	schema: import('zod').ZodSchema<T>,
-	command: string,
-	args?: Record<string, unknown>
-): Promise<T> {
-	const raw = await invokeCompat<unknown>(command, args);
-	return schema.parse(raw);
-}
-
-/**
  * Fetch a resource endpoint and validate the response against a Zod schema.
  *
  * Use this for versioned resource endpoints (e.g. GET /api/v1/projects).

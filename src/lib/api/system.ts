@@ -3,7 +3,7 @@
  */
 
 import type { UserSettings, TimelineRange, PluginManifest } from '$lib/types/analysis';
-import { invokeCompat, httpJson } from './core';
+import { httpJson } from './core';
 import type { NetworkInterface } from '$lib/types';
 
 export async function listInterfaces(): Promise<NetworkInterface[]> {
@@ -15,11 +15,15 @@ export async function getAppInfo(): Promise<{ version: string; rust_version: str
 }
 
 export async function getSettings(): Promise<UserSettings> {
-	return invokeCompat<UserSettings>('get_settings');
+	return httpJson<UserSettings>('/api/v1/system/settings');
 }
 
 export async function saveSettings(settings: UserSettings): Promise<void> {
-	return invokeCompat('save_settings', { settings });
+	await httpJson('/api/v1/system/settings', {
+		method: 'PUT',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ settings })
+	});
 }
 
 // Explicit aliases used during T2 migration.
@@ -32,11 +36,11 @@ export async function saveUserSettings(settings: UserSettings): Promise<void> {
 }
 
 export async function getTimelineRange(): Promise<TimelineRange> {
-	return invokeCompat<TimelineRange>('get_timeline_range');
+	return httpJson<TimelineRange>('/api/v1/data/timeline-range');
 }
 
 export async function listPlugins(): Promise<PluginManifest[]> {
-	return invokeCompat<PluginManifest[]>('list_plugins');
+	return httpJson<PluginManifest[]>('/api/v1/system/plugins');
 }
 
 export interface HeadlessImportPcapFile {

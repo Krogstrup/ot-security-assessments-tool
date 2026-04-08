@@ -3,19 +3,19 @@
  */
 
 import type { LiveAttackAlert } from '$lib/types/analysis';
-import { invokeCompat } from './core';
+import { httpJson } from './core';
 import type { CorrelatedAlert } from '$lib/types/analysis';
 
 export async function getCorrelatedAlerts(): Promise<CorrelatedAlert[]> {
-	return invokeCompat<CorrelatedAlert[]>('get_correlated_alerts');
+	return httpJson<CorrelatedAlert[]>('/api/v1/correlation/alerts');
 }
 
 export async function getAlertsForIp(ip: string): Promise<CorrelatedAlert[]> {
-	return invokeCompat<CorrelatedAlert[]>('get_alerts_for_ip', { ip });
+	return httpJson<CorrelatedAlert[]>(`/api/v1/correlation/alerts/${encodeURIComponent(ip)}`);
 }
 
 export async function clearAlerts(): Promise<void> {
-	return invokeCompat('clear_alerts');
+	await httpJson('/api/v1/correlation/alerts', { method: 'DELETE' });
 }
 
 export async function onLiveAttackAlert(

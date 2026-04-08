@@ -3,37 +3,67 @@
  */
 
 import type { IngestImportResult } from '$lib/types/operations';
-import { invokeCompat } from './core';
+import { httpJson } from './core';
 import type { DeviceZeekEvents } from '$lib/types';
 
 export async function importZeekLogs(paths: string[]): Promise<IngestImportResult> {
-	return invokeCompat<IngestImportResult>('import_zeek_logs', { paths });
+	return httpJson<IngestImportResult>('/api/v1/ingest/zeek', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ paths })
+	});
 }
 
 export async function importSuricataEve(path: string): Promise<IngestImportResult> {
-	return invokeCompat<IngestImportResult>('import_suricata_eve', { path });
+	return httpJson<IngestImportResult>('/api/v1/ingest/suricata', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ path })
+	});
 }
 
 export async function importNmapXml(path: string): Promise<IngestImportResult> {
-	return invokeCompat<IngestImportResult>('import_nmap_xml', { path });
+	return httpJson<IngestImportResult>('/api/v1/ingest/nmap', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ path })
+	});
 }
 
 export async function importMasscanJson(path: string): Promise<IngestImportResult> {
-	return invokeCompat<IngestImportResult>('import_masscan_json', { path });
+	return httpJson<IngestImportResult>('/api/v1/ingest/masscan', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ path })
+	});
 }
 
 export async function importWazuhAlerts(path: string): Promise<IngestImportResult> {
-	return invokeCompat<IngestImportResult>('import_wazuh_alerts', { path });
+	return httpJson<IngestImportResult>('/api/v1/ingest/wazuh', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ path })
+	});
 }
 
 export async function importSinemaCsv(path: string): Promise<IngestImportResult> {
-	return invokeCompat('import_sinema_csv', { path });
+	return httpJson<IngestImportResult>('/api/v1/ingest/sinema', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ path })
+	});
 }
 
 export async function importTiaXml(path: string): Promise<IngestImportResult> {
-	return invokeCompat('import_tia_xml', { path });
+	return httpJson<IngestImportResult>('/api/v1/ingest/tia', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ path })
+	});
 }
 
 export async function getDeviceZeekEvents(deviceIp: string): Promise<DeviceZeekEvents> {
-	return invokeCompat<DeviceZeekEvents>('get_device_zeek_events', { deviceIp });
+	return httpJson<DeviceZeekEvents>(
+		`/api/v1/ingest/zeek-device-events/${encodeURIComponent(deviceIp)}`
+	);
 }

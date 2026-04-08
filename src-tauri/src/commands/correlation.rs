@@ -6,7 +6,10 @@
 
 use serde::Serialize;
 
-use super::{AppState, InventoryState, StoredAlert};
+use super::{
+    support::{read_state, write_state},
+    AppState, InventoryState, StoredAlert,
+};
 
 /// An IDS/SIEM alert enriched with device inventory information.
 #[derive(Debug, Clone, Serialize)]
@@ -39,7 +42,7 @@ pub struct CorrelatedAlert {
 
 /// Return all imported IDS/SIEM alerts, enriched with device inventory data.
 pub async fn get_correlated_alerts(state: &AppState) -> Result<Vec<CorrelatedAlert>, String> {
-    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
+    let inventory = read_state(&state.inventory, "inventory")?;
     let mut alerts: Vec<CorrelatedAlert> = inventory
         .imported_alerts
         .iter()
@@ -59,7 +62,7 @@ pub async fn get_alerts_for_ip(
     ip: String,
     state: &AppState,
 ) -> Result<Vec<CorrelatedAlert>, String> {
-    let inventory = state.inventory.read().map_err(|e| e.to_string())?;
+    let inventory = read_state(&state.inventory, "inventory")?;
     let mut alerts: Vec<CorrelatedAlert> = inventory
         .imported_alerts
         .iter()
@@ -76,7 +79,7 @@ pub async fn get_alerts_for_ip(
 
 /// Clear all stored alerts.
 pub async fn clear_alerts(state: &AppState) -> Result<(), String> {
-    let mut inventory = state.inventory.write().map_err(|e| e.to_string())?;
+    let mut inventory = write_state(&state.inventory, "inventory")?;
     inventory.imported_alerts.clear();
     log::info!("Cleared all imported alerts");
     Ok(())
