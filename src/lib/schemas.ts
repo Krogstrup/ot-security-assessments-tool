@@ -133,3 +133,32 @@ export const appErrorSchema = z.object({
 });
 
 export type AppErrorSchema = z.infer<typeof appErrorSchema>;
+
+// ─── Project ──────────────────────────────────────────────────────────────────
+
+export const projectSchema = z.object({
+	id: z.number(),
+	name: z.string(),
+	client_name: z.string(),
+	site_name: z.string(),
+	assessor_name: z.string(),
+	engagement_start: z.string(),
+	engagement_end: z.string(),
+	notes: z.string(),
+	created_at: z.string(),
+	updated_at: z.string()
+});
+
+export type ProjectSchema = z.infer<typeof projectSchema>;
+
+export const projectSummarySchema = z.object({
+	id: z.number(),
+	name: z.string(),
+	client_name: z.string(),
+	site_name: z.string(),
+	session_count: z.number(),
+	created_at: z.string(),
+	updated_at: z.string()
+});
+
+export type ProjectSummarySchema = z.infer<typeof projectSummarySchema>;

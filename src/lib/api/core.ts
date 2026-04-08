@@ -75,3 +75,18 @@ export async function invokeValidated<T>(
 	const raw = await invokeCompat<unknown>(command, args);
 	return schema.parse(raw);
 }
+
+/**
+ * Fetch a resource endpoint and validate the response against a Zod schema.
+ *
+ * Use this for WebUI-first resource endpoints (e.g. GET /api/v1/projects).
+ * Throws ZodError on shape mismatch, surfacing contract drift at runtime.
+ */
+export async function httpValidated<T>(
+	schema: import('zod').ZodSchema<T>,
+	path: string,
+	init?: RequestInit
+): Promise<T> {
+	const raw = await httpJson<unknown>(path, init);
+	return schema.parse(raw);
+}
