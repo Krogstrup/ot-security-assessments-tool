@@ -30,7 +30,7 @@
 			layout: { name: 'grid' },
 			minZoom: 0.1,
 			maxZoom: 5,
-			wheelSensitivity: 0.3
+			wheelSensitivity: 3
 		});
 
 		cy.on('tap', 'node', (event: any) => {
