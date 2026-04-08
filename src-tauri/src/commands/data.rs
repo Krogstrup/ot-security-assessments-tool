@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 use super::{
@@ -77,6 +77,56 @@ pub struct DataCounts {
     pub connection_count: usize,
 }
 
+/// Supported sort keys for asset paging.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AssetSortBy {
+    Ip,
+    Packets,
+    Protocol,
+    Connections,
+}
+
+/// Supported sort keys for connection paging.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ConnectionSortBy {
+    Packets,
+    Bytes,
+}
+
+/// Supported sort keys for protocol statistics.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ProtocolStatsSortBy {
+    Packets,
+    Bytes,
+    Connections,
+    Devices,
+}
+
+fn paginate<T>(items: Vec<T>, page: usize, page_size: usize) -> (Vec<T>, bool) {
+    let start = page * page_size;
+    if start >= items.len() {
+        return (Vec::new(), false);
+    }
+    let has_more = start + page_size < items.len();
+    (
+        items.into_iter().skip(start).take(page_size).collect(),
+        has_more,
+    )
+}
+
+fn count_asset_connections(state: &AppState) -> Result<HashMap<String, u64>, String> {
+    let capture = read_state(&state.capture, "capture")?;
+    let mut counts: HashMap<String, u64> = HashMap::new();
+    for conn in &capture.connections {
+        *counts.entry(conn.src_ip.clone()).or_insert(0) += 1;
+        *counts.entry(conn.dst_ip.clone()).or_insert(0) += 1;
+    }
+    Ok(counts)
+}
+
 /// Get discovered assets, paginated.
 ///
 /// Parameters:
@@ -87,8 +137,16 @@ pub fn get_assets(
     state: &AppState,
     page: Option<usize>,
     page_size: Option<usize>,
-    sort_by: Option<String>,
+    sort_by: Option<AssetSortBy>,
 ) -> Result<AssetPage, String> {
+    // If sorting by connection count, read capture first to keep lock order
+    // consistent: capture -> inventory.
+    let connection_counts = if matches!(sort_by, Some(AssetSortBy::Connections)) {
+        Some(count_asset_connections(state)?)
+    } else {
+        None
+    };
+
     let inventory = read_state(&state.inventory, "inventory")?;
 
     let page = page.unwrap_or(0);
@@ -98,27 +156,32 @@ pub fn get_assets(
     let total = all_assets.len();
 
     // Sort
-    match sort_by.as_deref() {
-        Some("ip") => all_assets.sort_by(|a, b| a.ip_address.cmp(&b.ip_address)),
-        Some("packets") => all_assets.sort_by(|a, b| b.packet_count.cmp(&a.packet_count)),
-        Some("protocol") => {
+    match sort_by {
+        Some(AssetSortBy::Ip) => all_assets.sort_by(|a, b| a.ip_address.cmp(&b.ip_address)),
+        Some(AssetSortBy::Packets) => {
+            all_assets.sort_by(|a, b| b.packet_count.cmp(&a.packet_count))
+        }
+        Some(AssetSortBy::Protocol) => {
             all_assets.sort_by(|a, b| {
                 let ap = a.protocols.first().map(|s| s.as_str()).unwrap_or("");
                 let bp = b.protocols.first().map(|s| s.as_str()).unwrap_or("");
                 ap.cmp(bp)
             });
         }
+        Some(AssetSortBy::Connections) => {
+            let counts = connection_counts
+                .as_ref()
+                .expect("connection counts must be present for Connections sort");
+            all_assets.sort_by(|a, b| {
+                let ac = counts.get(a.ip_address.as_str()).copied().unwrap_or(0);
+                let bc = counts.get(b.ip_address.as_str()).copied().unwrap_or(0);
+                bc.cmp(&ac).then_with(|| a.ip_address.cmp(&b.ip_address))
+            });
+        }
         _ => {} // default insertion order
     }
 
-    // Paginate
-    let start = page * page_size;
-    let assets = if start < total {
-        all_assets.into_iter().skip(start).take(page_size).collect()
-    } else {
-        Vec::new()
-    };
-    let has_more = start + page_size < total;
+    let (assets, has_more) = paginate(all_assets, page, page_size);
 
     Ok(AssetPage {
         assets,
@@ -139,7 +202,7 @@ pub fn get_connections(
     state: &AppState,
     page: Option<usize>,
     page_size: Option<usize>,
-    sort_by: Option<String>,
+    sort_by: Option<ConnectionSortBy>,
 ) -> Result<ConnectionPage, String> {
     let capture = read_state(&state.capture, "capture")?;
 
@@ -149,27 +212,17 @@ pub fn get_connections(
     let mut all_connections = capture.connections.clone();
     let total = all_connections.len();
 
-    match sort_by.as_deref() {
-        Some("packets") => {
+    match sort_by {
+        Some(ConnectionSortBy::Packets) => {
             all_connections.sort_by(|a, b| b.packet_count.cmp(&a.packet_count));
         }
-        Some("bytes") => {
+        Some(ConnectionSortBy::Bytes) => {
             all_connections.sort_by(|a, b| b.byte_count.cmp(&a.byte_count));
         }
         _ => {}
     }
 
-    let start = page * page_size;
-    let connections = if start < total {
-        all_connections
-            .into_iter()
-            .skip(start)
-            .take(page_size)
-            .collect()
-    } else {
-        Vec::new()
-    };
-    let has_more = start + page_size < total;
+    let (connections, has_more) = paginate(all_connections, page, page_size);
 
     Ok(ConnectionPage {
         connections,
@@ -197,14 +250,27 @@ pub fn get_data_counts(state: &AppState) -> Result<DataCounts, String> {
 /// Single-pass O(n_connections): accumulates stats and unique-device sets for
 /// all protocols in one loop, avoiding the previous O(protocols × connections)
 /// double-loop.
-pub fn get_protocol_stats(state: &AppState) -> Result<Vec<ProtocolStatInfo>, String> {
+pub fn get_protocol_stats(
+    state: &AppState,
+    sort_by: Option<ProtocolStatsSortBy>,
+) -> Result<Vec<ProtocolStatInfo>, String> {
     let capture = read_state(&state.capture, "capture")?;
-    Ok(protocol_stats_from_connections(&capture.connections))
+    Ok(protocol_stats_from_connections_with_sort(
+        &capture.connections,
+        sort_by.unwrap_or(ProtocolStatsSortBy::Packets),
+    ))
 }
 
 /// Shared protocol-stat computation used by both API reads and export paths.
 pub(crate) fn protocol_stats_from_connections(
     connections: &[ConnectionInfo],
+) -> Vec<ProtocolStatInfo> {
+    protocol_stats_from_connections_with_sort(connections, ProtocolStatsSortBy::Packets)
+}
+
+pub(crate) fn protocol_stats_from_connections_with_sort(
+    connections: &[ConnectionInfo],
+    sort_by: ProtocolStatsSortBy,
 ) -> Vec<ProtocolStatInfo> {
     let mut stats: HashMap<String, ProtocolStatInfo> = HashMap::new();
     // Track unique devices per protocol in the same pass.
@@ -237,9 +303,21 @@ pub(crate) fn protocol_stats_from_connections(
     }
 
     let mut result: Vec<ProtocolStatInfo> = stats.into_values().collect();
-    result.sort_by(|a, b| b.packet_count.cmp(&a.packet_count));
-
+    sort_protocol_stats(&mut result, sort_by);
     result
+}
+
+pub(crate) fn sort_protocol_stats(stats: &mut [ProtocolStatInfo], sort_by: ProtocolStatsSortBy) {
+    match sort_by {
+        ProtocolStatsSortBy::Packets => stats.sort_by(|a, b| b.packet_count.cmp(&a.packet_count)),
+        ProtocolStatsSortBy::Bytes => stats.sort_by(|a, b| b.byte_count.cmp(&a.byte_count)),
+        ProtocolStatsSortBy::Connections => {
+            stats.sort_by(|a, b| b.connection_count.cmp(&a.connection_count))
+        }
+        ProtocolStatsSortBy::Devices => {
+            stats.sort_by(|a, b| b.unique_devices.cmp(&a.unique_devices))
+        }
+    }
 }
 
 /// Get packet summaries for a specific connection (for the connection tree detail view).
