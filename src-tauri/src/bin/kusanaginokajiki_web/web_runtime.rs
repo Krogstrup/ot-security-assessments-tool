@@ -3,6 +3,7 @@ use super::SharedState;
 use crate::application::services::capture_pipeline_commit::commit_capture_pipeline_state;
 use crate::commands::processor::PacketProcessor;
 use axum::Json;
+use gm_constants::LIVE_CAPTURE_BATCH_SIZE;
 use gm_capture::{LiveCaptureConfig, ParsedPacket};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -30,7 +31,7 @@ fn spawn_processing_thread_headless(
             match rx.recv_timeout(Duration::from_millis(50)) {
                 Ok(packet) => {
                     batch.push(packet);
-                    if batch.len() >= 500 || last_flush.elapsed() >= flush_interval {
+                    if batch.len() >= LIVE_CAPTURE_BATCH_SIZE || last_flush.elapsed() >= flush_interval {
                         flush_batch_headless(&state, &mut processor, &mut batch);
                         last_flush = Instant::now();
                     }

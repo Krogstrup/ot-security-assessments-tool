@@ -7,29 +7,19 @@
 use std::collections::{HashMap, HashSet};
 
 use gm_analysis::{
-    AnalysisInput, AssetSnapshot, BacnetSnapshot, CaptureContext, ConnectionSnapshot,
-    DeepParseSnapshot, Dnp3Snapshot, EnipSnapshot, FcSnapshot, Iec104Snapshot, ModbusSnapshot,
-    PollingSnapshot, ProfinetDcpSnapshot, RelationshipSnapshot, S7Snapshot,
+    AnalysisInput, BacnetSnapshot, CaptureContext, DeepParseSnapshot, Dnp3Snapshot, EnipSnapshot,
+    FcSnapshot, Iec104Snapshot, ModbusSnapshot, PollingSnapshot, ProfinetDcpSnapshot,
+    RelationshipSnapshot, S7Snapshot,
 };
+
+use crate::application::mappers::snapshots::{asset_snapshots, connection_snapshots};
 
 use super::{AnalysisState, CaptureState, InventoryState};
 
 /// Build AnalysisInput from capture + inventory domain slices.
 pub fn build_analysis_input(capture: &CaptureState, inventory: &InventoryState) -> AnalysisInput {
     let assets = asset_snapshots(inventory);
-
-    let connections: Vec<ConnectionSnapshot> = capture
-        .connections
-        .iter()
-        .map(|c| ConnectionSnapshot {
-            src_ip: c.src_ip.clone(),
-            dst_ip: c.dst_ip.clone(),
-            src_port: c.src_port,
-            dst_port: c.dst_port,
-            protocol: c.protocol.clone(),
-            packet_count: c.packet_count,
-        })
-        .collect();
+    let connections = connection_snapshots(capture);
 
     let mut deep_parse = std::collections::HashMap::new();
     for (ip, dp) in &inventory.deep_parse_info {
@@ -141,24 +131,6 @@ pub fn build_analysis_input(capture: &CaptureState, inventory: &InventoryState) 
         connections,
         deep_parse,
     }
-}
-
-pub(super) fn asset_snapshots(inventory: &InventoryState) -> Vec<AssetSnapshot> {
-    inventory
-        .assets
-        .iter()
-        .map(|a| AssetSnapshot {
-            ip_address: a.ip_address.clone(),
-            device_type: a.device_type.clone(),
-            protocols: a.protocols.clone(),
-            purdue_level: a.purdue_level,
-            is_public_ip: a.is_public_ip,
-            tags: a.tags.clone(),
-            vendor: a.vendor.clone(),
-            hostname: a.hostname.clone(),
-            product_family: a.product_family.clone(),
-        })
-        .collect()
 }
 
 /// Build a [`CaptureContext`] from domain state slices for Phase 14C detections.

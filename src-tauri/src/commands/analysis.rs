@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 
+use gm_constants::MAX_ANOMALY_RESULTS;
 use gm_analysis::{
     assess_switch_security, detect_malware_patterns, generate_compliance_report, AnalysisResult,
     AnomalyScore, ComplianceMapping, CredentialChecker, CriticalityAssessment, CveMatch,
@@ -13,8 +14,10 @@ use gm_analysis::{
     SwitchSecurityFinding, SwitchSecurityInput,
 };
 
+use crate::application::mappers::snapshots::asset_snapshots;
+
 use super::{
-    analysis_builders::{asset_snapshots, build_analysis_input, build_capture_context},
+    analysis_builders::{build_analysis_input, build_capture_context},
     support::{read_state, write_state},
     AnalysisState, AppState, InventoryState,
 };
@@ -80,8 +83,6 @@ fn build_malware_deep_parse(
 
 /// Maximum findings returned by get_findings — nobody reads 50 000 findings.
 const MAX_FINDINGS: usize = 1_000;
-/// Maximum anomaly scores returned by get_anomalies.
-const MAX_ANOMALIES: usize = 500;
 
 fn persist_analysis_result(
     result: &AnalysisResult,
@@ -142,13 +143,13 @@ pub fn get_purdue_assignments(state: &AppState) -> Result<Vec<PurdueAssignment>,
     Ok(analysis.purdue_assignments.clone())
 }
 
-/// Get anomaly scores from the last analysis run (capped at MAX_ANOMALIES = 500).
+/// Get anomaly scores from the last analysis run (capped at [`gm_constants::MAX_ANOMALY_RESULTS`]).
 pub fn get_anomalies(state: &AppState) -> Result<Vec<AnomalyScore>, String> {
     let analysis = read_state(&state.analysis, "analysis")?;
-    if analysis.anomalies.len() <= MAX_ANOMALIES {
+    if analysis.anomalies.len() <= MAX_ANOMALY_RESULTS {
         return Ok(analysis.anomalies.clone());
     }
-    Ok(analysis.anomalies[..MAX_ANOMALIES].to_vec())
+    Ok(analysis.anomalies[..MAX_ANOMALY_RESULTS].to_vec())
 }
 
 /// Get credential warnings for all discovered devices.
