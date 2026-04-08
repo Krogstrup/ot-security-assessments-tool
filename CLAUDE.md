@@ -7,6 +7,7 @@
 You are operating on Kusanagi Kajiki with a **WebUI + API-first** product direction.
 
 Primary goals for every task:
+
 1. Preserve/advance architecture boundaries.
 2. Prefer incremental, reviewable changes.
 3. Keep responses token-efficient by default.
@@ -28,6 +29,7 @@ Reference: `WEBUI_ONLY_MIGRATION_PLAN.md`.
 ## 3) Source-of-Truth Docs
 
 Use these docs in order:
+
 1. `AGENTS.md` (behavioral policy + token rules)
 2. `SYSTEM_ARCHITECTURE_REVIEW.md` (cross-system target + roadmap)
 3. `ARCHITECTURE_REVIEW.md` (backend details)
@@ -41,6 +43,7 @@ If docs conflict, follow newest product-direction constraint (WebUI-first).
 ## 4) Architecture Map
 
 ### Backend target layering
+
 - `interface` (transport adapters)
 - `application` (use cases/orchestration)
 - `domain` (business rules/models)
@@ -49,6 +52,7 @@ If docs conflict, follow newest product-direction constraint (WebUI-first).
 Rule: inner layers must not depend on outer layers.
 
 ### Frontend target layering
+
 - `ui` (presentational components)
 - `application` (feature orchestration)
 - `state` (actions/selectors/store facades)
@@ -66,6 +70,7 @@ Rule: avoid API orchestration directly inside large `.svelte` views.
 Use when task is ambiguous or large.
 
 Output format:
+
 1. Objective
 2. Assumptions
 3. Risks
@@ -73,6 +78,7 @@ Output format:
 5. Validation strategy
 
 Planning checklist:
+
 - [ ] Scope backend/frontend/both
 - [ ] Identify affected layers
 - [ ] Mention compatibility impact
@@ -83,12 +89,14 @@ Planning checklist:
 Use for implementation.
 
 Required behavior:
+
 - Keep diffs focused and modular.
 - Prefer extracting functions/services over expanding god files.
 - If touching contracts, update both sides (backend DTO + frontend type/schema).
 - If task is large, deliver first safe slice and note follow-up slices.
 
 Coding checklist:
+
 - [ ] Boundary respected
 - [ ] Naming clear and local
 - [ ] Errors handled consistently
@@ -100,6 +108,7 @@ Coding checklist:
 Use for PR review, audit, or “what’s wrong” tasks.
 
 Review output sections:
+
 1. Correctness
 2. Architecture fit
 3. Coupling risks
@@ -107,6 +116,7 @@ Review output sections:
 5. Suggested next diff (smallest high-impact)
 
 Severity labels:
+
 - `Critical` (must fix)
 - `Major` (should fix before merge)
 - `Minor` (can follow-up)
@@ -127,6 +137,7 @@ When asked to “generate backend/frontend/agents automatically,” simulate thi
    - Runs checks, validates contract alignment, reports risks.
 
 For each stage, emit:
+
 - planned files,
 - expected outputs,
 - pass/fail checks,
@@ -137,6 +148,7 @@ For each stage, emit:
 ## 7) Contract & API Discipline
 
 For any API-affecting change, do all of the following:
+
 - Update backend DTO/handler.
 - Update frontend type(s).
 - Update runtime schema validation where applicable.
@@ -144,6 +156,7 @@ For any API-affecting change, do all of the following:
 - Document breaking-change risk in PR summary.
 
 Avoid:
+
 - stringly-typed new command coupling when resource endpoint is viable,
 - silent shape drift without validation.
 
@@ -165,6 +178,7 @@ Run only commands relevant to changed areas.
 ## 9) Token Optimization Rules (Mandatory)
 
 Default brevity rules:
+
 - Use bullets, not long prose.
 - Don’t restate prompt.
 - Don’t print unchanged code.
@@ -172,6 +186,7 @@ Default brevity rules:
 - Provide deep detail only when asked.
 
 Default final response format:
+
 1. Summary
 2. Files changed
 3. Checks run
@@ -182,6 +197,7 @@ Default final response format:
 ## 10) Safe Change Strategy
 
 Preferred order for medium/large refactors:
+
 1. Add boundary abstractions (types/interfaces/helpers)
 2. Move logic behind abstraction
 3. Update call sites
@@ -195,6 +211,7 @@ Never do in one risky jump if incremental path exists.
 ## 11) WebUI-Only Migration Execution Rules
 
 When task intersects migration:
+
 - Map desktop invoke usage to target web resource endpoint.
 - Keep compatibility path until parity is verified.
 - Mark deprecated desktop behavior in docs/notes.
@@ -207,6 +224,7 @@ Use `WEBUI_ONLY_MIGRATION_PLAN.md` phases (A→D).
 ## 12) Done Definition
 
 A task is done when:
+
 - requested behavior is implemented,
 - architecture boundaries are not regressed,
 - relevant checks pass,

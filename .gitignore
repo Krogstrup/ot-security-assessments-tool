@@ -43,24 +43,15 @@ Desktop.ini
 
 # Development prompt files (Claude Code instructions)
 PROMPT-*.md
+.codex
 
 # Generated guide
-generate_guide.py
 Kusanagi-Kajiki-Guide.pdf
 
 # Claude context files
-CLAUDE.md
-CLAUDE.local.md
-CLAUDE_local.md
-CLAUDE.local
+#CLAUDE.md
+#CLAUDE.local.md
+#CLAUDE.local
 .claude/
 
-# Development prompt files
-PROMPT-*.md
-UPDATE_README.md
-.claude/
-generate_guide.py
-Kusanagi-Kajiki-Guide.pdf
-*:Zone.Identifier
-*Zone.Identifier
-docs/
+
