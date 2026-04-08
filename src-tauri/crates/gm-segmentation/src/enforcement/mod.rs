@@ -16,14 +16,27 @@
 //! - Suricata SIDs: 9000001+.
 //! - Vendor-aware remarks when PolicyGroup names encode a vendor suffix.
 
+mod cisco_asa;
+mod cisco_ios;
+mod generic_table;
+mod json_policy;
+mod suricata;
+pub(super) mod vendor_context;
+
 use std::collections::HashMap;
 
 use crate::{
-    CommunicationMatrix, EnforcementConfig, EnforcementFormat, PolicyGroup, Zone, ZoneModel,
-    ZonePairPolicy,
+    CommunicationMatrix, EnforcementConfig, EnforcementFormat, PolicyGroup, ZoneModel,
 };
 
-// ── Public API ──────────────────────────────────────────────────────────────
+use cisco_asa::gen_cisco_asa;
+use cisco_ios::gen_cisco_ios;
+use generic_table::gen_generic_table;
+use json_policy::gen_json_policy;
+use suricata::gen_suricata;
+use vendor_context::build_zone_vendors;
+
+// ── Public API ───────────────────────────────────────────────────────────────
 
 /// Generate enforcement configurations in all five formats.
 ///
@@ -155,513 +168,23 @@ pub fn protocol_to_transport(protocol: &str, port: Option<u16>) -> &'static str 
     }
 }
 
-// ── Vendor-aware context ────────────────────────────────────────────────────
-
-/// Return vendor-specific port context for known OT vendor + port combinations.
-///
-/// Used to enrich enforcement config remarks with protocol-level context that
-/// helps network engineers understand what each firewall rule actually permits.
-fn vendor_port_context(vendor: &str, port: u16) -> Option<&'static str> {
-    let v = vendor.to_lowercase();
-    if v.contains("siemens") {
-        match port {
-            102 => return Some("S7comm PLC communication"),
-            443 => return Some("SCALANCE web management"),
-            161 => return Some("SCALANCE SNMP monitoring"),
-            34962 => return Some("PROFINET IO"),
-            _ => {}
-        }
-    }
-    if v.contains("rockwell") {
-        match port {
-            44818 => return Some("EtherNet/IP explicit messaging"),
-            2222 => return Some("EtherNet/IP I/O"),
-            _ => {}
-        }
-    }
-    if v.contains("schneider") && port == 502 {
-        return Some("Modbus TCP");
-    }
-    if v.contains("abb") && port == 502 {
-        return Some("Modbus TCP");
-    }
-    if v.contains("honeywell") && port == 502 {
-        return Some("Modbus TCP");
-    }
-    None
-}
-
-/// Extract the vendor suffix from a PolicyGroup auto-generated name.
-///
-/// Group names follow the pattern `L{N}-{role}` (no vendor) or
-/// `L{N}-{role}-{vendor}` (with vendor split). Returns `Some(vendor)` when
-/// the name has the three-segment form starting with `L`.
-fn extract_vendor_from_group_name(name: &str) -> Option<&str> {
-    let parts: Vec<&str> = name.splitn(3, '-').collect();
-    if parts.len() == 3 && parts[0].starts_with('L') {
-        Some(parts[2])
-    } else {
-        None
-    }
-}
-
-/// Build a mapping from zone ID → list of vendor names extracted from the
-/// PolicyGroups assigned to each zone.
-fn build_zone_vendors(zones: &[Zone], groups: &[PolicyGroup]) -> HashMap<String, Vec<String>> {
-    let group_by_id: HashMap<&str, &PolicyGroup> =
-        groups.iter().map(|g| (g.id.as_str(), g)).collect();
-
-    let mut zone_vendors: HashMap<String, Vec<String>> = HashMap::new();
-    for zone in zones {
-        let mut vendors: Vec<String> = Vec::new();
-        for gid in &zone.policy_group_ids {
-            if let Some(group) = group_by_id.get(gid.as_str()) {
-                if let Some(vendor) = extract_vendor_from_group_name(&group.name) {
-                    if !vendors.iter().any(|v| v == vendor) {
-                        vendors.push(vendor.to_string());
-                    }
-                }
-            }
-        }
-        zone_vendors.insert(zone.id.clone(), vendors);
-    }
-    zone_vendors
-}
-
-/// Build a vendor context remark for a rule between two zones on a given port.
-///
-/// Checks both source and destination zone vendors against the port and returns
-/// a combined remark string, or `None` if no vendor context applies.
-fn vendor_remark_for_rule(
-    zone_vendors: &HashMap<String, Vec<String>>,
-    src_zone_id: &str,
-    dst_zone_id: &str,
-    port: Option<u16>,
-) -> Option<String> {
-    let port = port?;
-    let empty = Vec::new();
-    let src_vendors = zone_vendors.get(src_zone_id).unwrap_or(&empty);
-    let dst_vendors = zone_vendors.get(dst_zone_id).unwrap_or(&empty);
-
-    let mut remarks: Vec<String> = Vec::new();
-    for vendor in src_vendors.iter().chain(dst_vendors.iter()) {
-        if let Some(context) = vendor_port_context(vendor, port) {
-            let remark = format!("{vendor} — {context}");
-            if !remarks.contains(&remark) {
-                remarks.push(remark);
-            }
-        }
-    }
-
-    if remarks.is_empty() {
-        None
-    } else {
-        Some(remarks.join("; "))
-    }
-}
-
-// ── Format generators ────────────────────────────────────────────────────────
-
-/// Cisco IOS Extended ACL format.
-///
-/// One ACL per zone pair, named `ACL-{SRC}-TO-{DST}` (sanitized, max 64 chars).
-/// Emits `permit` lines for each rule and a `deny ip any any log` trailer.
-fn gen_cisco_ios(
-    pairs: &[ZonePairPolicy],
-    zone_names: &HashMap<String, String>,
-    zone_vendors: &HashMap<String, Vec<String>>,
-) -> EnforcementConfig {
-    let mut out = String::new();
-    out.push_str("! Generated by Kusanagi Kajiki microsegmentation analysis\n");
-    out.push_str("! Format: Cisco IOS Extended ACL\n");
-    out.push_str("! Note: Replace 'any' with actual IP ranges/subnets before deployment.\n");
-    out.push_str("!\n");
-
-    let mut rule_count = 0usize;
-
-    for pair in pairs {
-        let src_name = zone_name(zone_names, &pair.src_zone_id);
-        let dst_name = zone_name(zone_names, &pair.dst_zone_id);
-        let acl_name = build_acl_name(src_name, dst_name);
-
-        out.push_str(&format!("ip access-list extended {acl_name}\n"));
-        out.push_str(&format!(" ! Remark: {src_name} → {dst_name}\n"));
-
-        for rule in &pair.rules {
-            let transport = protocol_to_transport(&rule.protocol, rule.dst_port);
-            let risk_str = format!("{:?}", rule.risk).to_lowercase();
-
-            // Vendor-aware remark (e.g., "Siemens — S7comm PLC communication").
-            if let Some(vendor_ctx) = vendor_remark_for_rule(
-                zone_vendors,
-                &pair.src_zone_id,
-                &pair.dst_zone_id,
-                rule.dst_port,
-            ) {
-                out.push_str(&format!(" ! Remark: {vendor_ctx}\n"));
-            }
-
-            // Truncate justification to fit within IOS remark line limit.
-            let just: String = rule.justification.chars().take(80).collect();
-            out.push_str(&format!(" ! Remark: [{risk_str}] {just}\n"));
-            if let Some(port) = rule.dst_port {
-                out.push_str(&format!(" permit {transport} any any eq {port}\n"));
-            } else {
-                out.push_str(&format!(" permit {transport} any any\n"));
-            }
-            rule_count += 1;
-        }
-
-        out.push_str(" deny ip any any log\n");
-        out.push_str("!\n");
-    }
-
-    if pairs.is_empty() {
-        out.push_str("! No zone pairs defined — default deny applies to all traffic.\n");
-        out.push_str("!\n");
-    }
-
-    EnforcementConfig::new(EnforcementFormat::CiscoIosAcl, out, rule_count)
-}
-
-/// Cisco ASA Extended ACL format.
-///
-/// Zones with more than 3 assets use `object-group network` entries.
-/// Smaller zones fall back to `any`.
-fn gen_cisco_asa(
-    pairs: &[ZonePairPolicy],
-    zone_names: &HashMap<String, String>,
-    zones: &[Zone],
-    zone_vendors: &HashMap<String, Vec<String>>,
-) -> EnforcementConfig {
-    let zone_by_id: HashMap<&str, &Zone> = zones.iter().map(|z| (z.id.as_str(), z)).collect();
-
-    let mut out = String::new();
-    out.push_str("! Generated by Kusanagi Kajiki microsegmentation analysis\n");
-    out.push_str("! Format: Cisco ASA Extended ACL\n");
-    out.push_str(
-        "! Note: Populate object-group members with actual IP addresses before deployment.\n",
-    );
-    out.push_str("!\n");
-
-    let mut rule_count = 0usize;
-
-    // Collect unique zone IDs referenced by any pair (preserving first-seen order).
-    let mut zone_ids_seen: Vec<&str> = Vec::new();
-    for pair in pairs {
-        for zid in [pair.src_zone_id.as_str(), pair.dst_zone_id.as_str()] {
-            if !zone_ids_seen.contains(&zid) {
-                zone_ids_seen.push(zid);
-            }
-        }
-    }
-
-    // Emit object-groups for zones with more than 3 assets.
-    for &zone_id in &zone_ids_seen {
-        let asset_count = zone_by_id.get(zone_id).map(|z| z.asset_count).unwrap_or(0);
-        if asset_count > 3 {
-            let name = zone_names
-                .get(zone_id)
-                .map(|s| s.as_str())
-                .unwrap_or(zone_id);
-            let obj_name: String = format!("OBJ-{}", sanitize_acl_name(name))
-                .chars()
-                .take(64)
-                .collect();
-            out.push_str(&format!("object-group network {obj_name}\n"));
-            out.push_str(&format!(
-                " description {name} ({asset_count} assets - add member ip entries)\n"
-            ));
-            out.push_str("!\n");
-        }
-    }
-
-    // Emit ACL rules per zone pair.
-    for pair in pairs {
-        let src_name = zone_name(zone_names, &pair.src_zone_id);
-        let dst_name = zone_name(zone_names, &pair.dst_zone_id);
-        let acl_name = build_acl_name(src_name, dst_name);
-
-        let src_assets = zone_by_id
-            .get(pair.src_zone_id.as_str())
-            .map(|z| z.asset_count)
-            .unwrap_or(0);
-        let dst_assets = zone_by_id
-            .get(pair.dst_zone_id.as_str())
-            .map(|z| z.asset_count)
-            .unwrap_or(0);
-
-        let src_san: String = sanitize_acl_name(src_name).chars().take(28).collect();
-        let dst_san: String = sanitize_acl_name(dst_name).chars().take(28).collect();
-
-        let src_clause = if src_assets > 3 {
-            format!("object-group OBJ-{src_san}")
-        } else {
-            "any".to_string()
-        };
-        let dst_clause = if dst_assets > 3 {
-            format!("object-group OBJ-{dst_san}")
-        } else {
-            "any".to_string()
-        };
-
-        out.push_str(&format!("! Zone pair: {src_name} → {dst_name}\n"));
-
-        for rule in &pair.rules {
-            let transport = protocol_to_transport(&rule.protocol, rule.dst_port);
-
-            // Vendor-aware remark.
-            if let Some(vendor_ctx) = vendor_remark_for_rule(
-                zone_vendors,
-                &pair.src_zone_id,
-                &pair.dst_zone_id,
-                rule.dst_port,
-            ) {
-                out.push_str(&format!("! {vendor_ctx}\n"));
-            }
-
-            if let Some(port) = rule.dst_port {
-                out.push_str(&format!(
-                    "access-list {acl_name} extended permit {transport} \
-                     {src_clause} {dst_clause} eq {port}\n"
-                ));
-            } else {
-                out.push_str(&format!(
-                    "access-list {acl_name} extended permit {transport} \
-                     {src_clause} {dst_clause}\n"
-                ));
-            }
-            rule_count += 1;
-        }
-
-        out.push_str(&format!(
-            "access-list {acl_name} extended deny ip any any log\n"
-        ));
-        out.push_str(&format!("access-group {acl_name} in interface <outside>\n"));
-        out.push_str("!\n");
-    }
-
-    if pairs.is_empty() {
-        out.push_str("! No zone pairs defined.\n");
-    }
-
-    EnforcementConfig::new(EnforcementFormat::CiscoAsaAcl, out, rule_count)
-}
-
-/// Generic Firewall Table — tab-separated, one rule per row.
-///
-/// Columns: Action | Src Zone | Src Net | Dst Zone | Dst Net | Proto | Port | Dir | Risk | Justification
-fn gen_generic_table(
-    pairs: &[ZonePairPolicy],
-    zone_names: &HashMap<String, String>,
-    zone_vendors: &HashMap<String, Vec<String>>,
-) -> EnforcementConfig {
-    let mut out = String::new();
-    out.push_str(
-        "Action\tSrc Zone\tSrc Net\tDst Zone\tDst Net\tProto\tPort\tDir\tRisk\tJustification\n",
-    );
-
-    let mut rule_count = 0usize;
-
-    for pair in pairs {
-        let src_name = zone_name(zone_names, &pair.src_zone_id);
-        let dst_name = zone_name(zone_names, &pair.dst_zone_id);
-
-        for rule in &pair.rules {
-            let transport = protocol_to_transport(&rule.protocol, rule.dst_port);
-            let port_str = rule
-                .dst_port
-                .map(|p| p.to_string())
-                .unwrap_or_else(|| "any".to_string());
-            let risk_str = format!("{:?}", rule.risk).to_lowercase();
-            // Strip tabs to preserve TSV structure.
-            let mut just = rule.justification.replace('\t', " ");
-
-            // Append vendor context to justification.
-            if let Some(vendor_ctx) = vendor_remark_for_rule(
-                zone_vendors,
-                &pair.src_zone_id,
-                &pair.dst_zone_id,
-                rule.dst_port,
-            ) {
-                just = format!("{just} [{vendor_ctx}]");
-            }
-
-            out.push_str(&format!(
-                "ALLOW\t{src_name}\tany\t{dst_name}\tany\t{transport}\t{port_str}\t→\t{risk_str}\t{just}\n"
-            ));
-            rule_count += 1;
-        }
-    }
-
-    // Default deny row.
-    out.push_str("DENY\t*\t*\t*\t*\t*\t*\t*\t—\tDefault deny\n");
-
-    EnforcementConfig::new(EnforcementFormat::GenericFirewallTable, out, rule_count)
-}
-
-/// Suricata IDS/IPS rules — `pass`/`drop` syntax with SIDs starting at 9000001.
-fn gen_suricata(
-    pairs: &[ZonePairPolicy],
-    zone_names: &HashMap<String, String>,
-    zone_vendors: &HashMap<String, Vec<String>>,
-) -> EnforcementConfig {
-    let mut out = String::new();
-    out.push_str("# Generated by Kusanagi Kajiki microsegmentation analysis\n");
-    out.push_str("# Format: Suricata IDS/IPS rules\n");
-    out.push_str("# Place in /etc/suricata/rules/knk-policy.rules and enable in suricata.yaml\n");
-    out.push_str("#\n");
-
-    let mut sid: u32 = 9_000_001;
-    let mut rule_count = 0usize;
-
-    for pair in pairs {
-        let src_name = zone_name(zone_names, &pair.src_zone_id);
-        let dst_name = zone_name(zone_names, &pair.dst_zone_id);
-
-        out.push_str(&format!("# Zone pair: {src_name} → {dst_name}\n"));
-
-        for rule in &pair.rules {
-            let transport = protocol_to_transport(&rule.protocol, rule.dst_port);
-            let port_str = rule
-                .dst_port
-                .map(|p| p.to_string())
-                .unwrap_or_else(|| "any".to_string());
-            let risk_str = format!("{:?}", rule.risk).to_lowercase();
-
-            // Include vendor context in msg if available.
-            let vendor_suffix = vendor_remark_for_rule(
-                zone_vendors,
-                &pair.src_zone_id,
-                &pair.dst_zone_id,
-                rule.dst_port,
-            )
-            .map(|ctx| format!(" ({ctx})"))
-            .unwrap_or_default();
-
-            let msg = sanitize_suricata_msg(&format!(
-                "KNK-ALLOW: {}/{} {} to {} [{}]{}",
-                rule.protocol, port_str, src_name, dst_name, risk_str, vendor_suffix
-            ));
-
-            out.push_str(&format!(
-                "pass {transport} any any -> any {port_str} \
-                 (msg:\"{msg}\"; sid:{sid}; rev:1;)\n"
-            ));
-            sid += 1;
-            rule_count += 1;
-        }
-    }
-
-    // Default drop rule — catches everything not explicitly passed above.
-    out.push_str("#\n");
-    out.push_str(&format!(
-        "drop ip any any -> any any \
-         (msg:\"KNK-DENY: No conduit - default deny all unmatched traffic\"; sid:{sid}; rev:1;)\n"
-    ));
-
-    EnforcementConfig::new(EnforcementFormat::SuricataRules, out, rule_count)
-}
-
-/// JSON Policy — structured `{metadata, zones, conduits, rules, default_action}`.
-fn gen_json_policy(
-    matrix: &CommunicationMatrix,
-    zone_model: &ZoneModel,
-    zone_vendors: &HashMap<String, Vec<String>>,
-) -> EnforcementConfig {
-    let zones_json: Vec<serde_json::Value> = zone_model
-        .zones
-        .iter()
-        .map(|z| {
-            serde_json::json!({
-                "id": z.id,
-                "name": z.name,
-                "purdue_levels": z.purdue_levels,
-                "asset_count": z.asset_count,
-                "security_level": format!("{:?}", z.security_level).to_lowercase()
-            })
-        })
-        .collect();
-
-    let conduits_json: Vec<serde_json::Value> = zone_model
-        .conduits
-        .iter()
-        .map(|c| {
-            serde_json::json!({
-                "id": c.id,
-                "src_zone_id": c.src_zone_id,
-                "dst_zone_id": c.dst_zone_id,
-                "cross_purdue_risk": c.cross_purdue_risk
-            })
-        })
-        .collect();
-
-    let rules_json: Vec<serde_json::Value> = matrix
-        .zone_pairs
-        .iter()
-        .flat_map(|p| {
-            p.rules.iter().map(move |r| {
-                let vendor_context = vendor_remark_for_rule(
-                    zone_vendors,
-                    &p.src_zone_id,
-                    &p.dst_zone_id,
-                    r.dst_port,
-                )
-                .unwrap_or_default();
-
-                serde_json::json!({
-                    "src_zone_id": p.src_zone_id,
-                    "dst_zone_id": p.dst_zone_id,
-                    "protocol": r.protocol,
-                    "dst_port": r.dst_port,
-                    "risk": format!("{:?}", r.risk).to_lowercase(),
-                    "packet_count": r.packet_count,
-                    "justification": r.justification,
-                    "vendor_context": vendor_context
-                })
-            })
-        })
-        .collect();
-
-    let rule_count = rules_json.len();
-
-    let policy = serde_json::json!({
-        "metadata": {
-            "generated_by": "Kusanagi Kajiki",
-            "format": "json_policy",
-            "coverage_percent": matrix.coverage_percent,
-            "zone_score": zone_model.zone_score
-        },
-        "zones": zones_json,
-        "conduits": conduits_json,
-        "rules": rules_json,
-        "default_action": matrix.default_action,
-        "recommendations": zone_model.recommendations
-    });
-
-    let content = serde_json::to_string_pretty(&policy)
-        .unwrap_or_else(|e| format!("{{\"error\": \"serialization failed: {e}\"}}"));
-
-    EnforcementConfig::new(EnforcementFormat::JsonPolicy, content, rule_count)
-}
-
-// ── Private helpers ───────────────────────────────────────────────────────────
+// ── Private helpers ──────────────────────────────────────────────────────────
 
 /// Look up a zone display name; fall back to the raw zone ID.
-fn zone_name<'a>(zone_names: &'a HashMap<String, String>, id: &'a str) -> &'a str {
+pub(super) fn zone_name<'a>(zone_names: &'a HashMap<String, String>, id: &'a str) -> &'a str {
     zone_names.get(id).map(|s| s.as_str()).unwrap_or(id)
 }
 
 /// Build a sanitized Cisco ACL name from two zone display names.
 /// Format: `ACL-{SRC_28}-TO-{DST_28}`, total ≤ 64 characters.
-fn build_acl_name(src_name: &str, dst_name: &str) -> String {
+pub(super) fn build_acl_name(src_name: &str, dst_name: &str) -> String {
     let src: String = sanitize_acl_name(src_name).chars().take(28).collect();
     let dst: String = sanitize_acl_name(dst_name).chars().take(28).collect();
     format!("ACL-{src}-TO-{dst}")
 }
 
 /// Strip characters that would break Suricata rule syntax (`"` and `;`).
-fn sanitize_suricata_msg(s: &str) -> String {
+pub(super) fn sanitize_suricata_msg(s: &str) -> String {
     s.chars()
         .filter(|&c| c != '"' && c != ';')
         .take(200)
@@ -1084,6 +607,8 @@ mod tests {
 
     #[test]
     fn test_vendor_port_context() {
+        use super::vendor_context::vendor_port_context;
+
         // Known combinations.
         assert_eq!(
             vendor_port_context("Siemens", 102),

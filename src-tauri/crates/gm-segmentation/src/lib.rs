@@ -18,6 +18,7 @@ pub mod error;
 pub mod identity_groups;
 pub mod matrix;
 pub mod simulation;
+pub mod thresholds;
 pub mod zones;
 
 pub use enforcement::build_enforcement_config;

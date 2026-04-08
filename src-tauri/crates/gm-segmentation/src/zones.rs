@@ -374,26 +374,9 @@ fn ensure_dmz_zone(
     // Check for L1↔L4 traffic with no DMZ → recommend adding one.
     let ip_to_zone = build_ip_to_zone_map(zones, groups);
 
-    let l1_ips: HashSet<&str> = groups
-        .iter()
-        .filter(|g| matches!(g.purdue_level, Some(0) | Some(1)))
-        .flat_map(|g| g.member_ips.iter().map(|ip| ip.as_str()))
-        .collect();
-
-    let l4_ips: HashSet<&str> = groups
-        .iter()
-        .filter(|g| matches!(g.purdue_level, Some(l) if l >= 4))
-        .flat_map(|g| g.member_ips.iter().map(|ip| ip.as_str()))
-        .collect();
-
-    let has_l1_l4_traffic = input.connections.iter().any(|c| {
-        (l1_ips.contains(c.src_ip.as_str()) && l4_ips.contains(c.dst_ip.as_str()))
-            || (l4_ips.contains(c.src_ip.as_str()) && l1_ips.contains(c.dst_ip.as_str()))
-    });
-
     let final_has_dmz = zones.iter().any(|z| z.name.contains("DMZ"));
 
-    if has_l1_l4_traffic && !final_has_dmz {
+    if has_l1_l4_direct_traffic(groups, &input.connections) && !final_has_dmz {
         recommendations.push(
             "CRITICAL: Direct L1↔L4 traffic detected with no DMZ zone. \
              Add a DMZ (L3.5) between Control and Enterprise zones to meet IEC 62443-3-3 SL2."
@@ -428,7 +411,7 @@ fn detect_flat_network(
     let total = input.assets.len();
     let max_on_same_subnet = subnet_counts.values().copied().max().unwrap_or(0);
 
-    if max_on_same_subnet * 100 / total.max(1) > 80 {
+    if max_on_same_subnet * 100 / total.max(1) > crate::thresholds::FLAT_NETWORK_SUBNET_PERCENT {
         // >80% same /24 — check for L1↔L4 traffic.
         let l1_ips: HashSet<&str> = groups
             .iter()
@@ -620,6 +603,60 @@ fn build_conduits(
     }
 
     conduits
+}
+
+// ── Shared helpers ────────────────────────────────────────────────────────────
+
+/// True when any observed connection flows directly between an L0/L1 device and
+/// an L4+ device (skipping the supervisory/operations layers).
+///
+/// Used by both [`ensure_dmz_zone`] and [`detect_flat_network`] to avoid
+/// repeating the same IP-set construction and connection scan.
+fn has_l1_l4_direct_traffic(
+    groups: &[PolicyGroup],
+    connections: &[crate::ObservedConnection],
+) -> bool {
+    let l1_ips: HashSet<&str> = groups
+        .iter()
+        .filter(|g| matches!(g.purdue_level, Some(0) | Some(1)))
+        .flat_map(|g| g.member_ips.iter().map(|ip| ip.as_str()))
+        .collect();
+
+    let l4_ips: HashSet<&str> = groups
+        .iter()
+        .filter(|g| matches!(g.purdue_level, Some(l) if l >= 4))
+        .flat_map(|g| g.member_ips.iter().map(|ip| ip.as_str()))
+        .collect();
+
+    connections.iter().any(|c| {
+        (l1_ips.contains(c.src_ip.as_str()) && l4_ips.contains(c.dst_ip.as_str()))
+            || (l4_ips.contains(c.src_ip.as_str()) && l1_ips.contains(c.dst_ip.as_str()))
+    })
+}
+
+/// Deduplicate conduit rules by `(protocol, dst_port)`, merging boolean flags
+/// and collecting unique ATT&CK technique IDs.
+fn dedup_conduit_rules(rules: Vec<ConduitRule>) -> Vec<ConduitRule> {
+    let mut deduped: HashMap<(String, Option<u16>), ConduitRule> = HashMap::new();
+    for rule in rules {
+        let key = (rule.protocol.clone(), rule.dst_port);
+        deduped
+            .entry(key)
+            .and_modify(|existing| {
+                existing.has_write_ops |= rule.has_write_ops;
+                existing.has_config_ops |= rule.has_config_ops;
+                for tech in &rule.attack_techniques {
+                    if !existing.attack_techniques.contains(tech) {
+                        existing.attack_techniques.push(tech.clone());
+                    }
+                }
+                if existing.risk_note.is_none() {
+                    existing.risk_note = rule.risk_note.clone();
+                }
+            })
+            .or_insert(rule);
+    }
+    deduped.into_values().collect()
 }
 
 // ── Step 6 — SecurityFindings cross-reference ─────────────────────────────────
