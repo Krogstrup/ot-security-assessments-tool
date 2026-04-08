@@ -89,6 +89,24 @@ pub const CONFIDENCE_MAX: u8 = 5;
 /// Maximum Purdue level index used in this tool (0 = field/process, 5 = DMZ).
 pub const PURDUE_LEVEL_MAX: u8 = 5;
 
+// ── Runtime caps ─────────────────────────────────────────────────────────────
+
+/// Maximum topology nodes returned by the data API.  Excess nodes (ordered by
+/// descending packet count) are dropped to prevent the frontend from rendering
+/// a graph too large to be useful.
+pub const MAX_TOPOLOGY_NODES: usize = 5_000;
+
+/// Maximum topology edges returned by the data API.
+pub const MAX_TOPOLOGY_EDGES: usize = 20_000;
+
+/// Maximum anomaly scores returned by the analysis API in a single response.
+pub const MAX_ANOMALY_RESULTS: usize = 500;
+
+/// Packet batch size for the live-capture processing thread.  Once this many
+/// packets have accumulated (or the flush interval elapses) the batch is
+/// committed to shared state.
+pub const LIVE_CAPTURE_BATCH_SIZE: usize = 500;
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /// Returns `true` if `port` is a recognised OT/ICS server-side port.

@@ -28,7 +28,6 @@ pub use gm_ingest::{DeviceZeekEvents, StoredAlert, ZeekEventSummary};
 pub use gm_models::{
     AssetInfo, AssetSignatureMatch, ConnectionInfo, PacketSummary, ProtocolStatInfo,
 };
-use gm_parsers::IcsProtocol;
 use gm_parsers::RedundancyInfo;
 pub use gm_parsers::{
     BacnetDetail, DeepParseInfo, Dnp3Detail, Dnp3Relationship, EnipDetail, FunctionCodeStat,
@@ -253,39 +252,7 @@ impl AppState {
 }
 
 /// Infer device type based on which protocols it speaks and its role.
-pub fn infer_device_type(protocols: &[IcsProtocol], is_server: bool) -> String {
-    // If it responds on OT protocol ports, it's likely an OT device
-    let has_modbus = protocols.contains(&IcsProtocol::Modbus);
-    let has_dnp3 = protocols.contains(&IcsProtocol::Dnp3);
-    let has_ethernet_ip = protocols.contains(&IcsProtocol::EthernetIp);
-    let has_s7 = protocols.contains(&IcsProtocol::S7comm);
-    let has_bacnet = protocols.contains(&IcsProtocol::Bacnet);
-    let has_opc_ua = protocols.contains(&IcsProtocol::OpcUa);
-    let has_ge_srtp = protocols.contains(&IcsProtocol::GeSrtp);
-    let has_suitelink = protocols.contains(&IcsProtocol::WonderwareSuitelink);
-
-    let ot_protocol_count = protocols.iter().filter(|p| p.is_ot()).count();
-
-    if is_server && ot_protocol_count >= 1 {
-        // Server responding on OT ports → likely PLC/RTU
-        if has_ethernet_ip || has_s7 || has_ge_srtp || has_bacnet {
-            // Allen-Bradley (EtherNet/IP), Siemens (S7), GE (SRTP), BACnet controller
-            "plc".to_string()
-        } else if has_modbus || has_dnp3 {
-            "rtu".to_string()
-        } else {
-            "unknown".to_string()
-        }
-    } else if has_suitelink && is_server {
-        "scada_server".to_string() // Wonderware SuiteLink server
-    } else if ot_protocol_count >= 2 {
-        // Client talking multiple OT protocols → likely HMI or SCADA server
-        "hmi".to_string()
-    } else if has_opc_ua && ot_protocol_count == 1 {
-        "historian".to_string()
-    } else if ot_protocol_count == 0 {
-        "it_device".to_string()
-    } else {
-        "unknown".to_string()
-    }
-}
+///
+/// Canonical implementation lives in `gm_analysis::naming`; re-exported here
+/// so existing callers in `processor.rs` and `ingest.rs` compile unchanged.
+pub use gm_analysis::infer_device_type;

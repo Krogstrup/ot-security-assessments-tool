@@ -54,7 +54,7 @@ use uuid::Uuid;
 
 pub use comm_patterns::{ConnectionStats, PatternAnalyzer, PatternAnomaly, PatternAnomalyType};
 pub use default_creds::{CredentialChecker, DefaultCredential};
-pub use naming::{suggest_all as suggest_names_all, suggest_name, NamingSuggestion};
+pub use naming::{infer_device_type, suggest_all as suggest_names_all, suggest_name, NamingSuggestion};
 pub use risk::{
     assess_all as assess_criticality_all, assess_criticality, CriticalityAssessment,
     CriticalityLevel,
