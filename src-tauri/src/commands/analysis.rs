@@ -14,70 +14,17 @@ use gm_analysis::{
     SwitchSecurityFinding, SwitchSecurityInput,
 };
 
-use crate::application::mappers::snapshots::asset_snapshots;
+use crate::application::mappers::{
+    deep_parse::build_deep_parse_snapshot_map,
+    snapshots::asset_snapshots,
+};
 
 use super::{
-    analysis_builders::{build_analysis_input, build_capture_context},
+    analysis_input_builder::build_analysis_input,
+    capture_context_builder::build_capture_context,
     support::{read_state, write_state},
     AnalysisState, AppState, InventoryState,
 };
-
-fn build_malware_deep_parse(
-    inventory: &InventoryState,
-) -> HashMap<String, gm_analysis::DeepParseSnapshot> {
-    let mut deep_parse = HashMap::new();
-    for (ip, dp) in &inventory.deep_parse_info {
-        let modbus = dp.modbus.as_ref().map(|m| gm_analysis::ModbusSnapshot {
-            role: m.role.clone(),
-            unit_ids: m.unit_ids.clone(),
-            function_codes: m
-                .function_codes
-                .iter()
-                .map(|fc| gm_analysis::FcSnapshot {
-                    code: fc.code,
-                    count: fc.count,
-                    is_write: fc.is_write,
-                })
-                .collect(),
-            relationships: m
-                .relationships
-                .iter()
-                .map(|r| gm_analysis::RelationshipSnapshot {
-                    remote_ip: r.remote_ip.clone(),
-                    remote_role: r.remote_role.clone(),
-                    packet_count: r.packet_count,
-                })
-                .collect(),
-            polling_intervals: m
-                .polling_intervals
-                .iter()
-                .map(|pi| gm_analysis::PollingSnapshot {
-                    remote_ip: pi.remote_ip.clone(),
-                    function_code: pi.function_code,
-                    avg_interval_ms: pi.avg_interval_ms,
-                    min_interval_ms: pi.min_interval_ms,
-                    max_interval_ms: pi.max_interval_ms,
-                    sample_count: pi.sample_count,
-                })
-                .collect(),
-        });
-        let iec104 = dp.iec104.as_ref().map(|i| gm_analysis::Iec104Snapshot {
-            role: i.role.clone(),
-            has_control_commands: i.has_control_commands,
-            has_reset_process: i.has_reset_process,
-            has_interrogation: i.has_interrogation,
-        });
-        deep_parse.insert(
-            ip.clone(),
-            gm_analysis::DeepParseSnapshot {
-                modbus,
-                iec104,
-                ..Default::default()
-            },
-        );
-    }
-    deep_parse
-}
 
 // ─── Commands ─────────────────────────────────────────────────────────────────
 
@@ -272,7 +219,7 @@ pub fn get_malware_findings(state: &AppState) -> Result<Vec<MalwareFinding>, Str
 
     let ctx = build_capture_context(&capture, &inventory, &analysis);
     let connections = build_analysis_input(&capture, &inventory).connections;
-    let deep_parse = build_malware_deep_parse(&inventory);
+    let deep_parse = build_deep_parse_snapshot_map(&inventory);
 
     Ok(detect_malware_patterns(&ctx, &connections, &deep_parse))
 }
