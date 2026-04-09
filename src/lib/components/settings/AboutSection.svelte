@@ -27,11 +27,11 @@
 			<span class="about-value">Apache 2.0</span>
 		</div>
 	</div>
-	<p class="about-desc">
-		Kusanagi Kajiki — a modern ICS/SCADA passive network discovery tool.
-		Rebuilt with Tauri 2.0 (Rust) and SvelteKit for performance, security, and cross-platform support.
-	</p>
-</section>
+		<p class="about-desc">
+			Kusanagi Kajiki — a modern ICS/SCADA passive network discovery tool.
+			Built with a Rust backend and SvelteKit frontend for performance and security.
+		</p>
+	</section>
 
 <style>
 	.settings-section {

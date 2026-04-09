@@ -1,7 +1,7 @@
 /**
  * API module barrel export.
  *
- * Provides domain-organized access to all Tauri backend commands.
+ * Provides domain-organized access to all backend API modules.
  * Prefer importing specific functions from domain modules (e.g., `import { getAssets } from '$lib/api/assets'`)
  * for better tree-shaking, but this barrel export enables migration from the legacy `$lib/api`.
  */

@@ -1,7 +1,7 @@
 /**
  * Core HTTP utilities shared by all API modules.
  *
- * All API calls go through the HTTP server; there is no Tauri/desktop path.
+ * All API calls go through the HTTP server; there is no desktop-runtime path.
  */
 
 import type { AppError } from '$lib/types';

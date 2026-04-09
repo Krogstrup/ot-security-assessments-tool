@@ -1,3 +1,3 @@
-// Disable SSR for Tauri — all rendering happens client-side
+// Disable SSR — app rendering happens client-side in the browser.
 export const prerender = true;
 export const ssr = false;

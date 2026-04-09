@@ -5,7 +5,7 @@ import { defineConfig } from 'vite';
 export default defineConfig({
 	plugins: [tailwindcss(), sveltekit()],
 
-	// Tauri expects a fixed port during development
+	// Keep a fixed dev port for local frontend/backend integration.
 	server: {
 		host: '0.0.0.0',
 		port: 1420,
@@ -19,6 +19,6 @@ export default defineConfig({
 		}
 	},
 
-	// Env prefix for Tauri
-	envPrefix: ['VITE_', 'TAURI_']
+	// Only expose Vite-prefixed environment variables to the frontend bundle.
+	envPrefix: ['VITE_']
 });

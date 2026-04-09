@@ -5,7 +5,7 @@ import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 const config = {
 	preprocess: vitePreprocess(),
 	kit: {
-		// Static adapter required for Tauri — no server-side rendering
+		// Static adapter for browser-served frontend assets.
 		adapter: adapter({
 			fallback: 'index.html'
 		})
