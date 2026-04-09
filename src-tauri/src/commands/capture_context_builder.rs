@@ -2,7 +2,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use gm_constants::{OT_DEVICE_TYPES, OT_PROTOCOL_NAMES, OT_SERVER_PORTS};
+use gm_constants::OT_SERVER_PORTS;
+use gm_constants::OT_PROTOCOL_NAMES;
+use gm_constants::OT_DEVICE_TYPES;
 use gm_analysis::CaptureContext;
 
 use super::{AnalysisState, CaptureState, InventoryState};
@@ -18,6 +20,7 @@ pub fn build_capture_context(
     analysis: &AnalysisState,
 ) -> CaptureContext {
     // OT device IPs: assets running OT protocols or with OT device types.
+
     let mut ot_device_ips: HashSet<String> = inventory
         .assets
         .iter()

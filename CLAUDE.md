@@ -26,8 +26,6 @@ For every task:
 4. `FRONTEND_ARCHITECTURE_REVIEW.md` → frontend structure
 5. Migration plans (if applicable)
 
-If conflicts exist:
-→ follow **latest architecture direction (WebUI-first)**
 
 ---
 
