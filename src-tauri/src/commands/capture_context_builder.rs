@@ -1,140 +1,17 @@
-//! Input builders for security analysis commands.
-//!
-//! These functions construct [`AnalysisInput`] and [`CaptureContext`] from
-//! domain state slices, keeping the construction logic out of the command
-//! dispatch layer.
+//! Builds [`CaptureContext`] from domain state slices for Phase 14C detections.
 
 use std::collections::{HashMap, HashSet};
 
 use gm_constants::OT_SERVER_PORTS;
-use gm_analysis::{
-    AnalysisInput, BacnetSnapshot, CaptureContext, DeepParseSnapshot, Dnp3Snapshot, EnipSnapshot,
-    FcSnapshot, Iec104Snapshot, ModbusSnapshot, PollingSnapshot, ProfinetDcpSnapshot,
-    RelationshipSnapshot, S7Snapshot,
-};
-
-use crate::application::mappers::snapshots::{asset_snapshots, connection_snapshots};
+use gm_analysis::CaptureContext;
 
 use super::{AnalysisState, CaptureState, InventoryState};
 
-/// Build AnalysisInput from capture + inventory domain slices.
-pub fn build_analysis_input(capture: &CaptureState, inventory: &InventoryState) -> AnalysisInput {
-    let assets = asset_snapshots(inventory);
-    let connections = connection_snapshots(capture);
-
-    let mut deep_parse = std::collections::HashMap::new();
-    for (ip, dp) in &inventory.deep_parse_info {
-        let modbus = dp.modbus.as_ref().map(|m| ModbusSnapshot {
-            role: m.role.clone(),
-            unit_ids: m.unit_ids.clone(),
-            function_codes: m
-                .function_codes
-                .iter()
-                .map(|fc| FcSnapshot {
-                    code: fc.code,
-                    count: fc.count,
-                    is_write: fc.is_write,
-                })
-                .collect(),
-            relationships: m
-                .relationships
-                .iter()
-                .map(|r| RelationshipSnapshot {
-                    remote_ip: r.remote_ip.clone(),
-                    remote_role: r.remote_role.clone(),
-                    packet_count: r.packet_count,
-                })
-                .collect(),
-            polling_intervals: m
-                .polling_intervals
-                .iter()
-                .map(|pi| PollingSnapshot {
-                    remote_ip: pi.remote_ip.clone(),
-                    function_code: pi.function_code,
-                    avg_interval_ms: pi.avg_interval_ms,
-                    min_interval_ms: pi.min_interval_ms,
-                    max_interval_ms: pi.max_interval_ms,
-                    sample_count: pi.sample_count,
-                })
-                .collect(),
-        });
-
-        let dnp3 = dp.dnp3.as_ref().map(|d| Dnp3Snapshot {
-            role: d.role.clone(),
-            has_unsolicited: d.has_unsolicited,
-            function_codes: d
-                .function_codes
-                .iter()
-                .map(|fc| FcSnapshot {
-                    code: fc.code,
-                    count: fc.count,
-                    is_write: fc.is_write,
-                })
-                .collect(),
-            relationships: d
-                .relationships
-                .iter()
-                .map(|r| RelationshipSnapshot {
-                    remote_ip: r.remote_ip.clone(),
-                    remote_role: r.remote_role.clone(),
-                    packet_count: r.packet_count,
-                })
-                .collect(),
-        });
-
-        let enip = dp.enip.as_ref().map(|e| EnipSnapshot {
-            role: e.role.clone(),
-            cip_writes_to_assembly: e.cip_writes_to_assembly,
-            cip_file_access: e.cip_file_access,
-            list_identity_requests: e.list_identity_requests,
-        });
-
-        let s7 = dp.s7.as_ref().map(|s| S7Snapshot {
-            role: s.role.clone(),
-            functions_seen: s.functions_seen.clone(),
-        });
-
-        let bacnet = dp.bacnet.as_ref().map(|b| BacnetSnapshot {
-            role: b.role.clone(),
-            write_to_output: b.write_to_output,
-            write_to_notification_class: b.write_to_notification_class,
-            reinitialize_device: b.reinitialize_device,
-            device_communication_control: b.device_communication_control,
-        });
-
-        let iec104 = dp.iec104.as_ref().map(|i| Iec104Snapshot {
-            role: i.role.clone(),
-            has_control_commands: i.has_control_commands,
-            has_reset_process: i.has_reset_process,
-            has_interrogation: i.has_interrogation,
-        });
-
-        let profinet_dcp = dp.profinet_dcp.as_ref().map(|p| ProfinetDcpSnapshot {
-            role: p.role.clone(),
-        });
-
-        deep_parse.insert(
-            ip.clone(),
-            DeepParseSnapshot {
-                modbus,
-                dnp3,
-                enip,
-                s7,
-                bacnet,
-                iec104,
-                profinet_dcp,
-            },
-        );
-    }
-
-    AnalysisInput {
-        assets,
-        connections,
-        deep_parse,
-    }
-}
-
-/// Build a [`CaptureContext`] from domain state slices for Phase 14C detections.
+/// Build a [`CaptureContext`] from domain state slices.
+///
+/// Produces the richer per-capture metadata (MAC/IP mappings, first/last-seen
+/// timestamps, write-rate counters, OT device IP sets) required by context-aware
+/// ATT&CK detections.
 pub fn build_capture_context(
     capture: &CaptureState,
     inventory: &InventoryState,
@@ -265,25 +142,13 @@ pub fn build_capture_context(
         }
     }
     // Sanitise infinity values.
-    let capture_start = if capture_start.is_finite() {
-        capture_start
-    } else {
-        0.0
-    };
-    let capture_end = if capture_end.is_finite() {
-        capture_end
-    } else {
-        0.0
-    };
+    let capture_start = if capture_start.is_finite() { capture_start } else { 0.0 };
+    let capture_end = if capture_end.is_finite() { capture_end } else { 0.0 };
     for v in device_first_seen.values_mut() {
-        if !v.is_finite() {
-            *v = 0.0;
-        }
+        if !v.is_finite() { *v = 0.0; }
     }
     for v in device_last_seen.values_mut() {
-        if !v.is_finite() {
-            *v = 0.0;
-        }
+        if !v.is_finite() { *v = 0.0; }
     }
 
     // Per-source dst ports.
