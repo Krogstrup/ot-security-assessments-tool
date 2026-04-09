@@ -24,8 +24,14 @@ pub(super) fn add_routes(router: Router<SharedState>) -> Router<SharedState> {
         .route(api_path::HEALTH, get(health))
         .route(api_path::SYSTEM_APP_INFO, get(get_app_info))
         .route(api_path::SYSTEM_INTERFACES, get(get_interfaces))
-        .route(api_path::SYSTEM_IMPORT_PCAP_FILES, get(list_import_pcap_files))
-        .route(api_path::SYSTEM_IMPORT_FILES_BY_KIND, get(list_import_files))
+        .route(
+            api_path::SYSTEM_IMPORT_PCAP_FILES,
+            get(list_import_pcap_files),
+        )
+        .route(
+            api_path::SYSTEM_IMPORT_FILES_BY_KIND,
+            get(list_import_files),
+        )
         .route(api_path::CAPTURE_IMPORT_PCAP, post(import_pcap))
 }
 
@@ -75,7 +81,7 @@ async fn import_pcap(
         .map(|path| resolve_import_input_path(path, ImportKind::Pcap))
         .collect::<Result<Vec<_>, _>>()?;
 
-    let result = commands::capture::import_pcap_files(paths, state.as_ref())
-        .map_err(ApiError::bad_request)?;
+    let result =
+        commands::capture::import_pcap_files(paths, state.as_ref()).map_err(ApiError::from)?;
     Ok(Json(result))
 }

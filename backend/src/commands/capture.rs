@@ -3,11 +3,13 @@ use serde_json::json;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
 
+use super::error::AppError;
 use super::processor::PacketProcessor;
 use super::{support::read_state, support::write_state, AppState};
 use crate::application::services::capture_pipeline_commit::{
     compute_capture_pipeline_state, CapturePipelineDependencies, CapturePipelineSource,
 };
+use crate::application::use_cases::capture as use_case;
 use gm_capture::PcapReader;
 
 #[derive(Serialize)]
@@ -21,12 +23,7 @@ pub struct ImportResult {
     pub per_file: Vec<FileImportResult>,
 }
 
-#[derive(Serialize)]
-pub struct FileImportResult {
-    pub filename: String,
-    pub packet_count: usize,
-    pub status: String,
-}
+pub use use_case::ImportFileResult as FileImportResult;
 
 #[derive(Serialize)]
 pub struct StopCaptureResult {
@@ -47,17 +44,39 @@ pub struct CaptureStatusInfo {
     pub elapsed_seconds: f64,
 }
 
-pub async fn cancel_import(state: &AppState) -> Result<(), String> {
+pub async fn cancel_import(state: &AppState) -> Result<(), AppError> {
     state.import_cancelled.store(true, Ordering::SeqCst);
     log::info!("PCAP import cancellation requested");
     Ok(())
 }
 
-pub fn import_pcap_files(paths: Vec<String>, state: &AppState) -> Result<ImportResult, String> {
+pub fn import_pcap_files(paths: Vec<String>, state: &AppState) -> Result<ImportResult, AppError> {
     let start = Instant::now();
-    let (processor, per_file_results) = process_input_files(&paths, state, start)?;
-    let total_packet_count = total_packet_count(&per_file_results);
-    ensure_successful_import(total_packet_count, &per_file_results)?;
+
+    let reader = PcapReader::new();
+    let mut processor = PacketProcessor::new();
+
+    let per_file_results = use_case::process_input_files(
+        &paths,
+        start,
+        |path| reader.read_file(path).map_err(|e| e.to_string()),
+        |packet| processor.process_packet(packet),
+        |file_index, file_count, filename, packet_count, started| {
+            emit_import_progress(
+                state,
+                file_index,
+                file_count,
+                filename,
+                packet_count,
+                started,
+            )
+        },
+    );
+
+    let total_packet_count = use_case::total_packet_count(&per_file_results);
+    use_case::ensure_successful_import(total_packet_count, &per_file_results)
+        .map_err(AppError::invalid_input)?;
+
     let (connection_count, asset_count, protocols_detected) =
         compute_and_apply_import_state(processor, &per_file_results, state)?;
     let duration_ms = start.elapsed().as_millis() as u64;
@@ -71,56 +90,6 @@ pub fn import_pcap_files(paths: Vec<String>, state: &AppState) -> Result<ImportR
         duration_ms,
         per_file: per_file_results,
     })
-}
-
-fn process_input_files(
-    paths: &[String],
-    state: &AppState,
-    start: Instant,
-) -> Result<(PacketProcessor, Vec<FileImportResult>), String> {
-    let reader = PcapReader::new();
-    let mut processor = PacketProcessor::new();
-    let mut per_file_results: Vec<FileImportResult> = Vec::new();
-
-    for (file_index, path) in paths.iter().enumerate() {
-        let filename = filename_from_path(path);
-        match reader.read_file(path) {
-            Ok(packets) => {
-                for packet in &packets {
-                    processor.process_packet(packet);
-                }
-                per_file_results.push(FileImportResult {
-                    filename: filename.clone(),
-                    packet_count: packets.len(),
-                    status: "ok".to_string(),
-                });
-                emit_import_progress(
-                    state,
-                    file_index,
-                    paths.len(),
-                    &filename,
-                    packets.len(),
-                    start,
-                );
-            }
-            Err(e) => {
-                per_file_results.push(FileImportResult {
-                    filename,
-                    packet_count: 0,
-                    status: format!("error: {}", e),
-                });
-            }
-        }
-    }
-
-    Ok((processor, per_file_results))
-}
-
-fn filename_from_path(path: &str) -> String {
-    std::path::Path::new(path)
-        .file_name()
-        .map(|f| f.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.to_string())
 }
 
 fn emit_import_progress(
@@ -149,36 +118,23 @@ fn emit_import_progress(
     }
 }
 
-fn total_packet_count(per_file_results: &[FileImportResult]) -> usize {
-    per_file_results.iter().map(|r| r.packet_count).sum()
-}
-
-fn ensure_successful_import(
-    total_packet_count: usize,
-    per_file_results: &[FileImportResult],
-) -> Result<(), String> {
-    if total_packet_count == 0 && !per_file_results.iter().any(|r| r.status == "ok") {
-        return Err("No packets could be parsed from the provided files".to_string());
-    }
-    Ok(())
-}
-
 fn compute_and_apply_import_state(
     mut processor: PacketProcessor,
     per_file_results: &[FileImportResult],
     state: &AppState,
-) -> Result<(usize, usize, Vec<String>), String> {
+) -> Result<(usize, usize, Vec<String>), AppError> {
     let imported_files: Vec<String> = per_file_results
         .iter()
         .filter(|f| f.status == "ok")
         .map(|f| f.filename.clone())
         .collect();
 
-    let existing_imported_files = read_state(&state.capture, "capture")?
+    let existing_imported_files = read_state(&state.capture, "capture")
+        .map_err(AppError::state_lock)?
         .imported_files
         .clone();
-    let inv = read_state(&state.inventory, "inventory")?;
-    let sigs = read_state(&state.signatures, "signatures")?;
+    let inv = read_state(&state.inventory, "inventory").map_err(AppError::state_lock)?;
+    let sigs = read_state(&state.signatures, "signatures").map_err(AppError::state_lock)?;
 
     let deps = CapturePipelineDependencies {
         signature_engine: &sigs.signature_engine,
@@ -199,7 +155,7 @@ fn compute_and_apply_import_state(
     drop(inv);
 
     {
-        let mut cap = write_state(&state.capture, "capture")?;
+        let mut cap = write_state(&state.capture, "capture").map_err(AppError::state_lock)?;
         cap.topology = update.topology;
         cap.connections = update.connections;
         cap.packet_summaries = update.packet_summaries;
@@ -207,12 +163,13 @@ fn compute_and_apply_import_state(
         cap.imported_files = update.imported_files;
     }
     {
-        let mut inv = write_state(&state.inventory, "inventory")?;
+        let mut inv = write_state(&state.inventory, "inventory").map_err(AppError::state_lock)?;
         inv.assets = update.assets;
         inv.deep_parse_info = update.deep_parse_info;
     }
     {
-        let mut analysis = write_state(&state.analysis, "analysis")?;
+        let mut analysis =
+            write_state(&state.analysis, "analysis").map_err(AppError::state_lock)?;
         analysis.connection_stats = update.connection_stats;
         analysis.pattern_anomalies = update.pattern_anomalies;
     }
@@ -255,15 +212,16 @@ impl CapturePipelineSource for PacketProcessorCaptureSource<'_> {
         self.processor.get_connections()
     }
 
-    fn get_packet_summaries(
-        &self,
-    ) -> std::collections::HashMap<String, Vec<super::PacketSummary>> {
+    fn get_packet_summaries(&self) -> std::collections::HashMap<String, Vec<super::PacketSummary>> {
         self.processor.get_packet_summaries()
     }
 
     fn build_pattern_results(
         &mut self,
-    ) -> (Vec<gm_analysis::ConnectionStats>, Vec<gm_analysis::PatternAnomaly>) {
+    ) -> (
+        Vec<gm_analysis::ConnectionStats>,
+        Vec<gm_analysis::PatternAnomaly>,
+    ) {
         self.processor.build_pattern_results()
     }
 
@@ -276,91 +234,34 @@ impl CapturePipelineSource for PacketProcessorCaptureSource<'_> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{
-        ensure_successful_import, filename_from_path, total_packet_count, FileImportResult,
-    };
-
-    #[test]
-    fn filename_from_path_returns_basename_when_present() {
-        let filename = filename_from_path("/tmp/captures/demo.pcap");
-        assert_eq!(filename, "demo.pcap");
-    }
-
-    #[test]
-    fn filename_from_path_returns_input_when_no_basename_found() {
-        let filename = filename_from_path("capture.pcap");
-        assert_eq!(filename, "capture.pcap");
-    }
-
-    #[test]
-    fn total_packet_count_sums_all_files() {
-        let files = vec![
-            FileImportResult {
-                filename: "a.pcap".to_string(),
-                packet_count: 3,
-                status: "ok".to_string(),
-            },
-            FileImportResult {
-                filename: "b.pcap".to_string(),
-                packet_count: 7,
-                status: "ok".to_string(),
-            },
-        ];
-
-        assert_eq!(total_packet_count(&files), 10);
-    }
-
-    #[test]
-    fn ensure_successful_import_fails_when_no_packets_and_no_ok_files() {
-        let files = vec![FileImportResult {
-            filename: "broken.pcap".to_string(),
-            packet_count: 0,
-            status: "error: parse failed".to_string(),
-        }];
-
-        let result = ensure_successful_import(0, &files);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn ensure_successful_import_succeeds_when_any_file_is_ok() {
-        let files = vec![FileImportResult {
-            filename: "ok.pcap".to_string(),
-            packet_count: 0,
-            status: "ok".to_string(),
-        }];
-
-        let result = ensure_successful_import(0, &files);
-        assert!(result.is_ok());
-    }
-}
-
 pub async fn stop_capture(
     save_path: Option<String>,
     state: &AppState,
-) -> Result<StopCaptureResult, String> {
+) -> Result<StopCaptureResult, AppError> {
     let (mut capture, processing_thread) = {
-        let mut cap = write_state(&state.capture, "capture")?;
+        let mut cap = write_state(&state.capture, "capture").map_err(AppError::state_lock)?;
         let capture = cap.live_capture.take();
         let processing = cap.processing_thread.take();
         (capture, processing)
     };
 
     let Some(ref mut handle) = capture else {
-        return Err("No capture is running.".to_string());
+        return Err(AppError::no_capture_running());
     };
 
     let stats = handle.stats();
-    handle.stop().map_err(|e| e.to_string())?;
+    handle
+        .stop()
+        .map_err(|e| AppError::external_process(e.to_string()))?;
 
     if let Some(pt) = processing_thread {
         let _ = pt.join();
     }
 
     let (pcap_saved, pcap_path, packets_saved) = if let Some(ref path) = save_path {
-        let count = handle.save_to_pcap(path).map_err(|e| e.to_string())?;
+        let count = handle
+            .save_to_pcap(path)
+            .map_err(|e| AppError::IoError(e.to_string()))?;
         log::info!("Saved {} packets to {}", count, path);
         (true, Some(path.clone()), count)
     } else {
@@ -384,30 +285,30 @@ pub async fn stop_capture(
     })
 }
 
-pub async fn pause_capture(state: &AppState) -> Result<(), String> {
-    let cap = read_state(&state.capture, "capture")?;
+pub async fn pause_capture(state: &AppState) -> Result<(), AppError> {
+    let cap = read_state(&state.capture, "capture").map_err(AppError::state_lock)?;
     if let Some(ref handle) = cap.live_capture {
         handle.pause();
         log::info!("Live capture paused");
         Ok(())
     } else {
-        Err("No capture is running.".to_string())
+        Err(AppError::no_capture_running())
     }
 }
 
-pub async fn resume_capture(state: &AppState) -> Result<(), String> {
-    let cap = read_state(&state.capture, "capture")?;
+pub async fn resume_capture(state: &AppState) -> Result<(), AppError> {
+    let cap = read_state(&state.capture, "capture").map_err(AppError::state_lock)?;
     if let Some(ref handle) = cap.live_capture {
         handle.resume();
         log::info!("Live capture resumed");
         Ok(())
     } else {
-        Err("No capture is running.".to_string())
+        Err(AppError::no_capture_running())
     }
 }
 
-pub async fn get_capture_status(state: &AppState) -> Result<CaptureStatusInfo, String> {
-    let cap = read_state(&state.capture, "capture")?;
+pub async fn get_capture_status(state: &AppState) -> Result<CaptureStatusInfo, AppError> {
+    let cap = read_state(&state.capture, "capture").map_err(AppError::state_lock)?;
     if let Some(ref handle) = cap.live_capture {
         let stats = handle.stats();
         Ok(CaptureStatusInfo {
@@ -425,5 +326,66 @@ pub async fn get_capture_status(state: &AppState) -> Result<CaptureStatusInfo, S
             bytes_captured: 0,
             elapsed_seconds: 0.0,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::application::use_cases::capture as use_case;
+
+    use super::FileImportResult;
+
+    #[test]
+    fn filename_from_path_returns_basename_when_present() {
+        let filename = use_case::filename_from_path("/tmp/captures/demo.pcap");
+        assert_eq!(filename, "demo.pcap");
+    }
+
+    #[test]
+    fn filename_from_path_returns_input_when_no_basename_found() {
+        let filename = use_case::filename_from_path("capture.pcap");
+        assert_eq!(filename, "capture.pcap");
+    }
+
+    #[test]
+    fn total_packet_count_sums_all_files() {
+        let files = vec![
+            FileImportResult {
+                filename: "a.pcap".to_string(),
+                packet_count: 3,
+                status: "ok".to_string(),
+            },
+            FileImportResult {
+                filename: "b.pcap".to_string(),
+                packet_count: 7,
+                status: "ok".to_string(),
+            },
+        ];
+
+        assert_eq!(use_case::total_packet_count(&files), 10);
+    }
+
+    #[test]
+    fn ensure_successful_import_fails_when_no_packets_and_no_ok_files() {
+        let files = vec![FileImportResult {
+            filename: "broken.pcap".to_string(),
+            packet_count: 0,
+            status: "error: parse failed".to_string(),
+        }];
+
+        let result = use_case::ensure_successful_import(0, &files);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn ensure_successful_import_succeeds_when_any_file_is_ok() {
+        let files = vec![FileImportResult {
+            filename: "ok.pcap".to_string(),
+            packet_count: 0,
+            status: "ok".to_string(),
+        }];
+
+        let result = use_case::ensure_successful_import(0, &files);
+        assert!(result.is_ok());
     }
 }

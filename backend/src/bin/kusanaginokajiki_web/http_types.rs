@@ -1,5 +1,6 @@
 //! HTTP response and error envelope types for the web API.
 
+use crate::commands::error::AppError as CommandError;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -15,20 +16,20 @@ pub struct ApiError {
 }
 
 impl ApiError {
-    pub fn bad_request(message: impl Into<String>) -> Self {
+    fn with_code(status: StatusCode, code: &'static str, message: impl Into<String>) -> Self {
         Self {
-            status: StatusCode::BAD_REQUEST,
-            code: "bad_request",
+            status,
+            code,
             message: message.into(),
         }
     }
 
+    pub fn bad_request(message: impl Into<String>) -> Self {
+        Self::with_code(StatusCode::BAD_REQUEST, "bad_request", message)
+    }
+
     pub fn internal(message: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "internal_error",
-            message: message.into(),
-        }
+        Self::with_code(StatusCode::INTERNAL_SERVER_ERROR, "internal_error", message)
     }
 }
 
@@ -39,6 +40,42 @@ impl IntoResponse for ApiError {
             Json(json!({ "code": self.code, "message": self.message })),
         )
             .into_response()
+    }
+}
+
+impl From<CommandError> for ApiError {
+    fn from(value: CommandError) -> Self {
+        match value {
+            CommandError::StateLock(message) => {
+                ApiError::with_code(StatusCode::INTERNAL_SERVER_ERROR, "state_lock", message)
+            }
+            CommandError::NoSession => {
+                ApiError::with_code(StatusCode::BAD_REQUEST, "no_session", "No active session")
+            }
+            CommandError::NoProject => {
+                ApiError::with_code(StatusCode::BAD_REQUEST, "no_project", "No active project")
+            }
+            CommandError::InvalidInput(message) => {
+                ApiError::with_code(StatusCode::BAD_REQUEST, "invalid_input", message)
+            }
+            CommandError::ParseFailure(message) => {
+                ApiError::with_code(StatusCode::BAD_REQUEST, "parse_failure", message)
+            }
+            CommandError::DbError(message) => {
+                ApiError::with_code(StatusCode::INTERNAL_SERVER_ERROR, "db_error", message)
+            }
+            CommandError::IoError(message) => {
+                ApiError::with_code(StatusCode::INTERNAL_SERVER_ERROR, "io_error", message)
+            }
+            CommandError::NoCaptureRunning => ApiError::with_code(
+                StatusCode::BAD_REQUEST,
+                "no_capture_running",
+                "No capture running",
+            ),
+            CommandError::ExternalProcess(message) => {
+                ApiError::with_code(StatusCode::BAD_REQUEST, "external_process", message)
+            }
+        }
     }
 }
 

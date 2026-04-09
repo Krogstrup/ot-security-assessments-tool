@@ -43,6 +43,28 @@ pub enum AppError {
     ExternalProcess(String),
 }
 
+impl AppError {
+    pub fn invalid_input(message: impl Into<String>) -> Self {
+        AppError::InvalidInput(message.into())
+    }
+
+    pub fn parse_failure(message: impl Into<String>) -> Self {
+        AppError::ParseFailure(message.into())
+    }
+
+    pub fn state_lock(message: impl Into<String>) -> Self {
+        AppError::StateLock(message.into())
+    }
+
+    pub fn no_capture_running() -> Self {
+        AppError::NoCaptureRunning
+    }
+
+    pub fn external_process(message: impl Into<String>) -> Self {
+        AppError::ExternalProcess(message.into())
+    }
+}
+
 impl fmt::Display for AppError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -72,5 +94,11 @@ impl From<std::io::Error> for AppError {
 impl From<gm_db::DbError> for AppError {
     fn from(e: gm_db::DbError) -> Self {
         AppError::DbError(e.to_string())
+    }
+}
+
+impl From<String> for AppError {
+    fn from(e: String) -> Self {
+        AppError::InvalidInput(e)
     }
 }

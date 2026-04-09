@@ -8,7 +8,9 @@ use gm_types::{AssetInfo, ConnectionInfo};
 
 use super::{
     build_topology_from_connections, db_or_error,
-    mappers::{asset_info_to_row, connection_info_to_row, row_to_asset_info, row_to_connection_info},
+    mappers::{
+        asset_info_to_row, connection_info_to_row, row_to_asset_info, row_to_connection_info,
+    },
     parse_session_metadata, session_info_from_row, LoadedSessionData, SessionInfo, SessionMetadata,
 };
 
@@ -67,7 +69,10 @@ pub fn save_session(
 }
 
 /// Load a session by ID and return runtime payload for adapter application.
-pub fn load_session(session_id: String, db: Option<&Database>) -> Result<LoadSessionResult, String> {
+pub fn load_session(
+    session_id: String,
+    db: Option<&Database>,
+) -> Result<LoadSessionResult, String> {
     let db = db_or_error(db)?;
 
     let session_row = db.get_session(&session_id).map_err(|e| e.to_string())?;

@@ -23,7 +23,9 @@ pub fn export_session_archive(
 
     let session = db.get_session(&session_id).map_err(|e| e.to_string())?;
     let assets = db.list_assets(&session_id).map_err(|e| e.to_string())?;
-    let connections = db.list_connections(&session_id).map_err(|e| e.to_string())?;
+    let connections = db
+        .list_connections(&session_id)
+        .map_err(|e| e.to_string())?;
 
     let session_data = serde_json::json!({
         "session": {
@@ -134,7 +136,10 @@ pub fn import_session_archive(
 
     let metadata = parse_session_metadata(&metadata_str);
     let assets_vec: Vec<_> = loaded_assets.into_iter().map(row_to_asset_info).collect();
-    let conns_vec: Vec<_> = loaded_conns.into_iter().map(row_to_connection_info).collect();
+    let conns_vec: Vec<_> = loaded_conns
+        .into_iter()
+        .map(row_to_connection_info)
+        .collect();
     let topology = build_topology_from_connections(&conns_vec);
     let session_name = session_row.name.clone();
     let mut info = session_info_from_row(session_row);

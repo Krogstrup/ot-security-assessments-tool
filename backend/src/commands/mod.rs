@@ -1,7 +1,7 @@
 pub mod analysis;
-pub mod capture_context_builder;
 pub mod baseline;
 pub mod capture;
+pub mod capture_context_builder;
 pub mod correlation;
 pub mod data;
 pub mod error;
@@ -24,9 +24,6 @@ use gm_analysis::{AnomalyScore, ConnectionStats, Finding, PatternAnomaly, Purdue
 use gm_capture::LiveCaptureHandle;
 use gm_db::{Database, GeoIpLookup, OuiLookup};
 pub use gm_ingest::{DeviceZeekEvents, StoredAlert};
-pub use gm_types::{
-    AssetInfo, AssetSignatureMatch, ConnectionInfo, PacketSummary, ProtocolStatInfo,
-};
 use gm_parsers::RedundancyInfo;
 pub use gm_parsers::{
     BacnetDetail, DeepParseInfo, Dnp3Detail, Dnp3Relationship, EnipDetail, FunctionCodeStat,
@@ -37,6 +34,9 @@ use gm_physical::{InferredTopology, PhysicalTopology};
 use gm_segmentation::SegmentationReport;
 use gm_signatures::SignatureEngine;
 use gm_topology::TopologyGraph;
+pub use gm_types::{
+    AssetInfo, AssetSignatureMatch, ConnectionInfo, PacketSummary, ProtocolStatInfo,
+};
 use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, RwLock};

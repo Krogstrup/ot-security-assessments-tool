@@ -164,7 +164,10 @@ pub fn get_connections(
 }
 
 /// Get lightweight asset/connection counts (avoids serializing full datasets).
-pub fn get_data_counts(assets: &[AssetInfo], connections: &[ConnectionInfo]) -> Result<DataCounts, String> {
+pub fn get_data_counts(
+    assets: &[AssetInfo],
+    connections: &[ConnectionInfo],
+) -> Result<DataCounts, String> {
     let asset_count = assets.len();
     let connection_count = connections.len();
     Ok(DataCounts {

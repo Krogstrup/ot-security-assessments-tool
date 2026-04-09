@@ -14,7 +14,11 @@ fn normalize_hostname(hostname: &str) -> Option<String> {
 }
 
 fn normalize_purdue_level(level: u8) -> Option<u8> {
-    if level > 5 { None } else { Some(level) }
+    if level > 5 {
+        None
+    } else {
+        Some(level)
+    }
 }
 
 fn apply_asset_update(asset: &mut AssetInfo, updates: &AssetUpdate) {
@@ -80,7 +84,8 @@ pub fn bulk_update_assets(
     db: Option<&Database>,
     has_active_session: bool,
 ) -> Result<usize, String> {
-    let asset_id_set: std::collections::HashSet<&str> = asset_ids.iter().map(String::as_str).collect();
+    let asset_id_set: std::collections::HashSet<&str> =
+        asset_ids.iter().map(String::as_str).collect();
 
     let mut count = 0;
     for asset in assets.iter_mut() {

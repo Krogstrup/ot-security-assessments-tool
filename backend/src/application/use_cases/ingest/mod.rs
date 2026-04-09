@@ -19,9 +19,9 @@ use std::time::Instant;
 
 use gm_ingest::{DeviceZeekEvents, IngestResult, IngestSource, StoredAlert};
 use gm_parsers::IcsProtocol;
-use serde::Serialize;
 use gm_topology::TopologyGraph;
 use gm_types::{AssetInfo, ConnectionInfo};
+use serde::Serialize;
 
 use alert_index::{ingested_alert_to_stored, rebuild_zeek_device_events};
 use asset_merge::{create_asset_from_ingested, enrich_asset};

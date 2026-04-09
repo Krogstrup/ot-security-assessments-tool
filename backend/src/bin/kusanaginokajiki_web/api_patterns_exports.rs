@@ -82,7 +82,10 @@ pub(super) fn add_routes(router: Router<SharedState>) -> Router<SharedState> {
             spc_path::V1_CORRELATION_ALERTS,
             get(get_correlated_alerts).delete(clear_alerts),
         )
-        .route(spc_path::V1_CORRELATION_ALERTS_BY_IP, get(get_alerts_for_ip))
+        .route(
+            spc_path::V1_CORRELATION_ALERTS_BY_IP,
+            get(get_alerts_for_ip),
+        )
         .route(
             ses_path::V1_SYSTEM_SETTINGS,
             get(get_settings).put(save_settings),
@@ -93,7 +96,10 @@ pub(super) fn add_routes(router: Router<SharedState>) -> Router<SharedState> {
             ses_path::V1_EXPORTS_CONNECTIONS_CSV,
             post(export_connections_csv),
         )
-        .route(ses_path::V1_EXPORTS_TOPOLOGY_JSON, post(export_topology_json))
+        .route(
+            ses_path::V1_EXPORTS_TOPOLOGY_JSON,
+            post(export_topology_json),
+        )
         .route(ses_path::V1_EXPORTS_ASSETS_JSON, post(export_assets_json))
         .route(ses_path::V1_EXPORTS_REPORT_PDF, post(generate_pdf_report))
         .route(ses_path::V1_EXPORTS_SBOM, post(export_sbom))
@@ -110,7 +116,10 @@ pub(super) fn add_routes(router: Router<SharedState>) -> Router<SharedState> {
             ses_path::V1_EXPORTS_ALLOWLIST,
             get(generate_communication_allowlist),
         )
-        .route(ses_path::V1_EXPORTS_ALLOWLIST_CSV, post(export_allowlist_csv))
+        .route(
+            ses_path::V1_EXPORTS_ALLOWLIST_CSV,
+            post(export_allowlist_csv),
+        )
         .route(
             ses_path::V1_EXPORTS_FIREWALL_RULES,
             post(export_firewall_rules),
@@ -127,9 +136,7 @@ async fn get_signatures(State(state): State<SharedState>) -> Result<Json<Value>,
 }
 
 async fn reload_signatures(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
-    to_json(
-        commands::signatures::reload_signatures(state.as_ref()).map_err(ApiError::bad_request)?,
-    )
+    to_json(commands::signatures::reload_signatures(state.as_ref()).map_err(ApiError::bad_request)?)
 }
 
 async fn test_signature(
@@ -156,22 +163,17 @@ async fn list_plugins() -> Result<Json<Value>, ApiError> {
 }
 
 async fn get_connection_stats(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
-    to_json(commands::analysis::get_connection_stats(state.as_ref()).map_err(ApiError::bad_request)?)
+    to_json(commands::analysis::get_connection_stats(state.as_ref()).map_err(ApiError::from)?)
 }
 
 async fn get_pattern_anomalies(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
-    to_json(
-        commands::analysis::get_pattern_anomalies(state.as_ref()).map_err(ApiError::bad_request)?,
-    )
+    to_json(commands::analysis::get_pattern_anomalies(state.as_ref()).map_err(ApiError::from)?)
 }
 
 async fn get_redundancy_protocols(
     State(state): State<SharedState>,
 ) -> Result<Json<Value>, ApiError> {
-    to_json(
-        commands::analysis::get_redundancy_protocols(state.as_ref())
-            .map_err(ApiError::bad_request)?,
-    )
+    to_json(commands::analysis::get_redundancy_protocols(state.as_ref()).map_err(ApiError::from)?)
 }
 
 async fn get_correlated_alerts(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
@@ -208,7 +210,7 @@ async fn export_assets_csv(
     to_json(
         commands::export::export_assets_csv(output_path, state.as_ref())
             .await
-            .map_err(ApiError::bad_request)?,
+            .map_err(ApiError::from)?,
     )
 }
 
@@ -220,7 +222,7 @@ async fn export_connections_csv(
     to_json(
         commands::export::export_connections_csv(output_path, state.as_ref())
             .await
-            .map_err(ApiError::bad_request)?,
+            .map_err(ApiError::from)?,
     )
 }
 
@@ -232,7 +234,7 @@ async fn export_topology_json(
     to_json(
         commands::export::export_topology_json(output_path, state.as_ref())
             .await
-            .map_err(ApiError::bad_request)?,
+            .map_err(ApiError::from)?,
     )
 }
 
@@ -244,7 +246,7 @@ async fn export_assets_json(
     to_json(
         commands::export::export_assets_json(output_path, state.as_ref())
             .await
-            .map_err(ApiError::bad_request)?,
+            .map_err(ApiError::from)?,
     )
 }
 
@@ -256,7 +258,7 @@ async fn generate_pdf_report(
     to_json(
         commands::export::generate_pdf_report(body.config, output_path, state.as_ref())
             .await
-            .map_err(ApiError::bad_request)?,
+            .map_err(ApiError::from)?,
     )
 }
 
@@ -273,7 +275,7 @@ async fn export_sbom(
     to_json(
         commands::export::export_sbom(body.format, output_path, state.as_ref())
             .await
-            .map_err(ApiError::bad_request)?,
+            .map_err(ApiError::from)?,
     )
 }
 
@@ -285,7 +287,7 @@ async fn export_stix_bundle(
     to_json(
         commands::export::export_stix_bundle(output_path, state.as_ref())
             .await
-            .map_err(ApiError::bad_request)?,
+            .map_err(ApiError::from)?,
     )
 }
 
@@ -296,7 +298,7 @@ async fn save_topology_image(
     to_json(
         commands::export::save_topology_image(body.image_data, output_path)
             .await
-            .map_err(ApiError::bad_request)?,
+            .map_err(ApiError::from)?,
     )
 }
 
@@ -313,7 +315,7 @@ async fn export_filtered_pcap(
             state.as_ref(),
         )
         .await
-        .map_err(ApiError::bad_request)?,
+        .map_err(ApiError::from)?,
     )
 }
 
@@ -323,7 +325,7 @@ async fn generate_communication_allowlist(
     to_json(
         commands::export::generate_communication_allowlist(state.as_ref())
             .await
-            .map_err(ApiError::bad_request)?,
+            .map_err(ApiError::from)?,
     )
 }
 
@@ -335,7 +337,7 @@ async fn export_allowlist_csv(
     to_json(
         commands::export::export_allowlist_csv(output_path, state.as_ref())
             .await
-            .map_err(ApiError::bad_request)?,
+            .map_err(ApiError::from)?,
     )
 }
 
@@ -347,12 +349,12 @@ async fn export_firewall_rules(
     to_json(
         commands::export::export_firewall_rules(output_path, state.as_ref())
             .await
-            .map_err(ApiError::bad_request)?,
+            .map_err(ApiError::from)?,
     )
 }
 
 async fn run_segmentation(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
-    to_json(commands::segmentation::run_segmentation(state.as_ref()).map_err(ApiError::bad_request)?)
+    to_json(commands::segmentation::run_segmentation(state.as_ref()).map_err(ApiError::from)?)
 }
 
 async fn export_enforcement_config(
@@ -361,6 +363,6 @@ async fn export_enforcement_config(
 ) -> Result<Json<Value>, ApiError> {
     to_json(
         commands::segmentation::export_enforcement_config(body.format, state.as_ref())
-            .map_err(ApiError::bad_request)?,
+            .map_err(ApiError::from)?,
     )
 }

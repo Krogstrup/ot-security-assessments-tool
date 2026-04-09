@@ -2,7 +2,7 @@
 
 use gm_db::{Project, ProjectInput, ProjectSummary};
 
-use super::{support::mutex_state, AppState, SessionState};
+use super::{error::AppError, support::mutex_state, AppState, SessionState};
 
 const DATABASE_NOT_AVAILABLE: &str = "Database not available";
 
@@ -26,11 +26,11 @@ fn project_input(
     }
 }
 
-fn db_from_session(session: &SessionState) -> Result<&gm_db::Database, String> {
+fn db_from_session(session: &SessionState) -> Result<&gm_db::Database, AppError> {
     session
         .db
         .as_ref()
-        .ok_or_else(|| DATABASE_NOT_AVAILABLE.to_string())
+        .ok_or_else(|| AppError::invalid_input(DATABASE_NOT_AVAILABLE))
 }
 
 /// Create a new project.
@@ -44,8 +44,8 @@ pub async fn create_project(
     engagement_start: Option<String>,
     engagement_end: Option<String>,
     notes: Option<String>,
-) -> Result<Project, String> {
-    let inner = mutex_state(&state.session, "session")?;
+) -> Result<Project, AppError> {
+    let inner = mutex_state(&state.session, "session").map_err(AppError::state_lock)?;
     let db = db_from_session(&inner)?;
     let input = project_input(
         name,
@@ -56,21 +56,21 @@ pub async fn create_project(
         engagement_end,
         notes,
     );
-    db.create_project(&input).map_err(|e| e.to_string())
+    db.create_project(&input).map_err(AppError::from)
 }
 
 /// List all projects with session counts.
-pub async fn list_projects(state: &AppState) -> Result<Vec<ProjectSummary>, String> {
-    let inner = mutex_state(&state.session, "session")?;
+pub async fn list_projects(state: &AppState) -> Result<Vec<ProjectSummary>, AppError> {
+    let inner = mutex_state(&state.session, "session").map_err(AppError::state_lock)?;
     let db = db_from_session(&inner)?;
-    db.list_projects().map_err(|e| e.to_string())
+    db.list_projects().map_err(AppError::from)
 }
 
 /// Get a single project by ID.
-pub async fn get_project(state: &AppState, id: i64) -> Result<Project, String> {
-    let inner = mutex_state(&state.session, "session")?;
+pub async fn get_project(state: &AppState, id: i64) -> Result<Project, AppError> {
+    let inner = mutex_state(&state.session, "session").map_err(AppError::state_lock)?;
     let db = db_from_session(&inner)?;
-    db.get_project(id).map_err(|e| e.to_string())
+    db.get_project(id).map_err(AppError::from)
 }
 
 /// Update a project's metadata.
@@ -85,8 +85,8 @@ pub async fn update_project(
     engagement_start: Option<String>,
     engagement_end: Option<String>,
     notes: Option<String>,
-) -> Result<Project, String> {
-    let inner = mutex_state(&state.session, "session")?;
+) -> Result<Project, AppError> {
+    let inner = mutex_state(&state.session, "session").map_err(AppError::state_lock)?;
     let db = db_from_session(&inner)?;
     let input = project_input(
         name,
@@ -97,14 +97,14 @@ pub async fn update_project(
         engagement_end,
         notes,
     );
-    db.update_project(id, &input).map_err(|e| e.to_string())
+    db.update_project(id, &input).map_err(AppError::from)
 }
 
 /// Delete a project (and cascade to all its sessions).
-pub async fn delete_project(state: &AppState, id: i64) -> Result<(), String> {
-    let mut inner = mutex_state(&state.session, "session")?;
+pub async fn delete_project(state: &AppState, id: i64) -> Result<(), AppError> {
+    let mut inner = mutex_state(&state.session, "session").map_err(AppError::state_lock)?;
     let db = db_from_session(&inner)?;
-    db.delete_project(id).map_err(|e| e.to_string())?;
+    db.delete_project(id).map_err(AppError::from)?;
     // Clear active project if it was the one deleted
     if inner.current_project_id == Some(id) {
         inner.current_project_id = None;
@@ -115,18 +115,18 @@ pub async fn delete_project(state: &AppState, id: i64) -> Result<(), String> {
 
 /// Set the active project. All subsequent save_session / list_sessions calls
 /// will be scoped to this project.
-pub async fn set_active_project(state: &AppState, id: i64) -> Result<Project, String> {
-    let mut inner = mutex_state(&state.session, "session")?;
+pub async fn set_active_project(state: &AppState, id: i64) -> Result<Project, AppError> {
+    let mut inner = mutex_state(&state.session, "session").map_err(AppError::state_lock)?;
     let db = db_from_session(&inner)?;
-    let project = db.get_project(id).map_err(|e| e.to_string())?;
+    let project = db.get_project(id).map_err(AppError::from)?;
     inner.current_project_id = Some(id);
     log::info!("Active project set to '{}' ({})", project.name, id);
     Ok(project)
 }
 
 /// Clear the active project (return to project selection view).
-pub async fn clear_active_project(state: &AppState) -> Result<(), String> {
-    let mut inner = mutex_state(&state.session, "session")?;
+pub async fn clear_active_project(state: &AppState) -> Result<(), AppError> {
+    let mut inner = mutex_state(&state.session, "session").map_err(AppError::state_lock)?;
     inner.current_project_id = None;
     Ok(())
 }

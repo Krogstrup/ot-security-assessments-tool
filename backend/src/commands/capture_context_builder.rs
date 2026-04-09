@@ -2,10 +2,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use gm_types::OT_SERVER_PORTS;
-use gm_types::OT_PROTOCOL_NAMES;
-use gm_types::OT_DEVICE_TYPES;
 use gm_analysis::CaptureContext;
+use gm_types::OT_DEVICE_TYPES;
+use gm_types::OT_PROTOCOL_NAMES;
+use gm_types::OT_SERVER_PORTS;
 
 use super::{AnalysisState, CaptureState, InventoryState};
 
@@ -120,13 +120,25 @@ pub fn build_capture_context(
         }
     }
     // Sanitise infinity values.
-    let capture_start = if capture_start.is_finite() { capture_start } else { 0.0 };
-    let capture_end = if capture_end.is_finite() { capture_end } else { 0.0 };
+    let capture_start = if capture_start.is_finite() {
+        capture_start
+    } else {
+        0.0
+    };
+    let capture_end = if capture_end.is_finite() {
+        capture_end
+    } else {
+        0.0
+    };
     for v in device_first_seen.values_mut() {
-        if !v.is_finite() { *v = 0.0; }
+        if !v.is_finite() {
+            *v = 0.0;
+        }
     }
     for v in device_last_seen.values_mut() {
-        if !v.is_finite() { *v = 0.0; }
+        if !v.is_finite() {
+            *v = 0.0;
+        }
     }
 
     // Per-source dst ports.

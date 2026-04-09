@@ -3,11 +3,11 @@ use super::SharedState;
 use crate::application::services::capture_pipeline_commit::{
     compute_capture_pipeline_state, CapturePipelineDependencies, CapturePipelineSource,
 };
-use crate::commands::support::{read_state, write_state};
 use crate::commands::processor::PacketProcessor;
+use crate::commands::support::{read_state, write_state};
 use axum::Json;
-use gm_types::LIVE_CAPTURE_BATCH_SIZE;
 use gm_capture::{LiveCaptureConfig, ParsedPacket};
+use gm_types::LIVE_CAPTURE_BATCH_SIZE;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::sync::mpsc;
@@ -19,7 +19,9 @@ struct PacketProcessorCaptureSource<'a> {
 }
 
 impl CapturePipelineSource for PacketProcessorCaptureSource<'_> {
-    fn build_deep_parse_info(&self) -> std::collections::HashMap<String, crate::commands::DeepParseInfo> {
+    fn build_deep_parse_info(
+        &self,
+    ) -> std::collections::HashMap<String, crate::commands::DeepParseInfo> {
         self.processor.build_deep_parse_info()
     }
 
@@ -53,7 +55,10 @@ impl CapturePipelineSource for PacketProcessorCaptureSource<'_> {
 
     fn build_pattern_results(
         &mut self,
-    ) -> (Vec<gm_analysis::ConnectionStats>, Vec<gm_analysis::PatternAnomaly>) {
+    ) -> (
+        Vec<gm_analysis::ConnectionStats>,
+        Vec<gm_analysis::PatternAnomaly>,
+    ) {
         self.processor.build_pattern_results()
     }
 
@@ -86,7 +91,9 @@ fn spawn_processing_thread_headless(
             match rx.recv_timeout(Duration::from_millis(50)) {
                 Ok(packet) => {
                     batch.push(packet);
-                    if batch.len() >= LIVE_CAPTURE_BATCH_SIZE || last_flush.elapsed() >= flush_interval {
+                    if batch.len() >= LIVE_CAPTURE_BATCH_SIZE
+                        || last_flush.elapsed() >= flush_interval
+                    {
                         flush_batch_headless(&state, &mut processor, &mut batch);
                         last_flush = Instant::now();
                     }
@@ -144,12 +151,8 @@ fn flush_batch_headless(
         geoip_lookup: &inventory.geoip_lookup,
     };
     let mut source = PacketProcessorCaptureSource { processor };
-    let (update, _) = compute_capture_pipeline_state(
-        &mut source,
-        &deps,
-        &existing_imported_files,
-        &[],
-    );
+    let (update, _) =
+        compute_capture_pipeline_state(&mut source, &deps, &existing_imported_files, &[]);
     drop(signatures);
     drop(inventory);
 

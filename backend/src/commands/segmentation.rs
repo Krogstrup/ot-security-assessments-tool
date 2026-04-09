@@ -5,15 +5,16 @@ use gm_segmentation::SegmentationReport;
 use crate::application::use_cases::segmentation as use_case;
 
 use super::{
+    error::AppError,
     support::{read_state, write_state},
     AppState,
 };
 
 /// Run segmentation and cache the report in runtime state.
-pub fn run_segmentation(state: &AppState) -> Result<SegmentationReport, String> {
-    let capture = read_state(&state.capture, "capture")?;
-    let inventory = read_state(&state.inventory, "inventory")?;
-    let analysis = read_state(&state.analysis, "analysis")?;
+pub fn run_segmentation(state: &AppState) -> Result<SegmentationReport, AppError> {
+    let capture = read_state(&state.capture, "capture").map_err(AppError::state_lock)?;
+    let inventory = read_state(&state.inventory, "inventory").map_err(AppError::state_lock)?;
+    let analysis = read_state(&state.analysis, "analysis").map_err(AppError::state_lock)?;
 
     let report = use_case::run_segmentation(
         &inventory.assets,
@@ -22,13 +23,14 @@ pub fn run_segmentation(state: &AppState) -> Result<SegmentationReport, String> 
         &analysis.connection_stats,
         &analysis.pattern_anomalies,
         &analysis.findings,
-    )?;
+    )
+    .map_err(AppError::invalid_input)?;
 
     drop(capture);
     drop(inventory);
     drop(analysis);
 
-    let mut seg = write_state(&state.segmentation, "segmentation")?;
+    let mut seg = write_state(&state.segmentation, "segmentation").map_err(AppError::state_lock)?;
     seg.segmentation_report = Some(report.clone());
 
     log::info!(
@@ -43,11 +45,12 @@ pub fn run_segmentation(state: &AppState) -> Result<SegmentationReport, String> 
 }
 
 /// Export cached enforcement config from last segmentation report.
-pub fn export_enforcement_config(format: String, state: &AppState) -> Result<String, String> {
-    let seg = read_state(&state.segmentation, "segmentation")?;
-    let report = seg
-        .segmentation_report
-        .as_ref()
-        .ok_or_else(|| "No segmentation report available. Run segmentation analysis first.".to_string())?;
-    use_case::export_enforcement_config(format, report)
+pub fn export_enforcement_config(format: String, state: &AppState) -> Result<String, AppError> {
+    let seg = read_state(&state.segmentation, "segmentation").map_err(AppError::state_lock)?;
+    let report = seg.segmentation_report.as_ref().ok_or_else(|| {
+        AppError::invalid_input(
+            "No segmentation report available. Run segmentation analysis first.",
+        )
+    })?;
+    use_case::export_enforcement_config(format, report).map_err(AppError::invalid_input)
 }

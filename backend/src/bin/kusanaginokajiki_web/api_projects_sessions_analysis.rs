@@ -79,7 +79,10 @@ struct CveQuery {
 pub(super) fn add_routes(router: Router<SharedState>) -> Router<SharedState> {
     router
         // NOTE: /v1/projects/active must be registered before /v1/projects/{id}
-        .route(api_path::V1_PROJECTS, get(list_projects).post(create_project))
+        .route(
+            api_path::V1_PROJECTS,
+            get(list_projects).post(create_project),
+        )
         .route(
             api_path::V1_PROJECTS_ACTIVE,
             put(set_active_project).delete(clear_active_project),
@@ -106,7 +109,10 @@ pub(super) fn add_routes(router: Router<SharedState>) -> Router<SharedState> {
             get(get_naming_suggestions),
         )
         .route(api_path::V1_ANALYSIS_MALWARE, get(get_malware))
-        .route(api_path::V1_ANALYSIS_SWITCH_SECURITY, get(get_switch_security))
+        .route(
+            api_path::V1_ANALYSIS_SWITCH_SECURITY,
+            get(get_switch_security),
+        )
         .route(api_path::V1_ANALYSIS_COMPLIANCE, get(get_compliance))
         .route(api_path::V1_ANALYSIS_CVE, get(get_cve))
         .route(api_path::V1_EVENTS, get(events_handler))
@@ -115,7 +121,7 @@ pub(super) fn add_routes(router: Router<SharedState>) -> Router<SharedState> {
 async fn list_projects(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
     let projects = commands::projects::list_projects(state.as_ref())
         .await
-        .map_err(ApiError::bad_request)?;
+        .map_err(ApiError::from)?;
     to_json(projects)
 }
 
@@ -134,7 +140,7 @@ async fn create_project(
         body.notes,
     )
     .await
-    .map_err(ApiError::bad_request)?;
+    .map_err(ApiError::from)?;
     to_json(project)
 }
 
@@ -144,7 +150,7 @@ async fn get_project(
 ) -> Result<Json<Value>, ApiError> {
     let project = commands::projects::get_project(state.as_ref(), id)
         .await
-        .map_err(ApiError::bad_request)?;
+        .map_err(ApiError::from)?;
     to_json(project)
 }
 
@@ -165,7 +171,7 @@ async fn update_project(
         body.notes,
     )
     .await
-    .map_err(ApiError::bad_request)?;
+    .map_err(ApiError::from)?;
     to_json(project)
 }
 
@@ -175,7 +181,7 @@ async fn delete_project(
 ) -> Result<Json<Value>, ApiError> {
     commands::projects::delete_project(state.as_ref(), id)
         .await
-        .map_err(ApiError::bad_request)?;
+        .map_err(ApiError::from)?;
     Ok(Json(json!({})))
 }
 
@@ -185,21 +191,21 @@ async fn set_active_project(
 ) -> Result<Json<Value>, ApiError> {
     let project = commands::projects::set_active_project(state.as_ref(), body.id)
         .await
-        .map_err(ApiError::bad_request)?;
+        .map_err(ApiError::from)?;
     to_json(project)
 }
 
 async fn clear_active_project(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
     commands::projects::clear_active_project(state.as_ref())
         .await
-        .map_err(ApiError::bad_request)?;
+        .map_err(ApiError::from)?;
     Ok(Json(json!({})))
 }
 
 async fn list_sessions(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
     let sessions = commands::session::list_sessions(state.as_ref())
         .await
-        .map_err(ApiError::bad_request)?;
+        .map_err(ApiError::from)?;
     to_json(sessions)
 }
 
@@ -209,7 +215,7 @@ async fn save_session(
 ) -> Result<Json<Value>, ApiError> {
     let session = commands::session::save_session(body.name, body.description, state.as_ref())
         .await
-        .map_err(ApiError::bad_request)?;
+        .map_err(ApiError::from)?;
     to_json(session)
 }
 
@@ -219,7 +225,7 @@ async fn load_session(
 ) -> Result<Json<Value>, ApiError> {
     let session = commands::session::load_session(id, state.as_ref())
         .await
-        .map_err(ApiError::bad_request)?;
+        .map_err(ApiError::from)?;
     to_json(session)
 }
 
@@ -229,7 +235,7 @@ async fn delete_session(
 ) -> Result<Json<Value>, ApiError> {
     commands::session::delete_session(id, state.as_ref())
         .await
-        .map_err(ApiError::bad_request)?;
+        .map_err(ApiError::from)?;
     Ok(Json(json!({})))
 }
 
@@ -241,7 +247,7 @@ async fn export_session(
     let output_path = resolve_export_output_path(&body.output_path, "session.kkj")?;
     let archive = commands::session::export_session_archive(id, output_path, state.as_ref())
         .await
-        .map_err(ApiError::bad_request)?;
+        .map_err(ApiError::from)?;
     to_json(archive)
 }
 
@@ -252,7 +258,7 @@ async fn import_session(
     let archive_path = resolve_import_input_path(&body.archive_path, ImportKind::SessionArchive)?;
     let session = commands::session::import_session_archive(archive_path, state.as_ref())
         .await
-        .map_err(ApiError::bad_request)?;
+        .map_err(ApiError::from)?;
     to_json(session)
 }
 
@@ -261,56 +267,46 @@ async fn compare_sessions(
     Json(body): Json<CompareSessionsRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let diff = commands::baseline::compare_sessions(body.baseline_session_id, state.as_ref())
-        .map_err(ApiError::bad_request)?;
+        .map_err(ApiError::from)?;
     to_json(diff)
 }
 
 async fn run_analysis(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
-    let result = commands::analysis::run_analysis(state.as_ref()).map_err(ApiError::bad_request)?;
+    let result = commands::analysis::run_analysis(state.as_ref()).map_err(ApiError::from)?;
     to_json(result)
 }
 
 async fn get_findings(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
-    to_json(commands::analysis::get_findings(state.as_ref()).map_err(ApiError::bad_request)?)
+    to_json(commands::analysis::get_findings(state.as_ref()).map_err(ApiError::from)?)
 }
 
 async fn get_purdue(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
-    to_json(
-        commands::analysis::get_purdue_assignments(state.as_ref())
-            .map_err(ApiError::bad_request)?,
-    )
+    to_json(commands::analysis::get_purdue_assignments(state.as_ref()).map_err(ApiError::from)?)
 }
 
 async fn get_anomalies(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
-    to_json(commands::analysis::get_anomalies(state.as_ref()).map_err(ApiError::bad_request)?)
+    to_json(commands::analysis::get_anomalies(state.as_ref()).map_err(ApiError::from)?)
 }
 
 async fn get_credentials(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
-    to_json(
-        commands::analysis::get_credential_warnings(state.as_ref())
-            .map_err(ApiError::bad_request)?,
-    )
+    to_json(commands::analysis::get_credential_warnings(state.as_ref()).map_err(ApiError::from)?)
 }
 
 async fn get_criticality(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
-    to_json(commands::analysis::get_criticality(state.as_ref()).map_err(ApiError::bad_request)?)
+    to_json(commands::analysis::get_criticality(state.as_ref()).map_err(ApiError::from)?)
 }
 
 async fn get_naming_suggestions(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
-    to_json(
-        commands::analysis::get_naming_suggestions(state.as_ref())
-            .map_err(ApiError::bad_request)?,
-    )
+    to_json(commands::analysis::get_naming_suggestions(state.as_ref()).map_err(ApiError::from)?)
 }
 
 async fn get_malware(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
-    to_json(commands::analysis::get_malware_findings(state.as_ref()).map_err(ApiError::bad_request)?)
+    to_json(commands::analysis::get_malware_findings(state.as_ref()).map_err(ApiError::from)?)
 }
 
 async fn get_switch_security(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
     to_json(
-        commands::analysis::get_switch_security_findings(state.as_ref())
-            .map_err(ApiError::bad_request)?,
+        commands::analysis::get_switch_security_findings(state.as_ref()).map_err(ApiError::from)?,
     )
 }
 
@@ -320,7 +316,7 @@ async fn get_compliance(
 ) -> Result<Json<Value>, ApiError> {
     to_json(
         commands::analysis::get_compliance_report(state.as_ref(), query.framework)
-            .map_err(ApiError::bad_request)?,
+            .map_err(ApiError::from)?,
     )
 }
 
@@ -328,8 +324,5 @@ async fn get_cve(
     State(state): State<SharedState>,
     Query(query): Query<CveQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    to_json(
-        commands::analysis::get_cve_warnings(query.ip, state.as_ref())
-            .map_err(ApiError::bad_request)?,
-    )
+    to_json(commands::analysis::get_cve_warnings(query.ip, state.as_ref()).map_err(ApiError::from)?)
 }

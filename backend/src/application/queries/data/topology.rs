@@ -2,8 +2,8 @@
 
 use std::collections::HashSet;
 
-use gm_types::{MAX_TOPOLOGY_EDGES, MAX_TOPOLOGY_NODES};
 use gm_topology::TopologyGraph;
+use gm_types::{MAX_TOPOLOGY_EDGES, MAX_TOPOLOGY_NODES};
 
 /// Get the current network topology graph for visualization.
 ///
@@ -12,7 +12,6 @@ use gm_topology::TopologyGraph;
 /// [`gm_types::MAX_TOPOLOGY_EDGES`]. For smaller datasets the full graph
 /// is returned unchanged.
 pub fn get_topology(topo: &TopologyGraph) -> Result<TopologyGraph, String> {
-
     if topo.nodes.len() <= MAX_TOPOLOGY_NODES && topo.edges.len() <= MAX_TOPOLOGY_EDGES {
         return Ok(topo.clone());
     }

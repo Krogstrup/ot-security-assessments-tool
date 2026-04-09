@@ -86,7 +86,10 @@ pub(super) fn add_routes(router: Router<SharedState>) -> Router<SharedState> {
             physical_path::V1_PHYSICAL_INFERENCE,
             get(get_inferred_topology),
         )
-        .route(ingest_wireshark_path::V1_INGEST_ZEEK, post(import_zeek_logs))
+        .route(
+            ingest_wireshark_path::V1_INGEST_ZEEK,
+            post(import_zeek_logs),
+        )
         .route(
             ingest_wireshark_path::V1_INGEST_SURICATA,
             post(import_suricata_eve),
@@ -109,7 +112,10 @@ pub(super) fn add_routes(router: Router<SharedState>) -> Router<SharedState> {
             ingest_wireshark_path::V1_INGEST_ZEEK_DEVICE_EVENTS_BY_IP,
             get(get_device_zeek_events),
         )
-        .route(ingest_wireshark_path::V1_WIRESHARK_INFO, get(detect_wireshark))
+        .route(
+            ingest_wireshark_path::V1_WIRESHARK_INFO,
+            get(detect_wireshark),
+        )
         .route(
             ingest_wireshark_path::V1_WIRESHARK_OPEN_CONNECTION,
             post(open_in_wireshark),
@@ -133,10 +139,7 @@ async fn import_cisco_config(
     Json(body): Json<ImportPathRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let path = resolve_import_input_path(&body.path, ImportKind::PhysicalConfig)?;
-    to_json(
-        commands::physical::import_cisco_config(path, state.as_ref())
-            .map_err(ApiError::bad_request)?,
-    )
+    to_json(commands::physical::import_cisco_config(path, state.as_ref()).map_err(ApiError::from)?)
 }
 
 async fn import_mac_table(
@@ -146,7 +149,7 @@ async fn import_mac_table(
     let path = resolve_import_input_path(&body.path, ImportKind::PhysicalMac)?;
     to_json(
         commands::physical::import_mac_table(path, body.switch_hostname, state.as_ref())
-            .map_err(ApiError::bad_request)?,
+            .map_err(ApiError::from)?,
     )
 }
 
@@ -157,7 +160,7 @@ async fn import_cdp_neighbors(
     let path = resolve_import_input_path(&body.path, ImportKind::PhysicalNeighbor)?;
     to_json(
         commands::physical::import_cdp_neighbors(path, body.switch_hostname, state.as_ref())
-            .map_err(ApiError::bad_request)?,
+            .map_err(ApiError::from)?,
     )
 }
 
@@ -166,19 +169,17 @@ async fn import_arp_table(
     Json(body): Json<ImportPathRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let path = resolve_import_input_path(&body.path, ImportKind::PhysicalArp)?;
-    to_json(
-        commands::physical::import_arp_table(path, state.as_ref()).map_err(ApiError::bad_request)?,
-    )
+    to_json(commands::physical::import_arp_table(path, state.as_ref()).map_err(ApiError::from)?)
 }
 
 async fn get_physical_topology(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
-    to_json(
-        commands::physical::get_physical_topology(state.as_ref()).map_err(ApiError::bad_request)?,
-    )
+    to_json(commands::physical::get_physical_topology(state.as_ref()).map_err(ApiError::from)?)
 }
 
-async fn clear_physical_topology(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
-    commands::physical::clear_physical_topology(state.as_ref()).map_err(ApiError::bad_request)?;
+async fn clear_physical_topology(
+    State(state): State<SharedState>,
+) -> Result<Json<Value>, ApiError> {
+    commands::physical::clear_physical_topology(state.as_ref()).map_err(ApiError::from)?;
     Ok(Json(json!({})))
 }
 
@@ -188,8 +189,7 @@ async fn import_network_config(
 ) -> Result<Json<Value>, ApiError> {
     let path = resolve_import_input_path(&body.path, ImportKind::PhysicalConfig)?;
     to_json(
-        commands::physical::import_network_config(path, state.as_ref())
-            .map_err(ApiError::bad_request)?,
+        commands::physical::import_network_config(path, state.as_ref()).map_err(ApiError::from)?,
     )
 }
 
@@ -200,7 +200,7 @@ async fn import_mac_table_auto(
     let path = resolve_import_input_path(&body.path, ImportKind::PhysicalMac)?;
     to_json(
         commands::physical::import_mac_table_auto(path, body.switch_hostname, state.as_ref())
-            .map_err(ApiError::bad_request)?,
+            .map_err(ApiError::from)?,
     )
 }
 
@@ -211,20 +211,16 @@ async fn import_neighbor_table(
     let path = resolve_import_input_path(&body.path, ImportKind::PhysicalNeighbor)?;
     to_json(
         commands::physical::import_neighbor_table(path, body.switch_hostname, state.as_ref())
-            .map_err(ApiError::bad_request)?,
+            .map_err(ApiError::from)?,
     )
 }
 
 async fn run_topology_inference(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
-    to_json(
-        commands::physical::run_topology_inference(state.as_ref()).map_err(ApiError::bad_request)?,
-    )
+    to_json(commands::physical::run_topology_inference(state.as_ref()).map_err(ApiError::from)?)
 }
 
 async fn get_inferred_topology(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
-    to_json(
-        commands::physical::get_inferred_topology(state.as_ref()).map_err(ApiError::bad_request)?,
-    )
+    to_json(commands::physical::get_inferred_topology(state.as_ref()).map_err(ApiError::from)?)
 }
 
 async fn import_zeek_logs(
@@ -239,7 +235,7 @@ async fn import_zeek_logs(
     to_json(
         commands::ingest::import_zeek_logs(paths, state.as_ref())
             .await
-            .map_err(ApiError::bad_request)?,
+            .map_err(ApiError::from)?,
     )
 }
 
@@ -251,7 +247,7 @@ async fn import_suricata_eve(
     to_json(
         commands::ingest::import_suricata_eve(path, state.as_ref())
             .await
-            .map_err(ApiError::bad_request)?,
+            .map_err(ApiError::from)?,
     )
 }
 
@@ -263,7 +259,7 @@ async fn import_nmap_xml(
     to_json(
         commands::ingest::import_nmap_xml(path, state.as_ref())
             .await
-            .map_err(ApiError::bad_request)?,
+            .map_err(ApiError::from)?,
     )
 }
 
@@ -275,7 +271,7 @@ async fn import_masscan_json(
     to_json(
         commands::ingest::import_masscan_json(path, state.as_ref())
             .await
-            .map_err(ApiError::bad_request)?,
+            .map_err(ApiError::from)?,
     )
 }
 
@@ -287,7 +283,7 @@ async fn import_wazuh_alerts(
     to_json(
         commands::ingest::import_wazuh_alerts(path, state.as_ref())
             .await
-            .map_err(ApiError::bad_request)?,
+            .map_err(ApiError::from)?,
     )
 }
 
@@ -299,7 +295,7 @@ async fn import_sinema_csv(
     to_json(
         commands::ingest::import_sinema_csv(path, state.as_ref())
             .await
-            .map_err(ApiError::bad_request)?,
+            .map_err(ApiError::from)?,
     )
 }
 
@@ -311,7 +307,7 @@ async fn import_tia_xml(
     to_json(
         commands::ingest::import_tia_xml(path, state.as_ref())
             .await
-            .map_err(ApiError::bad_request)?,
+            .map_err(ApiError::from)?,
     )
 }
 
@@ -322,7 +318,7 @@ async fn get_device_zeek_events(
     to_json(
         commands::ingest::get_device_zeek_events(device_ip, state.as_ref())
             .await
-            .map_err(ApiError::bad_request)?,
+            .map_err(ApiError::from)?,
     )
 }
 
@@ -330,7 +326,7 @@ async fn detect_wireshark() -> Result<Json<Value>, ApiError> {
     to_json(
         commands::wireshark::detect_wireshark()
             .await
-            .map_err(ApiError::bad_request)?,
+            .map_err(ApiError::from)?,
     )
 }
 
@@ -340,7 +336,7 @@ async fn open_in_wireshark(
 ) -> Result<Json<Value>, ApiError> {
     commands::wireshark::open_in_wireshark(body.connection_id, state.as_ref())
         .await
-        .map_err(ApiError::bad_request)?;
+        .map_err(ApiError::from)?;
     Ok(Json(json!({})))
 }
 
@@ -349,7 +345,7 @@ async fn open_wireshark_for_node(
 ) -> Result<Json<Value>, ApiError> {
     commands::wireshark::open_wireshark_for_node(body.ip_address)
         .await
-        .map_err(ApiError::bad_request)?;
+        .map_err(ApiError::from)?;
     Ok(Json(json!({})))
 }
 
@@ -360,7 +356,7 @@ async fn get_connection_frames(
     to_json(
         commands::wireshark::get_connection_frames(connection_id, state.as_ref())
             .await
-            .map_err(ApiError::bad_request)?,
+            .map_err(ApiError::from)?,
     )
 }
 
@@ -371,7 +367,7 @@ async fn export_frames_csv(
     to_json(
         commands::wireshark::export_frames_csv(connection_id, state.as_ref())
             .await
-            .map_err(ApiError::bad_request)?,
+            .map_err(ApiError::from)?,
     )
 }
 
@@ -383,6 +379,6 @@ async fn save_frames_csv(
     let output_path = resolve_export_output_path(&body.output_path, "frames.csv")?;
     commands::wireshark::save_frames_csv(connection_id, output_path, state.as_ref())
         .await
-        .map_err(ApiError::bad_request)?;
+        .map_err(ApiError::from)?;
     Ok(Json(json!({})))
 }

@@ -8,7 +8,9 @@ use serde::Deserialize;
 
 use super::{
     base64::base64_decode,
-    report_builders::{assets_to_export, build_report_data, compute_protocol_stats, connections_to_export},
+    report_builders::{
+        assets_to_export, build_report_data, compute_protocol_stats, connections_to_export,
+    },
 };
 
 /// Report configuration from the frontend.
@@ -110,7 +112,8 @@ pub fn export_stix_bundle(
     let assets = assets_to_export(assets);
     let connections = connections_to_export(connections);
     let findings: Vec<ExportFinding> = Vec::new();
-    gm_report::stix::generate_stix_bundle(&assets, &connections, &findings).map_err(|e| e.to_string())
+    gm_report::stix::generate_stix_bundle(&assets, &connections, &findings)
+        .map_err(|e| e.to_string())
 }
 
 pub fn export_filtered_pcap(
@@ -143,8 +146,7 @@ pub fn save_topology_image(image_data: String, output_path: String) -> Result<St
     } else if image_data.starts_with("<?xml") || image_data.starts_with("<svg") {
         std::fs::write(Path::new(&output_path), image_data).map_err(|e| e.to_string())?;
     } else {
-        let bytes =
-            base64_decode(&image_data).map_err(|e| format!("Invalid image data: {}", e))?;
+        let bytes = base64_decode(&image_data).map_err(|e| format!("Invalid image data: {}", e))?;
         std::fs::write(Path::new(&output_path), bytes).map_err(|e| e.to_string())?;
     }
 

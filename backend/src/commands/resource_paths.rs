@@ -30,15 +30,11 @@ impl ResourcePaths {
     }
 
     fn probe_signatures_dir() -> PathBuf {
-        [
-            "signatures",
-            "../backend/signatures",
-            "backend/signatures",
-        ]
-        .iter()
-        .map(PathBuf::from)
-        .find(|p| p.exists())
-        .unwrap_or_else(|| PathBuf::from("signatures"))
+        ["signatures", "../backend/signatures", "backend/signatures"]
+            .iter()
+            .map(PathBuf::from)
+            .find(|p| p.exists())
+            .unwrap_or_else(|| PathBuf::from("signatures"))
     }
 
     fn probe_data_dir() -> PathBuf {
