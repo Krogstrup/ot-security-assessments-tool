@@ -571,33 +571,14 @@ fn build_conduits(
             false
         };
 
-        // Deduplicate rules by (protocol, dst_port); merge flags.
-        let mut deduped: HashMap<(String, Option<u16>), ConduitRule> = HashMap::new();
-        for rule in agg.rules {
-            let rkey = (rule.protocol.clone(), rule.dst_port);
-            deduped
-                .entry(rkey)
-                .and_modify(|existing| {
-                    existing.has_write_ops |= rule.has_write_ops;
-                    existing.has_config_ops |= rule.has_config_ops;
-                    for tech in &rule.attack_techniques {
-                        if !existing.attack_techniques.contains(tech) {
-                            existing.attack_techniques.push(tech.clone());
-                        }
-                    }
-                    if existing.risk_note.is_none() {
-                        existing.risk_note = rule.risk_note.clone();
-                    }
-                })
-                .or_insert(rule);
-        }
+        let rules = dedup_conduit_rules(agg.rules);
 
         conduits.push(Conduit {
             id: Uuid::new_v4().to_string(),
             src_zone_id,
             dst_zone_id,
             direction,
-            rules: deduped.into_values().collect(),
+            rules,
             cross_purdue_risk,
         });
     }
