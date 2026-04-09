@@ -1,34 +1,52 @@
 use axum::extract::{Path, State};
-use axum::Json;
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::web_requests::ImportPcapRequest;
-use super::web_support::{
+use super::super::web_api_paths::core as api_path;
+use super::super::web_runtime::to_json;
+use super::super::web_support::{
     list_import_files_for_kind, resolve_import_input_path, ApiError, ImportKind,
     ImportPcapFilesResponse,
 };
-use super::SharedState;
+use super::super::SharedState;
 use crate::commands;
 use crate::commands::capture::ImportResult;
 
-pub(super) async fn health() -> Json<serde_json::Value> {
+#[derive(Debug, Deserialize)]
+struct ImportPcapRequest {
+    paths: Vec<String>,
+}
+
+pub(super) fn add_routes(router: Router<SharedState>) -> Router<SharedState> {
+    router
+        .route(api_path::HEALTH, get(health))
+        .route(api_path::SYSTEM_APP_INFO, get(get_app_info))
+        .route(api_path::SYSTEM_INTERFACES, get(get_interfaces))
+        .route(api_path::SYSTEM_IMPORT_PCAP_FILES, get(list_import_pcap_files))
+        .route(api_path::SYSTEM_IMPORT_FILES_BY_KIND, get(list_import_files))
+        .route(api_path::CAPTURE_IMPORT_PCAP, post(import_pcap))
+}
+
+async fn health() -> Json<serde_json::Value> {
     Json(json!({ "ok": true }))
 }
 
-pub(super) async fn get_app_info() -> Result<Json<Value>, ApiError> {
-    super::web_runtime::to_json(commands::system::get_app_info())
+async fn get_app_info() -> Result<Json<Value>, ApiError> {
+    to_json(commands::system::get_app_info())
 }
 
-pub(super) async fn get_interfaces() -> Result<Json<Vec<gm_capture::NetworkInterface>>, ApiError> {
+async fn get_interfaces() -> Result<Json<Vec<gm_capture::NetworkInterface>>, ApiError> {
     let interfaces = commands::system::list_interfaces().map_err(ApiError::bad_request)?;
     Ok(Json(interfaces))
 }
 
-pub(super) async fn list_import_pcap_files() -> Result<Json<ImportPcapFilesResponse>, ApiError> {
+async fn list_import_pcap_files() -> Result<Json<ImportPcapFilesResponse>, ApiError> {
     Ok(Json(list_import_files_for_kind(ImportKind::Pcap)?))
 }
 
-pub(super) async fn list_import_files(
+async fn list_import_files(
     Path(kind): Path<String>,
 ) -> Result<Json<ImportPcapFilesResponse>, ApiError> {
     let kind = kind.parse::<ImportKind>().map_err(|_| {
@@ -41,7 +59,7 @@ pub(super) async fn list_import_files(
     Ok(Json(list_import_files_for_kind(kind)?))
 }
 
-pub(super) async fn import_pcap(
+async fn import_pcap(
     State(state): State<SharedState>,
     Json(request): Json<ImportPcapRequest>,
 ) -> Result<Json<ImportResult>, ApiError> {

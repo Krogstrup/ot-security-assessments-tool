@@ -5,7 +5,7 @@
 //! - Opening Wireshark with a display filter for a specific connection
 //! - Exporting filtered packets to CSV (View Frames)
 //!
-//! This module uses the Tauri shell plugin to launch Wireshark as a subprocess.
+//! This module launches Wireshark as a subprocess.
 //! It NEVER performs active network operations — only opens captured data.
 
 use serde::Serialize;

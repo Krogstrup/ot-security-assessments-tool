@@ -191,7 +191,7 @@ pub enum AnomalyType {
 /// Input data for analysis — a snapshot of the current state.
 ///
 /// This is constructed from AppStateInner fields and passed
-/// to analysis functions. Avoids coupling gm-analysis to Tauri.
+/// to analysis functions. Avoids coupling gm-analysis to runtime adapters.
 #[derive(Debug, Clone, Default)]
 pub struct AnalysisInput {
     pub assets: Vec<AssetSnapshot>,

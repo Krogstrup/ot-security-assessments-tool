@@ -133,6 +133,50 @@ pub const DEVICE_TYPE_FIREWALL: &str = "firewall";
 pub const DEVICE_TYPE_IT_DEVICE: &str = "it_device";
 pub const DEVICE_TYPE_WORKSTATION: &str = "workstation";
 
+/// OT/ICS field-device types.
+///
+/// Aggregate of the `DEVICE_TYPE_*` constants that represent operational
+/// technology endpoints.  Use this slice for membership tests instead of
+/// duplicating the list at each call site.
+pub const OT_DEVICE_TYPES: &[&str] = &[
+    DEVICE_TYPE_PLC,
+    DEVICE_TYPE_RTU,
+    DEVICE_TYPE_HMI,
+    DEVICE_TYPE_HISTORIAN,
+    DEVICE_TYPE_EWS,
+    DEVICE_TYPE_SCADA_SERVER,
+    DEVICE_TYPE_IO_SERVER,
+    DEVICE_TYPE_FIELD_DEVICE,
+    DEVICE_TYPE_CONTROLLER,
+];
+
+// ── OT protocol names ─────────────────────────────────────────────────────────
+
+/// Canonical PascalCase OT/ICS protocol name strings.
+///
+/// These match the values stored in `AssetSnapshot::protocols` and
+/// `ConnectionSnapshot::protocol` when populated from the connection layer.
+/// Use this slice for membership tests instead of maintaining per-module
+/// copies that risk drifting out of sync.
+pub const OT_PROTOCOL_NAMES: &[&str] = &[
+    "Modbus",
+    "Dnp3",
+    "EthernetIp",
+    "S7comm",
+    "Bacnet",
+    "OpcUa",
+    "Iec104",
+    "Profinet",
+    "ProfinetDcp",
+    "HartIp",
+    "GeSrtp",
+    "WonderwareSuitelink",
+    "FoundationFieldbus",
+    "FfHse",
+    "Mqtt",
+    "Snmp",
+];
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /// Returns `true` if `port` is a recognised OT/ICS server-side port.

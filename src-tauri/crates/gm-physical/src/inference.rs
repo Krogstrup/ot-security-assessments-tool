@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{BroadcastDomain, InferredGateway, InferredSubnet, InferredTopology, SwitchCandidate};
 
-/// Decoupled input for topology inference — no Tauri state dependency.
+/// Decoupled input for topology inference — no transport/runtime state dependency.
 #[derive(Debug, Clone, Default)]
 pub struct InferenceInput {
     /// IP address + optional MAC for each known asset

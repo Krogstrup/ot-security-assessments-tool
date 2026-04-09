@@ -1,4 +1,4 @@
-//! Tauri commands for signature management.
+//! Signature management operations.
 //!
 //! Provides commands to list, reload, and test signatures from the frontend.
 

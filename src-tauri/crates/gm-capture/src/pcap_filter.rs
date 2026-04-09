@@ -3,7 +3,7 @@
 //! Reads raw packets from one or more PCAP files, filters by IP address
 //! and/or port number, and writes matching packets to an output file.
 //!
-//! Used by the `export_filtered_pcap` Tauri command.
+//! Used by the `export_filtered_pcap` API operation.
 
 use std::collections::HashSet;
 use std::path::Path;

@@ -1,4 +1,4 @@
-//! Tauri commands for physical topology operations.
+//! Physical topology operations.
 //!
 //! Supports importing Cisco IOS, Juniper JunOS, and HP/Aruba ProCurve
 //! configs, MAC address tables, LLDP/CDP neighbors, and ARP tables.

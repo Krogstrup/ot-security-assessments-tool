@@ -1,6 +1,6 @@
 //! Security analysis commands: ATT&CK detection, Purdue assignment, anomaly scoring.
 //!
-//! These commands bridge the gm-analysis crate to the Tauri frontend.
+//! These commands bridge the gm-analysis crate to API endpoints.
 //! They construct AnalysisInput from AppState, run analysis, and
 //! store results back into AppState.
 

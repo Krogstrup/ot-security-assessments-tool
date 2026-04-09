@@ -1,7 +1,7 @@
 //! # Kusanagi Kajiki (草薙カジキ)
 //!
 //! Modern ICS/SCADA passive network discovery tool.
-//! Successor to the NSA's GRASSMARLIN, rebuilt with Tauri 2.0 (Rust) and SvelteKit.
+//! Successor to the NSA's GRASSMARLIN, rebuilt with Rust and SvelteKit.
 //!
 //! ## Crate Architecture
 //!

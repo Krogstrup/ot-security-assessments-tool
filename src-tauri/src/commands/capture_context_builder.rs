@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use gm_constants::OT_SERVER_PORTS;
+use gm_constants::{OT_DEVICE_TYPES, OT_PROTOCOL_NAMES, OT_SERVER_PORTS};
 use gm_analysis::CaptureContext;
 
 use super::{AnalysisState, CaptureState, InventoryState};
@@ -18,39 +18,14 @@ pub fn build_capture_context(
     analysis: &AnalysisState,
 ) -> CaptureContext {
     // OT device IPs: assets running OT protocols or with OT device types.
-    let ot_device_types = [
-        "plc",
-        "rtu",
-        "hmi",
-        "historian",
-        "engineering_workstation",
-        "scada_server",
-        "io_server",
-        "field_device",
-        "controller",
-    ];
-    let ot_protocol_names = [
-        "Modbus",
-        "Dnp3",
-        "EthernetIp",
-        "S7comm",
-        "Bacnet",
-        "OpcUa",
-        "Iec104",
-        "ProfinetDcp",
-        "HartIp",
-        "GeSrtp",
-        "WonderwareSuitelink",
-    ];
-
     let mut ot_device_ips: HashSet<String> = inventory
         .assets
         .iter()
         .filter(|a| {
-            ot_device_types.contains(&a.device_type.as_str())
+            OT_DEVICE_TYPES.contains(&a.device_type.as_str())
                 || a.protocols
                     .iter()
-                    .any(|p| ot_protocol_names.contains(&p.as_str()))
+                    .any(|p| OT_PROTOCOL_NAMES.contains(&p.as_str()))
         })
         .map(|a| a.ip_address.clone())
         .collect();

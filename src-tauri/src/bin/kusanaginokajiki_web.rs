@@ -16,20 +16,6 @@ mod application;
 mod commands;
 #[path = "kusanaginokajiki_web/web_api_paths.rs"]
 mod web_api_paths;
-#[path = "kusanaginokajiki_web/web_handlers_analysis.rs"]
-mod web_handlers_analysis;
-#[path = "kusanaginokajiki_web/web_handlers_capture_data.rs"]
-mod web_handlers_capture_data;
-#[path = "kusanaginokajiki_web/web_handlers_core.rs"]
-mod web_handlers_core;
-#[path = "kusanaginokajiki_web/web_handlers_patterns_exports.rs"]
-mod web_handlers_patterns_exports;
-#[path = "kusanaginokajiki_web/web_handlers_physical_ingest_wireshark.rs"]
-mod web_handlers_physical_ingest_wireshark;
-#[path = "kusanaginokajiki_web/web_handlers_projects_sessions.rs"]
-mod web_handlers_projects_sessions;
-#[path = "kusanaginokajiki_web/web_requests.rs"]
-mod web_requests;
 #[path = "kusanaginokajiki_web/web_routes.rs"]
 mod web_routes;
 #[path = "kusanaginokajiki_web/web_runtime.rs"]

@@ -9,9 +9,9 @@
 //! - **15D** `enforcement`    — export rules as Cisco ACL / Suricata / JSON
 //! - **15E** `simulation`     — replay traffic against policy, quantify impact
 //!
-//! All modules receive a [`SegmentationInput`] assembled by the Tauri command
+//! All modules receive a [`SegmentationInput`] assembled by the command adapter
 //! layer and return components that are bundled into a [`SegmentationReport`].
-//! No dependency on `gm-analysis`, `gm-topology`, or Tauri state.
+//! No dependency on `gm-analysis`, `gm-topology`, or transport state.
 
 pub mod enforcement;
 pub mod error;
@@ -200,7 +200,7 @@ pub struct SecurityFinding {
 
 /// Complete input bundle for the segmentation engine.
 ///
-/// No Tauri state: assembled by `commands/segmentation.rs` and passed in.
+/// No transport state: assembled by `commands/segmentation.rs` and passed in.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SegmentationInput {
     pub assets: Vec<AssetProfile>,

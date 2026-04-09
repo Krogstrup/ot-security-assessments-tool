@@ -1,4 +1,4 @@
-//! Tauri / web adapter layer for external data ingestion.
+//! Adapter layer for external data ingestion.
 //!
 //! Each function parses its source-specific format, then delegates all
 //! state-mutation work to [`crate::application::use_cases::ingest::run_ingest`].
