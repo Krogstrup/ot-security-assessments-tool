@@ -15,11 +15,10 @@ use gm_analysis::{
 };
 
 use crate::application::mappers::{
+    analysis_input::build_analysis_input,
     deep_parse::build_deep_parse_snapshot_map,
     snapshots::asset_snapshots,
 };
-
-use crate::application::mappers::analysis_input::build_analysis_input;
 
 use super::{
     capture_context_builder::build_capture_context,

@@ -7,6 +7,8 @@ use crate::{
         deep_parse::build_deep_parse_snapshot_map,
         snapshots::{asset_snapshots, connection_snapshots},
     },
+    // TODO: CaptureState/InventoryState should migrate to the application layer;
+    // this upward dependency (application → commands) is a known layering violation.
     commands::{CaptureState, InventoryState},
 };
 

@@ -1,7 +1,7 @@
 //! Canonical mapper: `InventoryState` deep_parse_info → `DeepParseSnapshot` map.
 //!
 //! Single source of truth consumed by:
-//!   - `build_analysis_input()` in commands/analysis_input_builder.rs
+//!   - `build_analysis_input()` in application/mappers/analysis_input.rs
 //!   - malware detection in commands/analysis.rs
 //!
 //! # Layering note
