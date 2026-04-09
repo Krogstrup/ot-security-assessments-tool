@@ -1,4 +1,5 @@
 pub mod mappers {
+    pub mod analysis_input;
     pub mod deep_parse;
     pub mod snapshots;
 }

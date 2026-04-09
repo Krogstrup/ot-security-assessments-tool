@@ -19,8 +19,9 @@ use crate::application::mappers::{
     snapshots::asset_snapshots,
 };
 
+use crate::application::mappers::analysis_input::build_analysis_input;
+
 use super::{
-    analysis_input_builder::build_analysis_input,
     capture_context_builder::build_capture_context,
     support::{read_state, write_state},
     AnalysisState, AppState, InventoryState,

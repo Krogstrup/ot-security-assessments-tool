@@ -2,12 +2,13 @@
 
 use gm_analysis::AnalysisInput;
 
-use crate::application::mappers::{
-    deep_parse::build_deep_parse_snapshot_map,
-    snapshots::{asset_snapshots, connection_snapshots},
+use crate::{
+    application::mappers::{
+        deep_parse::build_deep_parse_snapshot_map,
+        snapshots::{asset_snapshots, connection_snapshots},
+    },
+    commands::{CaptureState, InventoryState},
 };
-
-use super::{CaptureState, InventoryState};
 
 /// Build `AnalysisInput` from capture + inventory domain slices.
 pub fn build_analysis_input(capture: &CaptureState, inventory: &InventoryState) -> AnalysisInput {
