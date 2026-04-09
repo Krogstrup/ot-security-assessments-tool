@@ -1,7 +1,7 @@
 import type { IcsProtocol } from './protocols';
 
 // AssetSignatureMatch crosses the IPC boundary — re-export from generated binding.
-import type { AssetSignatureMatch } from '../../../src-tauri/bindings/gen/types/AssetSignatureMatch';
+import type { AssetSignatureMatch } from '../../../backend/bindings/gen/types/AssetSignatureMatch';
 export type { AssetSignatureMatch };
 
 export type DeviceType =

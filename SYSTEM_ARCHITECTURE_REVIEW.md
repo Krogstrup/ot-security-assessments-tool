@@ -11,12 +11,12 @@ Last verified against code on **2026-04-09**.
 - Frontend: SvelteKit/Vite app under `src/`
 - Backend: Axum server binary `kusanaginokajiki_web`
 - Combined runtime: backend serves static frontend build + `/api/*` endpoints
-  - Static serving: `src-tauri/src/bin/kusanaginokajiki_web.rs`
+  - Static serving: `backend/src/bin/kusanaginokajiki_web.rs`
   - API mount: `.nest("/api", build_api_router())`
 
 ## 1.2 API surface organization
 
-Route groups in `src-tauri/src/bin/kusanaginokajiki_web/web_routes.rs`:
+Route groups in `backend/src/bin/kusanaginokajiki_web/web_routes.rs`:
 
 - `core` (health, app info, interface listing, import file discovery)
 - `capture_data` (capture lifecycle + data queries + asset updates)
@@ -28,10 +28,10 @@ Route groups in `src-tauri/src/bin/kusanaginokajiki_web/web_routes.rs`:
 
 ## 2.1 Layering currently visible in code
 
-- Interface layer: `src-tauri/src/bin/kusanaginokajiki_web/api_*.rs`
-- Adapter/state layer: `src-tauri/src/commands/*`
-- Application extraction layer: `src-tauri/src/application/{queries,use_cases,services,mappers}`
-- Domain/infrastructure crates: `src-tauri/crates/gm-*`
+- Interface layer: `backend/src/bin/kusanaginokajiki_web/api_*.rs`
+- Adapter/state layer: `backend/src/commands/*`
+- Application extraction layer: `backend/src/application/{queries,use_cases,services,mappers}`
+- Domain/infrastructure crates: `backend/crates/gm-*`
 
 ## 2.2 Areas already extracted to application modules
 

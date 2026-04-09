@@ -6,7 +6,7 @@ Use this checklist while refreshing:
 
 - `ARCHITECTURE_REVIEW.md`
   - runtime entrypoint and route modules confirmed
-  - application extractions listed from `src-tauri/src/application/*`
+  - application extractions listed from `backend/src/application/*`
   - command-heavy hotspots quantified
   - dependency leakage and error-contract status stated
   - incremental backend roadmap included
@@ -29,22 +29,22 @@ Run targeted discovery commands before writing:
 
 ```bash
 # Backend runtime + routes
-sed -n '1,220p' src-tauri/Cargo.toml
-sed -n '1,220p' src-tauri/src/bin/kusanaginokajiki_web.rs
-sed -n '1,260p' src-tauri/src/bin/kusanaginokajiki_web/web_routes.rs
-sed -n '1,320p' src-tauri/src/bin/kusanaginokajiki_web/web_api_paths.rs
+sed -n '1,220p' backend/Cargo.toml
+sed -n '1,220p' backend/src/bin/kusanaginokajiki_web.rs
+sed -n '1,260p' backend/src/bin/kusanaginokajiki_web/web_routes.rs
+sed -n '1,320p' backend/src/bin/kusanaginokajiki_web/web_api_paths.rs
 
 # Backend extraction map
-find src-tauri/src/application -maxdepth 3 -type f | sort
-sed -n '1,220p' src-tauri/src/application/mod.rs
-sed -n '1,280p' src-tauri/src/commands/mod.rs
+find backend/src/application -maxdepth 3 -type f | sort
+sed -n '1,220p' backend/src/application/mod.rs
+sed -n '1,280p' backend/src/commands/mod.rs
 
 # Frontend structure + hotspots
 sed -n '1,260p' src/routes/+page.svelte
 find src/lib/components -maxdepth 2 -type d | sort
 find src/lib/stores -maxdepth 2 -type f | sort
 find src/lib/api -maxdepth 2 -type f | sort
-wc -l src-tauri/src/commands/*.rs src/routes/+page.svelte src/lib/components/*View.svelte | sort -nr
+wc -l backend/src/commands/*.rs src/routes/+page.svelte src/lib/components/*View.svelte | sort -nr
 
 # Validation usage
 rg -n "httpValidated|httpJson" src/lib/api

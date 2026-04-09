@@ -51,7 +51,7 @@ When changing code, state which layer you touched:
 ## 2) Backend Rules (Rust/Axum)
 
 ### Do
-- Treat `src-tauri/src/commands/*` as **adapter layer** target; move business workflows to application modules when practical.
+- Treat `backend/src/commands/*` as **adapter layer** target; move business workflows to application modules when practical.
 - Encapsulate multi-slice `AppState` mutations behind focused functions/services.
 - Normalize argument aliasing at the adapter boundary only.
 - Add/extend DTO structs instead of ad-hoc maps where possible.

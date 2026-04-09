@@ -1,7 +1,7 @@
 import type { DeviceType } from './assets';
 
 // PacketSummary crosses the IPC boundary — re-export from generated binding.
-export type { PacketSummary } from '../../../src-tauri/bindings/gen/types/PacketSummary';
+export type { PacketSummary } from '../../../backend/bindings/gen/types/PacketSummary';
 
 export interface Connection {
 	id: string;

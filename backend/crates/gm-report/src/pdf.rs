@@ -28,7 +28,7 @@ pub fn generate_report(
         "/Library/Fonts",
         // Flatpak / bundled
         "fonts",
-        "../src-tauri/fonts",
+        "../backend/fonts",
     ];
 
     let mut font_family = None;

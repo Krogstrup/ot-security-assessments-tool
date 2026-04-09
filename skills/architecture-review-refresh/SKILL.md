@@ -15,16 +15,16 @@ Update the three architecture review docs from source code evidence, not from pr
 
 1. Collect backend runtime evidence.
 - Verify runtime entrypoint and route composition in:
-  - `src-tauri/Cargo.toml`
-  - `src-tauri/src/bin/kusanaginokajiki_web.rs`
-  - `src-tauri/src/bin/kusanaginokajiki_web/web_routes.rs`
-  - `src-tauri/src/bin/kusanaginokajiki_web/web_api_paths.rs`
+  - `backend/Cargo.toml`
+  - `backend/src/bin/kusanaginokajiki_web.rs`
+  - `backend/src/bin/kusanaginokajiki_web/web_routes.rs`
+  - `backend/src/bin/kusanaginokajiki_web/web_api_paths.rs`
 - Verify current extraction level in:
-  - `src-tauri/src/application/mod.rs`
-  - `src-tauri/src/application/queries/*`
-  - `src-tauri/src/application/use_cases/*`
-  - `src-tauri/src/application/services/*`
-  - `src-tauri/src/commands/mod.rs`
+  - `backend/src/application/mod.rs`
+  - `backend/src/application/queries/*`
+  - `backend/src/application/use_cases/*`
+  - `backend/src/application/services/*`
+  - `backend/src/commands/mod.rs`
 
 2. Collect frontend structure evidence.
 - Verify app shell and top-level routing in:

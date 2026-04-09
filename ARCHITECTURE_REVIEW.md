@@ -8,21 +8,21 @@ Last verified against code on **2026-04-09**.
 
 ### Runtime entrypoint and transport
 
-- Runtime binary: `kusanaginokajiki_web` (`src-tauri/Cargo.toml` `default-run`)
-- HTTP server: `src-tauri/src/bin/kusanaginokajiki_web.rs`
-- API composition: `src-tauri/src/bin/kusanaginokajiki_web/web_routes.rs`
+- Runtime binary: `kusanaginokajiki_web` (`backend/Cargo.toml` `default-run`)
+- HTTP server: `backend/src/bin/kusanaginokajiki_web.rs`
+- API composition: `backend/src/bin/kusanaginokajiki_web/web_routes.rs`
 - Route groups:
   - `api_core.rs`
   - `api_capture_data.rs`
   - `api_physical_ingest_wireshark.rs`
   - `api_patterns_exports.rs`
   - `api_projects_sessions_analysis.rs`
-- API path constants: `src-tauri/src/bin/kusanaginokajiki_web/web_api_paths.rs`
+- API path constants: `backend/src/bin/kusanaginokajiki_web/web_api_paths.rs`
 
 ### State model
 
 - Shared state: `Arc<AppState>`
-- State root: `src-tauri/src/commands/mod.rs`
+- State root: `backend/src/commands/mod.rs`
 - Domain slices in `AppState`:
   - `capture`, `inventory`, `analysis`, `session`, `physical`, `segmentation`, `signatures`
 - Lock order is explicitly documented and enforced by convention in `commands/mod.rs`.
@@ -31,7 +31,7 @@ Last verified against code on **2026-04-09**.
 
 #### Interface layer (HTTP handlers)
 
-- `src-tauri/src/bin/kusanaginokajiki_web/api_*.rs`
+- `backend/src/bin/kusanaginokajiki_web/api_*.rs`
 - Responsibilities:
   - parse HTTP body/query/path
   - normalize payload names
@@ -40,7 +40,7 @@ Last verified against code on **2026-04-09**.
 
 #### Adapter layer (`commands/*`)
 
-- `src-tauri/src/commands/*.rs`
+- `backend/src/commands/*.rs`
 - Mixed role today:
   - part adapter
   - part application orchestration
@@ -48,13 +48,13 @@ Last verified against code on **2026-04-09**.
 
 #### Application modules (extracted and actively used)
 
-- `src-tauri/src/application/queries/data/*`
-- `src-tauri/src/application/use_cases/export/*`
-- `src-tauri/src/application/use_cases/session/*`
-- `src-tauri/src/application/use_cases/segmentation/*`
-- `src-tauri/src/application/use_cases/ingest/*`
-- `src-tauri/src/application/services/capture_pipeline_commit.rs`
-- `src-tauri/src/application/mappers/*`
+- `backend/src/application/queries/data/*`
+- `backend/src/application/use_cases/export/*`
+- `backend/src/application/use_cases/session/*`
+- `backend/src/application/use_cases/segmentation/*`
+- `backend/src/application/use_cases/ingest/*`
+- `backend/src/application/services/capture_pipeline_commit.rs`
+- `backend/src/application/mappers/*`
 
 #### Domain + infrastructure crates
 

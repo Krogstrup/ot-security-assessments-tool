@@ -2,7 +2,7 @@
  * Runtime Zod schemas for the five highest-traffic IPC response types.
  *
  * These schemas mirror the TypeScript types in `$lib/types/index.ts` and the
- * Rust structs in `src-tauri/src/commands/`. When a Rust struct is renamed or
+ * Rust structs in `backend/src/commands/`. When a Rust struct is renamed or
  * a field is added/removed, update the corresponding schema here so that
  * mismatches are surfaced as runtime ZodErrors instead of silent `undefined`
  * field values.

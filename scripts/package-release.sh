@@ -6,7 +6,7 @@ cd "$ROOT_DIR"
 
 APP_NAME="kusanaginokajiki"
 BIN_NAME="kusanaginokajiki_web"
-VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -n 1)"
+VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' backend/Cargo.toml | head -n 1)"
 ARCH="$(uname -m)"
 PLATFORM="linux-${ARCH}"
 PACKAGE_NAME="${APP_NAME}-${VERSION}-${PLATFORM}"
@@ -16,9 +16,9 @@ DIST_DIR="$RELEASE_ROOT/dist"
 ARCHIVE_PATH="$DIST_DIR/${PACKAGE_NAME}.tar.gz"
 
 FRONTEND_DIR="$ROOT_DIR/build"
-BIN_PATH="$ROOT_DIR/src-tauri/target/release/$BIN_NAME"
-SIGNATURES_DIR="$ROOT_DIR/src-tauri/signatures"
-DATA_DIR="$ROOT_DIR/src-tauri/data"
+BIN_PATH="$ROOT_DIR/backend/target/release/$BIN_NAME"
+SIGNATURES_DIR="$ROOT_DIR/backend/signatures"
+DATA_DIR="$ROOT_DIR/backend/data"
 
 echo "==> Building frontend + backend release binary"
 npm run build

@@ -32,8 +32,8 @@ impl ResourcePaths {
     fn probe_signatures_dir() -> PathBuf {
         [
             "signatures",
-            "../src-tauri/signatures",
-            "src-tauri/signatures",
+            "../backend/signatures",
+            "backend/signatures",
         ]
         .iter()
         .map(PathBuf::from)
@@ -42,7 +42,7 @@ impl ResourcePaths {
     }
 
     fn probe_data_dir() -> PathBuf {
-        ["data", "../src-tauri/data", "src-tauri/data"]
+        ["data", "../backend/data", "backend/data"]
             .iter()
             .map(PathBuf::from)
             .find(|p| p.join("oui.tsv").exists())

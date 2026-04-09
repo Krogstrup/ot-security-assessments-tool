@@ -1,23 +1,23 @@
 // ─── Protocol detail types (Rust-first, auto-generated) ───────
 // These types cross the IPC boundary. Their source of truth is the
 // Rust struct with #[derive(TS)]. Do not redefine them here.
-// To regenerate: cargo test --manifest-path src-tauri/Cargo.toml
-export type { DeepParseInfo } from '../../../src-tauri/bindings/gen/types/DeepParseInfo';
-export type { EnipDetail } from '../../../src-tauri/bindings/gen/types/EnipDetail';
-export type { S7Detail } from '../../../src-tauri/bindings/gen/types/S7Detail';
-export type { BacnetDetail } from '../../../src-tauri/bindings/gen/types/BacnetDetail';
-export type { Iec104Detail } from '../../../src-tauri/bindings/gen/types/Iec104Detail';
-export type { ProfinetDcpDetail } from '../../../src-tauri/bindings/gen/types/ProfinetDcpDetail';
-export type { LldpDetail } from '../../../src-tauri/bindings/gen/types/LldpDetail';
-export type { SnmpDetail } from '../../../src-tauri/bindings/gen/types/SnmpDetail';
-export type { ModbusDetail } from '../../../src-tauri/bindings/gen/types/ModbusDetail';
-export type { Dnp3Detail } from '../../../src-tauri/bindings/gen/types/Dnp3Detail';
-export type { FunctionCodeStat } from '../../../src-tauri/bindings/gen/types/FunctionCodeStat';
-export type { RegisterRangeInfo } from '../../../src-tauri/bindings/gen/types/RegisterRangeInfo';
-export type { ModbusDeviceIdInfo } from '../../../src-tauri/bindings/gen/types/ModbusDeviceIdInfo';
-export type { ModbusRelationship } from '../../../src-tauri/bindings/gen/types/ModbusRelationship';
-export type { Dnp3Relationship } from '../../../src-tauri/bindings/gen/types/Dnp3Relationship';
-export type { PollingInterval } from '../../../src-tauri/bindings/gen/types/PollingInterval';
+// To regenerate: cargo test --manifest-path backend/Cargo.toml
+export type { DeepParseInfo } from '../../../backend/bindings/gen/types/DeepParseInfo';
+export type { EnipDetail } from '../../../backend/bindings/gen/types/EnipDetail';
+export type { S7Detail } from '../../../backend/bindings/gen/types/S7Detail';
+export type { BacnetDetail } from '../../../backend/bindings/gen/types/BacnetDetail';
+export type { Iec104Detail } from '../../../backend/bindings/gen/types/Iec104Detail';
+export type { ProfinetDcpDetail } from '../../../backend/bindings/gen/types/ProfinetDcpDetail';
+export type { LldpDetail } from '../../../backend/bindings/gen/types/LldpDetail';
+export type { SnmpDetail } from '../../../backend/bindings/gen/types/SnmpDetail';
+export type { ModbusDetail } from '../../../backend/bindings/gen/types/ModbusDetail';
+export type { Dnp3Detail } from '../../../backend/bindings/gen/types/Dnp3Detail';
+export type { FunctionCodeStat } from '../../../backend/bindings/gen/types/FunctionCodeStat';
+export type { RegisterRangeInfo } from '../../../backend/bindings/gen/types/RegisterRangeInfo';
+export type { ModbusDeviceIdInfo } from '../../../backend/bindings/gen/types/ModbusDeviceIdInfo';
+export type { ModbusRelationship } from '../../../backend/bindings/gen/types/ModbusRelationship';
+export type { Dnp3Relationship } from '../../../backend/bindings/gen/types/Dnp3Relationship';
+export type { PollingInterval } from '../../../backend/bindings/gen/types/PollingInterval';
 
 // ─── Manual-only types (pure UI / no Rust counterpart) ────────
 
