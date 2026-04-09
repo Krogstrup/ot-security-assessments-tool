@@ -6,7 +6,6 @@ pub mod correlation;
 pub mod error;
 pub mod handlers;
 pub mod ingest;
-pub mod patterns;
 pub mod physical;
 pub mod processor;
 pub mod projects;

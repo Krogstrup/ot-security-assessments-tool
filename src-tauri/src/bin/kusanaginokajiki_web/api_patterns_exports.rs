@@ -156,12 +156,12 @@ async fn list_plugins() -> Result<Json<Value>, ApiError> {
 }
 
 async fn get_connection_stats(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
-    to_json(commands::patterns::get_connection_stats(state.as_ref()).map_err(ApiError::bad_request)?)
+    to_json(commands::analysis::get_connection_stats(state.as_ref()).map_err(ApiError::bad_request)?)
 }
 
 async fn get_pattern_anomalies(State(state): State<SharedState>) -> Result<Json<Value>, ApiError> {
     to_json(
-        commands::patterns::get_pattern_anomalies(state.as_ref()).map_err(ApiError::bad_request)?,
+        commands::analysis::get_pattern_anomalies(state.as_ref()).map_err(ApiError::bad_request)?,
     )
 }
 
@@ -169,7 +169,7 @@ async fn get_redundancy_protocols(
     State(state): State<SharedState>,
 ) -> Result<Json<Value>, ApiError> {
     to_json(
-        commands::patterns::get_redundancy_protocols(state.as_ref())
+        commands::analysis::get_redundancy_protocols(state.as_ref())
             .map_err(ApiError::bad_request)?,
     )
 }
