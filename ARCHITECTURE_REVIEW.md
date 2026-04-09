@@ -58,7 +58,7 @@ Last verified against code on **2026-04-09**.
 
 #### Domain + infrastructure crates
 
-- `gm-analysis`, `gm-capture`, `gm-db`, `gm-ingest`, `gm-parsers`, `gm-topology`, `gm-signatures`, `gm-segmentation`, `gm-report`, `gm-physical`, `gm-models`, `gm-constants`
+- `gm-analysis`, `gm-capture`, `gm-db`, `gm-ingest`, `gm-parsers`, `gm-topology`, `gm-signatures`, `gm-segmentation`, `gm-report`, `gm-physical`, `gm-types`
 
 ## 2. What Is Already in Good Shape
 
