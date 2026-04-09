@@ -3,7 +3,7 @@ use super::SharedState;
 use crate::application::services::capture_pipeline_commit::commit_capture_pipeline_state;
 use crate::commands::processor::PacketProcessor;
 use axum::Json;
-use gm_constants::LIVE_CAPTURE_BATCH_SIZE;
+use gm_types::LIVE_CAPTURE_BATCH_SIZE;
 use gm_capture::{LiveCaptureConfig, ParsedPacket};
 use serde::Serialize;
 use serde_json::{json, Value};

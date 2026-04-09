@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use gm_constants::MODBUS_WRITE_FCS;
+use gm_types::MODBUS_WRITE_FCS;
 
 use crate::{AnalysisInput, Finding, FindingType, Severity};
 
@@ -109,7 +109,7 @@ pub(super) fn detect_t0814_diagnostic_dos(input: &AnalysisInput) -> Vec<Finding>
     let eng_ws_ips: HashSet<&str> = input
         .assets
         .iter()
-        .filter(|a| a.device_type == gm_constants::DEVICE_TYPE_EWS)
+        .filter(|a| a.device_type == gm_types::DEVICE_TYPE_EWS)
         .map(|a| a.ip_address.as_str())
         .collect();
 

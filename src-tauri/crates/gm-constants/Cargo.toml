@@ -1,7 +1,0 @@
-[package]
-name = "gm-constants"
-version = "0.1.0"
-edition = "2021"
-description = "Shared domain constants for OT/ICS protocol analysis"
-
-[dependencies]

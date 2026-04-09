@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use gm_analysis::{ConnectionStats, PatternAnalyzer, PatternAnomaly};
 use gm_capture::ParsedPacket;
-use gm_constants::is_ot_server_port;
+use gm_types::is_ot_server_port;
 use gm_parsers::{
     deep_parse, identify_protocol, parse_lldp, parse_redundancy, parse_snmp_response,
     DeepParseResult, IcsProtocol, LldpInfo, RedundancyInfo, SnmpDeviceInfo,

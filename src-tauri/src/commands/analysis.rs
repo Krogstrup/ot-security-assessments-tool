@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use gm_constants::{MAX_ANOMALY_RESULTS, MAX_FINDINGS};
+use gm_types::{MAX_ANOMALY_RESULTS, MAX_FINDINGS};
 use gm_analysis::{
     assess_switch_security, detect_malware_patterns, generate_compliance_report, AnalysisResult,
     AnomalyScore, ComplianceMapping, ConnectionStats, CredentialChecker, CriticalityAssessment,
@@ -88,7 +88,7 @@ pub fn get_purdue_assignments(state: &AppState) -> Result<Vec<PurdueAssignment>,
     Ok(analysis.purdue_assignments.clone())
 }
 
-/// Get anomaly scores from the last analysis run (capped at [`gm_constants::MAX_ANOMALY_RESULTS`]).
+/// Get anomaly scores from the last analysis run (capped at [`gm_types::MAX_ANOMALY_RESULTS`]).
 pub fn get_anomalies(state: &AppState) -> Result<Vec<AnomalyScore>, String> {
     let analysis = read_state(&state.analysis, "analysis")?;
     if analysis.anomalies.len() <= MAX_ANOMALY_RESULTS {

@@ -2,9 +2,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use gm_constants::OT_SERVER_PORTS;
-use gm_constants::OT_PROTOCOL_NAMES;
-use gm_constants::OT_DEVICE_TYPES;
+use gm_types::OT_SERVER_PORTS;
+use gm_types::OT_PROTOCOL_NAMES;
+use gm_types::OT_DEVICE_TYPES;
 use gm_analysis::CaptureContext;
 
 use super::{AnalysisState, CaptureState, InventoryState};

@@ -235,7 +235,7 @@ fn assign_level(
     }
 
     // IT-only devices → L4
-    if dt == gm_constants::DEVICE_TYPE_IT_DEVICE || asset.protocols.iter().all(|p| !is_ot_protocol_name(p)) {
+    if dt == gm_types::DEVICE_TYPE_IT_DEVICE || asset.protocols.iter().all(|p| !is_ot_protocol_name(p)) {
         return (4, "IT-only protocols, no OT activity detected".to_string());
     }
 

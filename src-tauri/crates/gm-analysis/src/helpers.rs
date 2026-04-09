@@ -1,6 +1,6 @@
 //! Shared OT classification helpers used across analysis modules.
 //!
-//! Device type strings use the constants from `gm_constants::DEVICE_TYPE_*`.
+//! Device type strings use the constants from `gm_types::DEVICE_TYPE_*`.
 //!
 //! Centralises protocol and device-type lists so that every module draws from
 //! a single source of truth. Previously each module kept its own copy of these
@@ -20,7 +20,7 @@
 /// Covers PLCs, RTUs, HMIs, historians, SCADA servers, engineering workstations,
 /// I/O servers, generic field devices, and controllers.
 pub(crate) fn is_ot_device_type(device_type: &str) -> bool {
-    use gm_constants::{
+    use gm_types::{
         DEVICE_TYPE_CONTROLLER, DEVICE_TYPE_EWS, DEVICE_TYPE_FIELD_DEVICE, DEVICE_TYPE_HISTORIAN,
         DEVICE_TYPE_HMI, DEVICE_TYPE_IO_SERVER, DEVICE_TYPE_PLC, DEVICE_TYPE_RTU,
         DEVICE_TYPE_SCADA_SERVER,
@@ -44,7 +44,7 @@ pub(crate) fn is_ot_device_type(device_type: &str) -> bool {
 /// This intentionally stays narrower than [`is_ot_device_type`] to avoid
 /// broadening detections that are designed for PLC/RTU-style endpoints.
 pub(crate) fn is_plc_or_rtu_family_device_type(device_type: &str) -> bool {
-    use gm_constants::{DEVICE_TYPE_FIELD_DEVICE, DEVICE_TYPE_PLC, DEVICE_TYPE_RTU};
+    use gm_types::{DEVICE_TYPE_FIELD_DEVICE, DEVICE_TYPE_PLC, DEVICE_TYPE_RTU};
 
     device_type == DEVICE_TYPE_PLC
         || device_type == DEVICE_TYPE_RTU

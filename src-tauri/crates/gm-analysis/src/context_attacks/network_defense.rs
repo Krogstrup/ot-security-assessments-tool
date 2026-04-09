@@ -4,7 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use gm_constants::OT_SERVER_PORTS as OT_PORTS;
+use gm_types::OT_SERVER_PORTS as OT_PORTS;
 
 use crate::helpers::{is_ot_protocol_name, is_plc_or_rtu_family_device_type};
 use crate::thresholds;

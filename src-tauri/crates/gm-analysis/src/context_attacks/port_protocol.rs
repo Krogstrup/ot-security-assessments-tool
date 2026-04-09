@@ -4,7 +4,7 @@
 
 use std::collections::HashSet;
 
-use gm_constants::REMOTE_ACCESS_PORTS;
+use gm_types::REMOTE_ACCESS_PORTS;
 
 use crate::helpers::canonical_ot_ports;
 use crate::{AnalysisInput, Finding, FindingType, Severity};

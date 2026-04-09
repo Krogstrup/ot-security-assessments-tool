@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use gm_constants::CLEARTEXT_OT_PORTS;
+use gm_types::CLEARTEXT_OT_PORTS;
 
 use crate::{AnalysisInput, Finding, FindingType, Severity};
 

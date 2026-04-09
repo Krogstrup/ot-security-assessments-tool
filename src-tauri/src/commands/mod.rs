@@ -55,7 +55,7 @@ use gm_analysis::{AnomalyScore, ConnectionStats, Finding, PatternAnomaly, Purdue
 use gm_capture::LiveCaptureHandle;
 use gm_db::{Database, GeoIpLookup, OuiLookup};
 pub use gm_ingest::{DeviceZeekEvents, StoredAlert, ZeekEventSummary};
-pub use gm_models::{
+pub use gm_types::{
     AssetInfo, AssetSignatureMatch, ConnectionInfo, PacketSummary, ProtocolStatInfo,
 };
 use gm_parsers::RedundancyInfo;

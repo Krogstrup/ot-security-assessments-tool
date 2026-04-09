@@ -11,8 +11,7 @@ rust-version = "1.77"
 [workspace]
 members = [
     ".",
-    "crates/gm-constants",
-    "crates/gm-models",
+    "crates/gm-types",
     "crates/gm-capture",
     "crates/gm-parsers",
     "crates/gm-signatures",
@@ -27,8 +26,7 @@ members = [
 
 [dependencies]
 # Workspace crates
-gm-constants = { path = "crates/gm-constants" }
-gm-models = { path = "crates/gm-models" }
+gm-types = { path = "crates/gm-types" }
 gm-capture = { path = "crates/gm-capture" }
 gm-parsers = { path = "crates/gm-parsers" }
 gm-topology = { path = "crates/gm-topology" }

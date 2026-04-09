@@ -65,7 +65,7 @@ pub(super) fn create_asset_from_ingested(ingested: &IngestedAsset, is_active: bo
     let has_server_ports = ingested
         .open_ports
         .iter()
-        .any(|p| gm_constants::OT_SERVER_PORTS.contains(&p.port));
+        .any(|p| gm_types::OT_SERVER_PORTS.contains(&p.port));
     let device_type = ingested
         .device_type
         .clone()
