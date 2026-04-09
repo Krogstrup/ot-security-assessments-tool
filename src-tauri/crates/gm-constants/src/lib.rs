@@ -110,6 +110,29 @@ pub const MAX_FINDINGS: usize = 1_000;
 /// committed to shared state.
 pub const LIVE_CAPTURE_BATCH_SIZE: usize = 500;
 
+// ── Device type strings ───────────────────────────────────────────────────────
+
+/// Canonical device type string constants.
+///
+/// Use these instead of inline string literals so that typos are caught by
+/// referencing code and renaming is a one-line change. These map 1:1 to the
+/// `device_type` field on `AssetInfo` / `AssetSnapshot`.
+pub const DEVICE_TYPE_UNKNOWN: &str = "unknown";
+pub const DEVICE_TYPE_PLC: &str = "plc";
+pub const DEVICE_TYPE_RTU: &str = "rtu";
+pub const DEVICE_TYPE_HMI: &str = "hmi";
+pub const DEVICE_TYPE_HISTORIAN: &str = "historian";
+pub const DEVICE_TYPE_EWS: &str = "engineering_workstation";
+pub const DEVICE_TYPE_SCADA_SERVER: &str = "scada_server";
+pub const DEVICE_TYPE_IO_SERVER: &str = "io_server";
+pub const DEVICE_TYPE_FIELD_DEVICE: &str = "field_device";
+pub const DEVICE_TYPE_CONTROLLER: &str = "controller";
+pub const DEVICE_TYPE_SWITCH: &str = "switch";
+pub const DEVICE_TYPE_ROUTER: &str = "router";
+pub const DEVICE_TYPE_FIREWALL: &str = "firewall";
+pub const DEVICE_TYPE_IT_DEVICE: &str = "it_device";
+pub const DEVICE_TYPE_WORKSTATION: &str = "workstation";
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /// Returns `true` if `port` is a recognised OT/ICS server-side port.
