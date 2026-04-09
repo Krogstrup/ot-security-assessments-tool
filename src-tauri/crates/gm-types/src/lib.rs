@@ -211,10 +211,10 @@ pub fn ot_port_to_protocol(port: u16) -> Option<&'static str> {
 
 // ── Domain models ─────────────────────────────────────────────────────────────
 
+use serde::{Deserialize, Serialize};
+
 #[cfg(test)]
 use ts_rs::TS;
-
-use serde::{Deserialize, Serialize};
 
 /// Asset information stored in application state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
