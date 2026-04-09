@@ -62,8 +62,6 @@ pub struct ImportPcapFilesResponse {
 
 // ── ImportKind ────────────────────────────────────────────────────────────────
 
-const DEFAULT_IMPORT_FILE_LIST_LIMIT: usize = 500;
-
 /// Discriminator for all supported import file types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportKind {
@@ -157,6 +155,8 @@ impl std::str::FromStr for ImportKind {
 }
 
 // ── Runtime config ────────────────────────────────────────────────────────────
+
+const DEFAULT_IMPORT_FILE_LIST_LIMIT: usize = 500;
 
 #[derive(Debug)]
 struct HeadlessRuntimeConfig {
