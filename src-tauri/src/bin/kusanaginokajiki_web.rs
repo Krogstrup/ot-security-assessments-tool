@@ -16,8 +16,16 @@ mod application;
 mod commands;
 #[path = "kusanaginokajiki_web/web_api_paths.rs"]
 mod web_api_paths;
-#[path = "kusanaginokajiki_web/web_routes.rs"]
-mod web_routes;
+#[path = "kusanaginokajiki_web/api_capture_data.rs"]
+mod capture_data;
+#[path = "kusanaginokajiki_web/api_core.rs"]
+mod core;
+#[path = "kusanaginokajiki_web/api_patterns_exports.rs"]
+mod patterns_exports;
+#[path = "kusanaginokajiki_web/api_physical_ingest_wireshark.rs"]
+mod physical_ingest_wireshark;
+#[path = "kusanaginokajiki_web/api_projects_sessions_analysis.rs"]
+mod projects_sessions_analysis;
 #[path = "kusanaginokajiki_web/web_runtime.rs"]
 mod web_runtime;
 #[path = "kusanaginokajiki_web/web_support.rs"]
@@ -53,7 +61,13 @@ fn build_shared_state() -> SharedState {
 }
 
 fn build_api_router() -> Router<SharedState> {
-    web_routes::build_api_router()
+    let router = Router::new();
+    let router = core::add_routes(router);
+    let router = capture_data::add_routes(router);
+    let router = physical_ingest_wireshark::add_routes(router);
+    let router = patterns_exports::add_routes(router);
+    let router = projects_sessions_analysis::add_routes(router);
+    router
 }
 
 fn build_http_app(frontend_dist: &StdPath, state: SharedState) -> Router {
