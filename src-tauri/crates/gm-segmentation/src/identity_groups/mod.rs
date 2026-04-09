@@ -103,7 +103,7 @@ pub fn build_policy_groups(input: &SegmentationInput) -> Vec<PolicyGroup> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Criticality, DeviceCategory, ObservedConnection, ProtocolRole, SegmentationInput};
+    use crate::{Criticality, DeviceCategory, ObservedConnection, ProtocolRole, SecurityLevel, SegmentationInput};
 
     fn make_asset(ip: &str, device_type: &str, purdue_level: Option<u8>) -> AssetProfile {
         crate::AssetProfile {
