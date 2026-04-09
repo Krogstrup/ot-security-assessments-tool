@@ -10,6 +10,7 @@ pub mod queries {
 }
 
 pub mod services {
+    pub mod asset_inventory;
     pub mod capture_pipeline_commit;
 }
 
@@ -21,6 +22,7 @@ pub mod use_cases {
     pub mod export;
     pub mod ingest;
     pub mod physical;
+    pub mod projects;
     pub mod segmentation;
     pub mod session;
     pub mod wireshark;

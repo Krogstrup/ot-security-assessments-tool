@@ -102,3 +102,69 @@ impl From<String> for AppError {
         AppError::InvalidInput(e)
     }
 }
+
+impl From<crate::application::use_cases::capture::CaptureImportError> for AppError {
+    fn from(value: crate::application::use_cases::capture::CaptureImportError) -> Self {
+        AppError::InvalidInput(value.to_string())
+    }
+}
+
+impl From<crate::application::use_cases::physical::PhysicalUseCaseError> for AppError {
+    fn from(value: crate::application::use_cases::physical::PhysicalUseCaseError) -> Self {
+        match value {
+            crate::application::use_cases::physical::PhysicalUseCaseError::ParseFailure(
+                message,
+            ) => AppError::ParseFailure(message),
+            crate::application::use_cases::physical::PhysicalUseCaseError::InvalidInput(
+                message,
+            ) => AppError::InvalidInput(message),
+            crate::application::use_cases::physical::PhysicalUseCaseError::Io(err) => {
+                AppError::IoError(err.to_string())
+            }
+        }
+    }
+}
+
+impl From<crate::application::use_cases::projects::ProjectUseCaseError> for AppError {
+    fn from(value: crate::application::use_cases::projects::ProjectUseCaseError) -> Self {
+        match value {
+            crate::application::use_cases::projects::ProjectUseCaseError::DatabaseNotAvailable => {
+                AppError::DbError("Database not available".to_string())
+            }
+            crate::application::use_cases::projects::ProjectUseCaseError::Database(err) => {
+                AppError::DbError(err.to_string())
+            }
+        }
+    }
+}
+
+impl From<crate::application::use_cases::segmentation::SegmentationUseCaseError> for AppError {
+    fn from(value: crate::application::use_cases::segmentation::SegmentationUseCaseError) -> Self {
+        AppError::InvalidInput(value.to_string())
+    }
+}
+
+impl From<crate::application::use_cases::session::SessionUseCaseError> for AppError {
+    fn from(value: crate::application::use_cases::session::SessionUseCaseError) -> Self {
+        match value {
+            crate::application::use_cases::session::SessionUseCaseError::DatabaseNotAvailable => {
+                AppError::DbError("Database not available".to_string())
+            }
+            crate::application::use_cases::session::SessionUseCaseError::Database(err) => {
+                AppError::DbError(err.to_string())
+            }
+            crate::application::use_cases::session::SessionUseCaseError::Io(err) => {
+                AppError::IoError(err.to_string())
+            }
+            crate::application::use_cases::session::SessionUseCaseError::Serialization(err) => {
+                AppError::ParseFailure(err.to_string())
+            }
+            crate::application::use_cases::session::SessionUseCaseError::Archive(err) => {
+                AppError::ParseFailure(err.to_string())
+            }
+            crate::application::use_cases::session::SessionUseCaseError::InvalidInput(message) => {
+                AppError::InvalidInput(message)
+            }
+        }
+    }
+}

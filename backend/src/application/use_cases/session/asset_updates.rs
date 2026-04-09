@@ -3,7 +3,7 @@
 use gm_db::Database;
 use gm_types::AssetInfo;
 
-use super::AssetUpdate;
+use super::{AssetUpdate, SessionUseCaseError};
 
 fn normalize_hostname(hostname: &str) -> Option<String> {
     if hostname.is_empty() {
@@ -46,11 +46,13 @@ pub fn update_asset(
     assets: &mut [AssetInfo],
     db: Option<&Database>,
     has_active_session: bool,
-) -> Result<AssetInfo, String> {
+) -> Result<AssetInfo, SessionUseCaseError> {
     let asset = assets
         .iter_mut()
         .find(|a| a.id == asset_id)
-        .ok_or_else(|| format!("Asset {} not found", asset_id))?;
+        .ok_or_else(|| {
+            SessionUseCaseError::invalid_input(format!("Asset {} not found", asset_id))
+        })?;
     apply_asset_update(asset, &updates);
     let updated = asset.clone();
 
@@ -83,7 +85,7 @@ pub fn bulk_update_assets(
     assets: &mut [AssetInfo],
     db: Option<&Database>,
     has_active_session: bool,
-) -> Result<usize, String> {
+) -> Result<usize, SessionUseCaseError> {
     let asset_id_set: std::collections::HashSet<&str> =
         asset_ids.iter().map(String::as_str).collect();
 

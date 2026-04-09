@@ -68,15 +68,14 @@ pub async fn save_session(
         &deep_parse_info,
         &imported_files,
     )
-    .map_err(AppError::invalid_input)
+    .map_err(AppError::from)
 }
 
 /// Load a session by ID and replace runtime state.
 pub async fn load_session(session_id: String, state: &AppState) -> Result<SessionInfo, AppError> {
     let result = {
         let sess = mutex_state(&state.session, "session").map_err(AppError::state_lock)?;
-        use_case::load_session(session_id.clone(), sess.db.as_ref())
-            .map_err(AppError::invalid_input)?
+        use_case::load_session(session_id.clone(), sess.db.as_ref()).map_err(AppError::from)?
     };
     apply_loaded_session_state(state, result.data)?;
     Ok(result.info)
@@ -85,14 +84,13 @@ pub async fn load_session(session_id: String, state: &AppState) -> Result<Sessio
 /// List saved sessions, optionally scoped to active project.
 pub async fn list_sessions(state: &AppState) -> Result<Vec<SessionInfo>, AppError> {
     let sess = mutex_state(&state.session, "session").map_err(AppError::state_lock)?;
-    use_case::list_sessions(sess.db.as_ref(), sess.current_project_id)
-        .map_err(AppError::invalid_input)
+    use_case::list_sessions(sess.db.as_ref(), sess.current_project_id).map_err(AppError::from)
 }
 
 /// Delete a session by ID.
 pub async fn delete_session(session_id: String, state: &AppState) -> Result<(), AppError> {
     let sess = mutex_state(&state.session, "session").map_err(AppError::state_lock)?;
-    use_case::delete_session(session_id, sess.db.as_ref()).map_err(AppError::invalid_input)
+    use_case::delete_session(session_id, sess.db.as_ref()).map_err(AppError::from)
 }
 
 /// Export a session to `.kkj` archive.
@@ -103,7 +101,7 @@ pub async fn export_session_archive(
 ) -> Result<String, AppError> {
     let sess = mutex_state(&state.session, "session").map_err(AppError::state_lock)?;
     use_case::export_session_archive(session_id, output_path, sess.db.as_ref())
-        .map_err(AppError::invalid_input)
+        .map_err(AppError::from)
 }
 
 /// Import a `.kkj` archive and replace runtime state with imported session.
@@ -113,8 +111,7 @@ pub async fn import_session_archive(
 ) -> Result<SessionInfo, AppError> {
     let result = {
         let sess = mutex_state(&state.session, "session").map_err(AppError::state_lock)?;
-        use_case::import_session_archive(archive_path, sess.db.as_ref())
-            .map_err(AppError::invalid_input)?
+        use_case::import_session_archive(archive_path, sess.db.as_ref()).map_err(AppError::from)?
     };
     apply_loaded_session_state(state, result.data)?;
     Ok(result.info)
@@ -135,7 +132,7 @@ pub async fn update_asset(
         sess.db.as_ref(),
         sess.current_session_id.is_some(),
     )
-    .map_err(AppError::invalid_input)
+    .map_err(AppError::from)
 }
 
 /// Bulk-update many assets.
@@ -153,5 +150,5 @@ pub async fn bulk_update_assets(
         sess.db.as_ref(),
         sess.current_session_id.is_some(),
     )
-    .map_err(AppError::invalid_input)
+    .map_err(AppError::from)
 }

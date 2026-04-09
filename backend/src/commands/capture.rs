@@ -56,7 +56,7 @@ pub fn import_pcap_files(paths: Vec<String>, state: &AppState) -> Result<ImportR
     let reader = PcapReader::new();
     let mut processor = PacketProcessor::new();
 
-    let per_file_results = use_case::process_input_files(
+    let import_outcome = use_case::run_import(
         &paths,
         start,
         |path| reader.read_file(path).map_err(|e| e.to_string()),
@@ -71,11 +71,9 @@ pub fn import_pcap_files(paths: Vec<String>, state: &AppState) -> Result<ImportR
                 started,
             )
         },
-    );
-
-    let total_packet_count = use_case::total_packet_count(&per_file_results);
-    use_case::ensure_successful_import(total_packet_count, &per_file_results)
-        .map_err(AppError::invalid_input)?;
+    )?;
+    let per_file_results = import_outcome.per_file_results;
+    let total_packet_count = import_outcome.total_packet_count;
 
     let (connection_count, asset_count, protocols_detected) =
         compute_and_apply_import_state(processor, &per_file_results, state)?;

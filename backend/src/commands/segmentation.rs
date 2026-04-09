@@ -24,7 +24,7 @@ pub fn run_segmentation(state: &AppState) -> Result<SegmentationReport, AppError
         &analysis.pattern_anomalies,
         &analysis.findings,
     )
-    .map_err(AppError::invalid_input)?;
+    .map_err(AppError::from)?;
 
     drop(capture);
     drop(inventory);
@@ -52,5 +52,5 @@ pub fn export_enforcement_config(format: String, state: &AppState) -> Result<Str
             "No segmentation report available. Run segmentation analysis first.",
         )
     })?;
-    use_case::export_enforcement_config(format, report).map_err(AppError::invalid_input)
+    use_case::export_enforcement_config(format, report).map_err(AppError::from)
 }

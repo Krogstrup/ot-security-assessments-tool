@@ -1,6 +1,8 @@
 //! Session use-case: save/load/list/delete sessions, asset updates,
 //! ZIP archive import/export, and DB ↔ domain-type mappers.
 
+use std::fmt;
+
 pub mod archive;
 pub mod asset_updates;
 pub mod crud;
@@ -54,8 +56,63 @@ use gm_types::{AssetInfo, ConnectionInfo};
 
 pub(super) const DATABASE_NOT_AVAILABLE: &str = "Database not available";
 
-pub(super) fn db_or_error(db: Option<&Database>) -> Result<&Database, String> {
-    db.ok_or_else(|| DATABASE_NOT_AVAILABLE.to_string())
+#[derive(Debug)]
+pub enum SessionUseCaseError {
+    DatabaseNotAvailable,
+    Database(gm_db::DbError),
+    Io(std::io::Error),
+    Serialization(serde_json::Error),
+    Archive(zip::result::ZipError),
+    InvalidInput(String),
+}
+
+impl SessionUseCaseError {
+    pub fn invalid_input(message: impl Into<String>) -> Self {
+        SessionUseCaseError::InvalidInput(message.into())
+    }
+}
+
+impl fmt::Display for SessionUseCaseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SessionUseCaseError::DatabaseNotAvailable => write!(f, "{DATABASE_NOT_AVAILABLE}"),
+            SessionUseCaseError::Database(err) => write!(f, "{err}"),
+            SessionUseCaseError::Io(err) => write!(f, "{err}"),
+            SessionUseCaseError::Serialization(err) => write!(f, "{err}"),
+            SessionUseCaseError::Archive(err) => write!(f, "{err}"),
+            SessionUseCaseError::InvalidInput(message) => write!(f, "{message}"),
+        }
+    }
+}
+
+impl std::error::Error for SessionUseCaseError {}
+
+impl From<gm_db::DbError> for SessionUseCaseError {
+    fn from(value: gm_db::DbError) -> Self {
+        SessionUseCaseError::Database(value)
+    }
+}
+
+impl From<std::io::Error> for SessionUseCaseError {
+    fn from(value: std::io::Error) -> Self {
+        SessionUseCaseError::Io(value)
+    }
+}
+
+impl From<serde_json::Error> for SessionUseCaseError {
+    fn from(value: serde_json::Error) -> Self {
+        SessionUseCaseError::Serialization(value)
+    }
+}
+
+impl From<zip::result::ZipError> for SessionUseCaseError {
+    fn from(value: zip::result::ZipError) -> Self {
+        SessionUseCaseError::Archive(value)
+    }
+}
+
+pub(super) fn db_or_error(db: Option<&Database>) -> Result<&Database, SessionUseCaseError> {
+    db.ok_or(SessionUseCaseError::DatabaseNotAvailable)
 }
 
 pub(super) fn parse_session_metadata(metadata: &str) -> SessionMetadata {

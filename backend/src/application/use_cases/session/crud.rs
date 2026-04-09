@@ -12,6 +12,7 @@ use super::{
         asset_info_to_row, connection_info_to_row, row_to_asset_info, row_to_connection_info,
     },
     parse_session_metadata, session_info_from_row, LoadedSessionData, SessionInfo, SessionMetadata,
+    SessionUseCaseError,
 };
 
 pub struct LoadSessionResult {
@@ -29,7 +30,7 @@ pub fn save_session(
     assets: &[AssetInfo],
     deep_parse_info: &HashMap<String, DeepParseInfo>,
     imported_files: &[String],
-) -> Result<SessionInfo, String> {
+) -> Result<SessionInfo, SessionUseCaseError> {
     let db = db_or_error(db)?;
 
     let session_id = uuid::Uuid::new_v4().to_string();
@@ -38,28 +39,24 @@ pub fn save_session(
         deep_parse_info: deep_parse_info.clone(),
         imported_files: imported_files.to_vec(),
     };
-    let metadata_json = serde_json::to_string(&metadata).map_err(|e| e.to_string())?;
+    let metadata_json = serde_json::to_string(&metadata)?;
 
-    let session_row = db
-        .create_session(&session_id, &name, &desc, &metadata_json)
-        .map_err(|e| e.to_string())?;
+    let session_row = db.create_session(&session_id, &name, &desc, &metadata_json)?;
 
     for asset in assets {
         let row = asset_info_to_row(asset, &session_id);
-        db.insert_asset(&row).map_err(|e| e.to_string())?;
+        db.insert_asset(&row)?;
     }
 
     for conn in connections {
         let row = connection_info_to_row(conn, &session_id);
-        db.insert_connection(&row).map_err(|e| e.to_string())?;
+        db.insert_connection(&row)?;
     }
 
-    db.update_session_counts(&session_id, assets.len() as i64, connections.len() as i64)
-        .map_err(|e| e.to_string())?;
+    db.update_session_counts(&session_id, assets.len() as i64, connections.len() as i64)?;
 
     if let Some(project_id) = current_project_id {
-        db.assign_session_to_project(&session_id, project_id)
-            .map_err(|e| e.to_string())?;
+        db.assign_session_to_project(&session_id, project_id)?;
     }
 
     let mut info = session_info_from_row(session_row);
@@ -72,20 +69,18 @@ pub fn save_session(
 pub fn load_session(
     session_id: String,
     db: Option<&Database>,
-) -> Result<LoadSessionResult, String> {
+) -> Result<LoadSessionResult, SessionUseCaseError> {
     let db = db_or_error(db)?;
 
-    let session_row = db.get_session(&session_id).map_err(|e| e.to_string())?;
+    let session_row = db.get_session(&session_id)?;
     let metadata = parse_session_metadata(&session_row.metadata);
     let assets: Vec<_> = db
-        .list_assets(&session_id)
-        .map_err(|e| e.to_string())?
+        .list_assets(&session_id)?
         .into_iter()
         .map(row_to_asset_info)
         .collect();
     let connections: Vec<_> = db
-        .list_connections(&session_id)
-        .map_err(|e| e.to_string())?
+        .list_connections(&session_id)?
         .into_iter()
         .map(row_to_connection_info)
         .collect();
@@ -107,19 +102,21 @@ pub fn load_session(
 pub fn list_sessions(
     db: Option<&Database>,
     current_project_id: Option<i64>,
-) -> Result<Vec<SessionInfo>, String> {
+) -> Result<Vec<SessionInfo>, SessionUseCaseError> {
     let db = db_or_error(db)?;
     let rows = match current_project_id {
-        Some(project_id) => db
-            .list_sessions_for_project(project_id)
-            .map_err(|e| e.to_string())?,
-        None => db.list_sessions().map_err(|e| e.to_string())?,
+        Some(project_id) => db.list_sessions_for_project(project_id)?,
+        None => db.list_sessions()?,
     };
     Ok(rows.into_iter().map(session_info_from_row).collect())
 }
 
 /// Delete a session by ID.
-pub fn delete_session(session_id: String, db: Option<&Database>) -> Result<(), String> {
+pub fn delete_session(
+    session_id: String,
+    db: Option<&Database>,
+) -> Result<(), SessionUseCaseError> {
     let db = db_or_error(db)?;
-    db.delete_session(&session_id).map_err(|e| e.to_string())
+    db.delete_session(&session_id)?;
+    Ok(())
 }

@@ -17,7 +17,7 @@ use super::{
 pub fn import_cisco_config(path: String, state: &AppState) -> Result<PhysicalTopology, AppError> {
     let mut physical = write_state(&state.physical, "physical").map_err(AppError::state_lock)?;
     let topology = use_case::import_cisco_config(&mut physical.physical_topology, &path)
-        .map_err(AppError::parse_failure)?;
+        .map_err(AppError::from)?;
     log::info!("Imported Cisco config from {}", path);
     Ok(topology)
 }
@@ -30,7 +30,7 @@ pub fn import_mac_table(
     let mut physical = write_state(&state.physical, "physical").map_err(AppError::state_lock)?;
     let topology =
         use_case::import_mac_table(&mut physical.physical_topology, &path, &switch_hostname)
-            .map_err(AppError::invalid_input)?;
+            .map_err(AppError::from)?;
     log::info!("Imported MAC table from {} for {}", path, switch_hostname);
     Ok(topology)
 }
@@ -43,7 +43,7 @@ pub fn import_cdp_neighbors(
     let mut physical = write_state(&state.physical, "physical").map_err(AppError::state_lock)?;
     let topology =
         use_case::import_cdp_neighbors(&mut physical.physical_topology, &path, &switch_hostname)
-            .map_err(AppError::invalid_input)?;
+            .map_err(AppError::from)?;
     log::info!(
         "Imported neighbor table from {} for {}",
         path,
@@ -55,7 +55,7 @@ pub fn import_cdp_neighbors(
 pub fn import_arp_table(path: String, state: &AppState) -> Result<PhysicalTopology, AppError> {
     let mut physical = write_state(&state.physical, "physical").map_err(AppError::state_lock)?;
     let topology = use_case::import_arp_table(&mut physical.physical_topology, &path)
-        .map_err(AppError::parse_failure)?;
+        .map_err(AppError::from)?;
     log::info!("Imported ARP table from {}", path);
     Ok(topology)
 }
@@ -75,7 +75,7 @@ pub fn clear_physical_topology(state: &AppState) -> Result<(), AppError> {
 pub fn import_network_config(path: String, state: &AppState) -> Result<PhysicalTopology, AppError> {
     let mut physical = write_state(&state.physical, "physical").map_err(AppError::state_lock)?;
     let topology = use_case::import_network_config(&mut physical.physical_topology, &path)
-        .map_err(AppError::parse_failure)?;
+        .map_err(AppError::from)?;
     log::info!("Imported network config from {}", path);
     Ok(topology)
 }
@@ -88,7 +88,7 @@ pub fn import_mac_table_auto(
     let mut physical = write_state(&state.physical, "physical").map_err(AppError::state_lock)?;
     let topology =
         use_case::import_mac_table_auto(&mut physical.physical_topology, &path, &switch_hostname)
-            .map_err(AppError::invalid_input)?;
+            .map_err(AppError::from)?;
     log::info!(
         "Auto-imported MAC table from {} for {}",
         path,
@@ -105,7 +105,7 @@ pub fn import_neighbor_table(
     let mut physical = write_state(&state.physical, "physical").map_err(AppError::state_lock)?;
     let topology =
         use_case::import_neighbor_table(&mut physical.physical_topology, &path, &switch_hostname)
-            .map_err(AppError::invalid_input)?;
+            .map_err(AppError::from)?;
     log::info!(
         "Auto-imported neighbor table from {} for {}",
         path,

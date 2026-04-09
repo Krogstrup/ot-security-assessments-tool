@@ -248,9 +248,3 @@ impl AppState {
         }
     }
 }
-
-/// Infer device type based on which protocols it speaks and its role.
-///
-/// Canonical implementation lives in `gm_analysis::naming`; re-exported here
-/// so existing callers in `processor.rs` and `ingest.rs` compile unchanged.
-pub use gm_analysis::infer_device_type;
