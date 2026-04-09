@@ -1,232 +1,317 @@
-# CLAUDE.md — Autonomous Full-Stack Workflow Guide
+# CLAUDE.md — Execution & Architecture Workflow Guide
 
-> Canonical agent policy is in `AGENTS.md`. This file is Claude-specific operational glue for planning, coding, and reviewing.
-
-## 1) Mission
-
-You are operating on Kusanagi Kajiki with a **WebUI + API-first** product direction.
-
-Primary goals for every task:
-
-1. Preserve/advance architecture boundaries.
-2. Prefer incremental, reviewable changes.
-3. Keep responses token-efficient by default.
-4. Improve delivery speed without increasing coupling.
+> Canonical agent policy is defined in `AGENTS.md`.
+> This file defines **how Claude plans, executes, and verifies work in this repository**.
 
 ---
 
-## 2) Product Direction (Non-Negotiable)
+# 1) Mission
 
-- Build for **WebUI + API** as primary runtime.
-- Do **not** introduce new desktop-only UI behavior.
-- Treat desktop/Tauri surface as compatibility-only unless explicitly requested.
-- Prefer explicit HTTP/resource API evolution over adding new invoke passthrough commands.
+Operate on Kusanagi Kajiki with a **WebUI + API-first architecture**.
 
-Reference: `WEBUI_ONLY_MIGRATION_PLAN.md`.
+For every task:
 
----
-
-## 3) Source-of-Truth Docs
-
-Use these docs in order:
-
-1. `AGENTS.md` (behavioral policy + token rules)
-2. `SYSTEM_ARCHITECTURE_REVIEW.md` (cross-system target + roadmap)
-3. `ARCHITECTURE_REVIEW.md` (backend details)
-4. `FRONTEND_ARCHITECTURE_REVIEW.md` (frontend details)
-5. `WEBUI_ONLY_MIGRATION_PLAN.md` (migration phases/exit criteria)
-
-If docs conflict, follow newest product-direction constraint (WebUI-first).
+1. Preserve or improve architecture boundaries
+2. Prefer small, safe, reviewable changes
+3. Validate against real code (never assume plan == reality)
+4. Keep responses concise unless depth is requested
 
 ---
 
-## 4) Architecture Map
+# 2) Source of Truth (Priority Order)
 
-### Backend target layering
+1. `AGENTS.md` → rules, constraints, execution behavior
+2. `SYSTEM_ARCHITECTURE_REVIEW.md` → system-level direction
+3. `ARCHITECTURE_REVIEW.md` → backend structure
+4. `FRONTEND_ARCHITECTURE_REVIEW.md` → frontend structure
+5. Migration plans (if applicable)
 
-- `interface` (transport adapters)
-- `application` (use cases/orchestration)
-- `domain` (business rules/models)
-- `infrastructure` (DB/files/external integrations)
-
-Rule: inner layers must not depend on outer layers.
-
-### Frontend target layering
-
-- `ui` (presentational components)
-- `application` (feature orchestration)
-- `state` (actions/selectors/store facades)
-- `domain` (pure transforms/validation)
-- `infra` (API clients/runtime adapters)
-
-Rule: avoid API orchestration directly inside large `.svelte` views.
+If conflicts exist:
+→ follow **latest architecture direction (WebUI-first)**
 
 ---
 
-## 5) Operating Modes
+# 3) Execution Model (MANDATORY)
+
+Claude must follow this loop:
+
+### 1. Inspect
+
+* Check real files, imports, usage
+* Validate assumptions before acting
+
+### 2. Decide
+
+* Apply step
+* Adapt step
+* Skip step
+
+### 3. Execute
+
+* Make minimal, scoped changes
+
+### 4. Verify
+
+* Run relevant checks (`cargo check`, etc.)
+* Confirm behavior unchanged (unless requested)
+
+---
+
+## Hard rules
+
+* Do NOT blindly follow plans
+* Do NOT delete before successful compile
+* Do NOT apply global replacements without verification
+* If mismatch is found → adapt, not abort
+
+---
+
+# 4) Architecture Model (Enforced)
+
+## Backend
+
+Layers:
+
+* **interface** → `api_*.rs` (HTTP only)
+* **adapter** → `commands/*` (thin boundary target)
+* **application** → `application/*` (use-cases, orchestration)
+* **domain** → `gm-*` (pure logic)
+
+### Rules
+
+* Commands must shrink over time (not grow)
+* Application owns workflows
+* Domain is pure and dependency-free
+
+Correct direction:
+
+```text
+api → commands → application → gm-*
+```
+
+Forbidden:
+
+```text
+gm-* → commands
+application → commands
+```
+
+---
+
+## Frontend
+
+Layers:
+
+* ui → `.svelte`
+* application → `*Flows.ts`
+* state → stores/actions
+* infra → API layer
+
+### Rules
+
+* No orchestration in large views
+* Flows own async workflows
+* API calls stay centralized
+
+---
+
+# 5) Operating Modes
+
+---
 
 ## A) Planning Mode
 
-Use when task is ambiguous or large.
+Use when:
 
-Output format:
+* task is large
+* architecture unclear
+* multiple files involved
+
+Output:
 
 1. Objective
-2. Assumptions
+2. Current state (based on inspection)
 3. Risks
-4. 3-8 step plan (small increments)
+4. Incremental plan (3–8 steps)
 5. Validation strategy
 
-Planning checklist:
-
-- [ ] Scope backend/frontend/both
-- [ ] Identify affected layers
-- [ ] Mention compatibility impact
-- [ ] Mention rollback path for risky changes
+---
 
 ## B) Coding Mode
 
 Use for implementation.
 
-Required behavior:
+### Required behavior
 
-- Keep diffs focused and modular.
-- Prefer extracting functions/services over expanding god files.
-- If touching contracts, update both sides (backend DTO + frontend type/schema).
-- If task is large, deliver first safe slice and note follow-up slices.
+* Verify file exists before modifying
+* Check usage before deleting or moving
+* Keep diffs small and reversible
+* Prefer extraction over expansion
 
-Coding checklist:
+### If task is large
 
-- [ ] Boundary respected
-- [ ] Naming clear and local
-- [ ] Errors handled consistently
-- [ ] Tests/checks run
-- [ ] Docs/comments updated if behavior changed
+* Deliver first safe slice
+* Explicitly list follow-up slices
+
+---
 
 ## C) Review Mode
 
-Use for PR review, audit, or “what’s wrong” tasks.
+Use for audits / PR review.
 
-Review output sections:
+Output:
 
 1. Correctness
-2. Architecture fit
+2. Architecture alignment
 3. Coupling risks
-4. Contract risks
-5. Suggested next diff (smallest high-impact)
+4. Contract/API risks
+5. Smallest high-impact fix
 
-Severity labels:
+Severity:
 
-- `Critical` (must fix)
-- `Major` (should fix before merge)
-- `Minor` (can follow-up)
-
----
-
-## 6) Autonomous Multi-Agent Pattern (Conceptual)
-
-When asked to “generate backend/frontend/agents automatically,” simulate this pipeline:
-
-1. **Architect Agent**
-   - Defines boundaries, DTO changes, and migration slice.
-2. **Backend Agent**
-   - Implements/adjusts use-cases, adapters, and contracts.
-3. **Frontend Agent**
-   - Updates API client, state flows, and UI containers.
-4. **QA/Review Agent**
-   - Runs checks, validates contract alignment, reports risks.
-
-For each stage, emit:
-
-- planned files,
-- expected outputs,
-- pass/fail checks,
-- handoff notes.
+* Critical
+* Major
+* Minor
 
 ---
 
-## 7) Contract & API Discipline
+# 6) Refactor Discipline (Important for this repo)
 
-For any API-affecting change, do all of the following:
+This repo is actively reducing:
 
-- Update backend DTO/handler.
-- Update frontend type(s).
-- Update runtime schema validation where applicable.
-- Keep error shape consistent (`code`, `message`, optional `details`).
-- Document breaking-change risk in PR summary.
+* micro-files
+* micro-crates
+* adapter-layer overload
 
-Avoid:
+### Therefore:
 
-- stringly-typed new command coupling when resource endpoint is viable,
-- silent shape drift without validation.
+When refactoring:
 
----
-
-## 8) Repository Commands (Use Minimal Relevant Set)
-
-From repo root:
-
-- Frontend check: `npm run check`
-- Web frontend dev: `npm run web:dev`
-- API server (headless): `npm run web:start -- --port 4173`
-- Web build + API release build: `npm run web:build`
-
-Run only commands relevant to changed areas.
+* Merge trivial files when tightly coupled
+* Remove indirection with no abstraction value
+* Keep domain logic untouched
+* Move orchestration → application layer
 
 ---
 
-## 9) Token Optimization Rules (Mandatory)
+## Safe Refactor Pattern
 
-Default brevity rules:
-
-- Use bullets, not long prose.
-- Don’t restate prompt.
-- Don’t print unchanged code.
-- Summarize repetitive diagnostics.
-- Provide deep detail only when asked.
-
-Default final response format:
-
-1. Summary
-2. Files changed
-3. Checks run
-4. Risks/follow-ups
-
----
-
-## 10) Safe Change Strategy
-
-Preferred order for medium/large refactors:
-
-1. Add boundary abstractions (types/interfaces/helpers)
-2. Move logic behind abstraction
+1. Locate usage (`rg`)
+2. Move logic
 3. Update call sites
-4. Remove old path
-5. Add guard checks/tests
+4. Compile
+5. Remove old code
 
-Never do in one risky jump if incremental path exists.
-
----
-
-## 11) WebUI-Only Migration Execution Rules
-
-When task intersects migration:
-
-- Map desktop invoke usage to target web resource endpoint.
-- Keep compatibility path until parity is verified.
-- Mark deprecated desktop behavior in docs/notes.
-- Define measurable exit criteria for each slice.
-
-Use `WEBUI_ONLY_MIGRATION_PLAN.md` phases (A→D).
+Never skip compile step.
 
 ---
 
-## 12) Done Definition
+# 7) Backend-Specific Rules
 
-A task is done when:
+* Do not add new orchestration to `commands/*`
+* Prefer adding use-cases in `application/*`
+* Keep DTOs explicit and typed
+* Preserve AppState lock ordering (critical)
 
-- requested behavior is implemented,
-- architecture boundaries are not regressed,
-- relevant checks pass,
-- compatibility risks are stated,
-- PR summary is clear and token-efficient.
+Lock order must not change.
+
+---
+
+# 8) Frontend-Specific Rules
+
+* Extract flows from large components
+* Avoid direct writable store mutation for complex flows
+* Expand runtime validation on critical API paths
+
+---
+
+# 9) Contract Discipline
+
+When backend changes affect API:
+
+* Update DTOs
+* Update frontend types
+* Update validation schemas
+* Maintain error format:
+
+```json
+{ "code": "...", "message": "...", "details": {} }
+```
+
+---
+
+# 10) Execution Checks
+
+Run only what is relevant:
+
+### Backend
+
+```bash
+cargo check
+cargo test (if needed)
+```
+
+### Frontend
+
+```bash
+npm run check
+```
+
+Report succinctly:
+
+* ✅ success
+* ❌ failure + reason
+
+---
+
+# 11) Safe Change Strategy
+
+For medium/large work:
+
+1. Add abstraction
+2. Move logic
+3. Update callers
+4. Compile
+5. Remove old path
+
+Avoid big-bang changes.
+
+---
+
+# 12) WebUI-First Constraint
+
+* Prefer HTTP endpoints over command-style calls
+* Keep compatibility paths only when necessary
+* Mark deprecated paths clearly
+
+---
+
+# 13) Done Definition
+
+A task is complete when:
+
+* behavior implemented correctly
+* architecture boundaries respected
+* code compiles cleanly
+* risks are documented
+* changes are reviewable and minimal
+
+---
+
+# 14) Mental Model (Quick Reference)
+
+* **Domain (`gm-*`)** → capabilities (pure logic)
+* **Application** → use-cases (orchestration)
+* **Commands** → adapter (thin boundary)
+
+---
+
+# 15) Anti-Patterns (Avoid)
+
+* Growing `commands/*`
+* Logic inside HTTP handlers
+* Blind refactors without inspection
+* Deleting before compile passes
+* Cross-layer dependency leaks
+
+---

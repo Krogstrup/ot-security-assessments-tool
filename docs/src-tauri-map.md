@@ -27,7 +27,7 @@ Quick audit commands:
 ```bash
 find src-tauri -type f | sort
 rg -n "^pub mod|^mod |^pub use " src-tauri/src src-tauri/crates
-rg -n "\#\[tauri::command\]|route\(" src-tauri/src
+rg -n "^pub fn|route\(" src-tauri/src
 ```
 
 Ownership intent:
@@ -94,12 +94,6 @@ Critical state rule:
 - Does: pins exact crate versions and transitive graph.
 - Used in code: consumed by Cargo at build/test time.
 - Maintain: never hand-edit; regenerate with Cargo when dependencies change.
-
-### `src-tauri/capabilities/default.json`
-- For: Tauri capability permissions profile.
-- Does: grants default window permissions (`core`, `dialog`, `shell` subsets).
-- Used in code: applied by Tauri runtime when running with windowed capabilities.
-- Maintain: keep least-privilege; only add permissions required by implemented features.
 
 ### `src-tauri/src/lib.rs`
 - For: crate-level architecture documentation anchor.
@@ -301,7 +295,7 @@ Global maintenance rule:
 ### `src-tauri/src/commands/resource_paths.rs`
 - For: runtime resource path resolution for signatures and data files.
 - Does: resolves `signatures_dir`, `oui_path`, `geoip_path` from app resource dir or environment/fallback probes.
-- Used in code: `AppState::new` path input in web mode and Tauri mode.
+- Used in code: `AppState::new` path input in web mode and legacy desktop mode.
 - Maintain: keep env var names stable (`KK_SIGNATURES_DIR`, `KK_DATA_DIR`), avoid hard-coding only one run-layout.
 
 ### `src-tauri/src/commands/error.rs`
@@ -724,7 +718,7 @@ Global use in code:
 - For: analysis crate dependency/build manifest.
 - Does: declares analysis-only dependencies and features.
 - Used in code: compiled into command-layer analysis flows.
-- Maintain: keep crate independent from Tauri/runtime-specific dependencies.
+- Maintain: keep crate independent from runtime/transport-specific dependencies.
 
 ### `src-tauri/crates/gm-analysis/src/lib.rs`
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Architecture Review Refresh"
+  short_description: "Keep architecture review docs aligned with code"
+  default_prompt: "Refresh ARCHITECTURE_REVIEW.md, SYSTEM_ARCHITECTURE_REVIEW.md, and FRONTEND_ARCHITECTURE_REVIEW.md from current code."

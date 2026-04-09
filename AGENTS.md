@@ -28,7 +28,7 @@ Token rules:
 
 - **WebUI-first only**: prioritize `kusanaginokajiki_web` + browser frontend.
 - Do not add new desktop-only UI features.
-- Desktop/Tauri command surface is compatibility-only during migration.
+- Legacy desktop command surface is compatibility-only during migration.
 - Prefer HTTP/resource endpoints over adding new invoke commands.
 
 ---
@@ -48,7 +48,7 @@ When changing code, state which layer you touched:
 
 ---
 
-## 2) Backend Rules (Rust/Tauri/Axum)
+## 2) Backend Rules (Rust/Axum)
 
 ### Do
 - Treat `src-tauri/src/commands/*` as **adapter layer** target; move business workflows to application modules when practical.
@@ -158,4 +158,3 @@ If creating/updating `CLAUDE.md`, keep it to:
 - no long prose.
 
 `CLAUDE.md` should reference this `AGENTS.md` instead of duplicating it.
-
