@@ -8,7 +8,7 @@ It answers, for each file:
 - how it is used by the rest of the code,
 - how to maintain it safely.
 
-Last reviewed: 2026-04-08.
+Last reviewed: 2026-04-09.
 
 ---
 
@@ -49,6 +49,22 @@ Runtime flow:
 
 Critical state rule:
 - Lock order in `AppState` must stay: `capture -> inventory -> analysis -> session -> physical -> segmentation -> signatures`.
+
+## Recent Refactor Notes (2026-04-09)
+
+- `src-tauri/src/commands/analysis_builders.rs` was deleted and split into two focused modules:
+  - `analysis_input_builder.rs` — `build_analysis_input()` only.
+  - `capture_context_builder.rs` — `build_capture_context()` only.
+- `src-tauri/src/application/mappers/deep_parse.rs` was added as the **canonical DeepParseSnapshot mapper** (all 7 protocols). The duplicate in `analysis.rs` (`build_malware_deep_parse`, Modbus+IEC104 only) was deleted and callers now use this single function.
+- `src-tauri/src/application/use_cases/ingest/mod.rs` was thinned to an orchestrator. Extracted:
+  - `asset_merge.rs` — `enrich_asset` / `create_asset_from_ingested` helpers.
+  - `alert_index.rs` — `ingested_alert_to_stored` / `rebuild_zeek_device_events` / `classify_zeek_log_type`.
+- `src-tauri/src/bin/kusanaginokajiki_web/web_support.rs` was thinned to a re-export shim. Extracted:
+  - `http_types.rs` — `ApiError`, `ImportPcapFilesResponse`.
+  - `import_support.rs` — `ImportKind`, `HeadlessRuntimeConfig`, all resolve/list path helpers.
+- `gm-constants/src/lib.rs` gained `MAX_FINDINGS` and 15 `DEVICE_TYPE_*` string constants.
+- `gm-analysis/src/attack_codes.rs` was added with all 31 MITRE T-code constants. All literal T-code strings across the crate now reference this module.
+- `gm-analysis/src/attack/test_utils.rs` was added with a shared `make_input()` helper. Eight duplicate copies removed from attack sub-modules.
 
 ## Recent Refactor Notes (2026-04-08)
 
@@ -92,10 +108,32 @@ Critical state rule:
 - Maintain: keep comments aligned with actual architecture.
 
 ### `src-tauri/src/bin/kusanaginokajiki_web.rs`
+
 - For: primary WebUI-first backend runtime (headless HTTP + static frontend server).
 - Does: parses CLI args, creates `AppState`, registers `/api` routes, serves SSE events, keeps legacy invoke-compat endpoint.
 - Used in code: central entrypoint for web mode; calls nearly all command modules.
 - Maintain: add new functionality as resource-style routes first, keep invoke passthrough only for compatibility, preserve route ordering notes (`/active` before `/{id}`, etc).
+
+### `src-tauri/src/bin/kusanaginokajiki_web/http_types.rs`
+
+- For: HTTP-layer response types for the web binary.
+- Does: defines `ApiError` (error envelope), `ImportPcapFileEntry`, and `ImportPcapFilesResponse`.
+- Used in code: imported by handler modules and re-exported via `web_support.rs`.
+- Maintain: keep `ApiError` shape (`code`, `message`) stable — frontend error handling depends on it.
+
+### `src-tauri/src/bin/kusanaginokajiki_web/import_support.rs`
+
+- For: import/export path resolution and file listing for web mode.
+- Does: `ImportKind` enum, `HeadlessRuntimeConfig`, `RUNTIME_CONFIG` static, `resolve_frontend_dist`, `resolve_export_output_path`, `resolve_import_input_path`, `list_import_files_for_kind`.
+- Used in code: import handlers and web runtime startup.
+- Maintain: keep env var names stable (`KK_IMPORT_DIR`, `KK_EXPORT_DIR`); path resolution must be consistent across headless and dev modes.
+
+### `src-tauri/src/bin/kusanaginokajiki_web/web_support.rs`
+
+- For: backward-compatibility re-export shim for handler files.
+- Does: re-exports `ApiError`, `ImportPcapFilesResponse` from `http_types` and all import helpers from `import_support`.
+- Used in code: all 7 handler files (`web_handlers_*.rs`) import via `super::web_support::*`.
+- Maintain: this is a thin shim — add new items to `http_types.rs` or `import_support.rs`, then re-export here.
 
 ---
 
@@ -298,9 +336,21 @@ Global maintenance rule:
 
 ### `src-tauri/src/commands/analysis.rs`
 - For: analysis command bridge to `gm-analysis`.
-- Does: builds snapshot inputs from AppState, runs full analysis, stores findings/anomalies/assignments, serves derived analysis views (credentials, criticality, malware, CVE, compliance).
+- Does: runs full analysis, stores findings/anomalies/assignments, serves derived analysis views (credentials, criticality, malware, CVE, compliance). Snapshot building is delegated to `analysis_input_builder`, `capture_context_builder`, and `application/mappers/deep_parse`.
 - Used in code: `/v1/analysis/*` routes and invoke paths.
 - Maintain: keep snapshot mapping complete when DTOs change; avoid direct domain mutation inside analysis crate.
+
+### `src-tauri/src/commands/analysis_input_builder.rs`
+- For: builds `AnalysisInput` from capture + inventory state.
+- Does: calls `asset_snapshots`, `connection_snapshots`, and `build_deep_parse_snapshot_map` and assembles them into `AnalysisInput`.
+- Used in code: `commands/analysis.rs::run_analysis` and related commands.
+- Maintain: this is a thin orchestrator — logic stays in mapper modules.
+
+### `src-tauri/src/commands/capture_context_builder.rs`
+- For: builds `CaptureContext` from domain state for Phase 14C ATT&CK detections.
+- Does: computes OT device IP sets, MAC/IP mappings, first/last-seen timestamps, write-rate counters, and read/write target sets.
+- Used in code: `commands/analysis.rs::run_context_attacks`.
+- Maintain: keep OT port lookup using `gm_constants::OT_SERVER_PORTS`; do not duplicate port lists locally.
 
 ### `src-tauri/src/commands/patterns.rs`
 - For: communication pattern and redundancy retrieval commands.
@@ -423,6 +473,38 @@ Global maintenance rule:
 - Does: tracks role and station/device name.
 - Used in code: PROFINET device detail and segmentation role modeling.
 - Maintain: keep unknown-role fallback behavior stable.
+
+---
+
+## Application Layer (`src-tauri/src/application`)
+
+### `src-tauri/src/application/mappers/deep_parse.rs`
+
+- For: canonical builder for `DeepParseSnapshot` maps fed into `gm-analysis`.
+- Does: maps all 7 protocol accumulators (Modbus, DNP3, EtherNet/IP, S7, BACnet, IEC-104, PROFINET DCP) from `InventoryState` into `HashMap<String, DeepParseSnapshot>`.
+- Used in code: `commands/analysis_input_builder.rs::build_analysis_input` and `commands/analysis.rs` malware path.
+- Maintain: this is the **single source of truth** for DeepParse mapping — do not add partial copies elsewhere. Extend here when new protocols gain deep-parse fields.
+
+### `src-tauri/src/application/use_cases/ingest/mod.rs`
+
+- For: ingest use-case orchestrator.
+- Does: `run_ingest()` — validates input, dispatches to `gm-ingest`, then merges results into `InventoryState` via `enrich_asset` / `create_asset_from_ingested` and rebuilds alert indexes.
+- Used in code: `commands/ingest.rs` command adapter.
+- Maintain: keep as thin orchestrator; logic lives in `asset_merge` and `alert_index` sub-modules. Merge behavior must be idempotent (improving confidence only).
+
+### `src-tauri/src/application/use_cases/ingest/asset_merge.rs`
+
+- For: per-asset enrichment and creation helpers for the ingest flow.
+- Does: `enrich_asset()` — merges ingested fields (hostname, device type, vendor, Purdue level) into an existing `AssetInfo` using confidence rules. `create_asset_from_ingested()` — constructs a new `AssetInfo` from ingested data when no existing asset matches.
+- Used in code: `ingest/mod.rs::run_ingest` only (`pub(super)`).
+- Maintain: confidence rules must remain monotonically improving — never lower a higher-confidence existing value.
+
+### `src-tauri/src/application/use_cases/ingest/alert_index.rs`
+
+- For: alert storage conversion and Zeek event rebuilding.
+- Does: `ingested_alert_to_stored()` — converts `gm-ingest` alert output to `StoredAlert`. `rebuild_zeek_device_events()` — rebuilds the per-device Zeek event index from all stored alerts. `classify_zeek_log_type()` — private helper mapping Zeek log names to event category strings.
+- Used in code: `ingest/mod.rs::run_ingest` only (`pub(super)`).
+- Maintain: `classify_zeek_log_type` string keys must stay aligned with Zeek log filenames produced by `gm-ingest`.
 
 ---
 
@@ -645,22 +727,46 @@ Global use in code:
 - Maintain: keep crate independent from Tauri/runtime-specific dependencies.
 
 ### `src-tauri/crates/gm-analysis/src/lib.rs`
+
 - For: analysis domain API and shared analysis data types.
 - Does: exports findings, anomalies, assignments, snapshots, and `run_full_analysis` orchestrator.
 - Used in code: `commands/analysis.rs` builds snapshots and calls this crate.
 - Maintain: treat as stable domain contract; add fields compatibly.
 
-### `src-tauri/crates/gm-analysis/src/attack.rs`
-- For: ATT&CK-for-ICS rule detections.
-- Does: detects technique patterns from snapshots/context.
-- Used in code: called by `run_full_analysis`.
-- Maintain: every rule should emit concrete evidence and bounded logic.
+### `src-tauri/crates/gm-analysis/src/attack_codes.rs`
 
-### `src-tauri/crates/gm-analysis/src/context_attacks.rs`
+- For: single source of truth for all MITRE ATT&CK for ICS T-code string constants.
+- Does: defines one `pub const T0XXX: &str = "T0XXX"` per technique used in the crate (~31 codes).
+- Used in code: every `Finding` that sets `technique_id` must reference `crate::attack_codes::T0XXX`.
+- Maintain: add a new constant here before adding a new detection rule. Never hard-code T-code strings in detection files.
+
+### `src-tauri/crates/gm-analysis/src/helpers.rs`
+
+- For: shared predicate helpers used across attack and context-attack modules.
+- Does: `is_ot_device_type()` — returns `true` for device types classified as OT field equipment. `is_ot_protocol_name()` — returns `true` for OT protocol name strings.
+- Used in code: `attack/`, `context_attacks/`, and `naming.rs`.
+- Maintain: `is_ot_device_type` must stay in sync with `gm_constants::DEVICE_TYPE_*` values and with how `AssetInfo.device_type` is populated. Do not inline device type checks elsewhere.
+
+### `src-tauri/crates/gm-analysis/src/attack/` (module directory)
+
+- For: ATT&CK-for-ICS rule detections.
+- Does: sub-modules implement technique-specific detectors grouped by protocol or attack category. `mod.rs` orchestrates and returns all findings.
+- Used in code: called by `run_full_analysis`.
+- Maintain: every rule should emit concrete evidence and bounded logic. All T-code strings must use `crate::attack_codes::T0XXX`.
+
+### `src-tauri/crates/gm-analysis/src/attack/test_utils.rs`
+
+- For: shared test fixture factory for `gm-analysis` attack module tests (`#[cfg(test)]` only).
+- Does: `make_input() -> AnalysisInput` — returns a default empty input, eliminating duplicate boilerplate.
+- Used in code: all 8 attack sub-module test sections via `use crate::attack::test_utils::make_input`.
+- Maintain: keep minimal; do not add production logic here.
+
+### `src-tauri/crates/gm-analysis/src/context_attacks/` (module directory)
+
 - For: context-rich ATT&CK detections requiring capture/session context.
-- Does: implements extended technique checks using per-device/temporal context maps.
-- Used in code: `attack.rs` delegates to `detect_context_attacks`.
-- Maintain: keep context field names stable with `commands/analysis.rs::build_capture_context`.
+- Does: sub-modules implement extended technique checks using per-device/temporal context maps.
+- Used in code: `attack/mod.rs` delegates to `detect_context_attacks`.
+- Maintain: keep context field names stable with `commands/capture_context_builder.rs`.
 
 ### `src-tauri/crates/gm-analysis/src/anomaly.rs`
 - For: anomaly detection algorithms.
@@ -829,10 +935,10 @@ Global use in code:
 - Maintain: keep dependency footprint small.
 
 ### `src-tauri/crates/gm-constants/src/lib.rs`
-- For: shared OT/ICS constants and helpers.
-- Does: defines protocol ports, write FC sets, helper mapping functions.
-- Used in code: attack detection, server-role heuristics, protocol naming.
-- Maintain: update centrally when protocol assumptions change.
+- For: shared OT/ICS constants and helpers — single source of truth for all backend modules.
+- Does: defines `OT_SERVER_PORTS`, `CLEARTEXT_OT_PORTS`, `REMOTE_ACCESS_PORTS`, `MODBUS_WRITE_FCS`, `MAX_FINDINGS`, `MAX_ANOMALY_RESULTS`, `MAX_TOPOLOGY_NODES/EDGES`, `LIVE_CAPTURE_BATCH_SIZE`, `DEVICE_TYPE_*` string constants (15 types), and port/protocol helper functions.
+- Used in code: attack detection, server-role heuristics, protocol naming, analysis caps, ingest asset creation.
+- Maintain: add new constants here rather than inlining them in caller files; every `DEVICE_TYPE_*` string must stay in sync with the `AssetInfo.device_type` field values stored in the DB.
 
 ## `gm-db`
 
