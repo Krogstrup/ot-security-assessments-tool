@@ -60,7 +60,7 @@ pub(super) fn detect_t0855_unauthorized_writes(input: &AnalysisInput) -> Vec<Fin
                     write_count,
                     broadcast_ids.join(", ")
                 ),
-                Some("T0855".to_string()),
+                Some(crate::attack_codes::T0855.to_string()),
             ));
         }
 
@@ -89,7 +89,7 @@ pub(super) fn detect_t0855_unauthorized_writes(input: &AnalysisInput) -> Vec<Fin
                     write_targets.len(),
                     write_targets.join(", ")
                 ),
-                Some("T0855".to_string()),
+                Some(crate::attack_codes::T0855.to_string()),
             ));
         }
     }
@@ -153,7 +153,7 @@ pub(super) fn detect_t0814_diagnostic_dos(input: &AnalysisInput) -> Vec<Finding>
                     "Device {} (type: {}) sent {} Modbus FC 8 diagnostic commands",
                     ip, device_type, fc8_count
                 ),
-                Some("T0814".to_string()),
+                Some(crate::attack_codes::T0814.to_string()),
             ));
         }
     }
@@ -164,11 +164,10 @@ pub(super) fn detect_t0814_diagnostic_dos(input: &AnalysisInput) -> Vec<Finding>
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(test)]
+    use crate::attack::test_utils::make_input;
     use crate::*;
 
-    fn make_input() -> AnalysisInput {
-        AnalysisInput::default()
-    }
 
     #[test]
     fn test_t0855_broadcast_write() {
@@ -201,7 +200,7 @@ mod tests {
         let findings = detect_t0855_unauthorized_writes(&input);
         assert!(!findings.is_empty());
         assert_eq!(findings[0].severity, Severity::Critical);
-        assert_eq!(findings[0].technique_id, Some("T0855".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0855.to_string()));
     }
 
     #[test]
@@ -273,7 +272,7 @@ mod tests {
         let findings = detect_t0814_diagnostic_dos(&input);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].severity, Severity::High);
-        assert_eq!(findings[0].technique_id, Some("T0814".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0814.to_string()));
     }
 
     #[test]

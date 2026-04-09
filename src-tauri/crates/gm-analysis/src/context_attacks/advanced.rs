@@ -33,7 +33,7 @@ pub(super) fn detect_t0830_adversary_in_the_middle(ctx: &CaptureContext) -> Vec<
                 .to_string(),
             vec![ip.clone()],
             format!("IP {} associated with MACs: {}", ip, mac_list.join(", ")),
-            Some("T0830".to_string()),
+            Some(crate::attack_codes::T0830.to_string()),
         ));
     }
 
@@ -89,7 +89,7 @@ pub(super) fn detect_t0884_connection_proxy(
                         ip,
                         port_list.join(", ")
                     ),
-                    Some("T0884".to_string()),
+                    Some(crate::attack_codes::T0884.to_string()),
                 ));
             }
         }
@@ -145,7 +145,7 @@ pub(super) fn detect_t0866_exploitation_remote_services(
                     "{} {} → OT device {} on {} (port {}), {} packets",
                     src_label, conn.src_ip, conn.dst_ip, service, conn.dst_port, conn.packet_count
                 ),
-                Some("T0866".to_string()),
+                Some(crate::attack_codes::T0866.to_string()),
             ));
         }
     }
@@ -196,7 +196,7 @@ pub(super) fn detect_t0800_firmware_update_mode(input: &AnalysisInput) -> Vec<Fi
                             ip,
                             targets.join(", ")
                         ),
-                        Some("T0800".to_string()),
+                        Some(crate::attack_codes::T0800.to_string()),
                     ));
                 }
             }
@@ -236,7 +236,7 @@ pub(super) fn detect_t0800_firmware_update_mode(input: &AnalysisInput) -> Vec<Fi
                             ip,
                             targets.join(", ")
                         ),
-                        Some("T0800".to_string()),
+                        Some(crate::attack_codes::T0800.to_string()),
                     ));
                 }
             }
@@ -302,7 +302,7 @@ pub(super) fn detect_t0801_monitor_process_state(
                 endpoints.len(),
                 sample.join(", ")
             ),
-            Some("T0801".to_string()),
+            Some(crate::attack_codes::T0801.to_string()),
         ));
     }
 
@@ -371,7 +371,7 @@ mod tests {
             !findings.is_empty(),
             "Two MACs for one IP should trigger T0830"
         );
-        assert_eq!(findings[0].technique_id, Some("T0830".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0830.to_string()));
         assert_eq!(findings[0].severity, Severity::Critical);
     }
 
@@ -392,7 +392,7 @@ mod tests {
         let ctx = CaptureContext::default();
         let findings = detect_t0884_connection_proxy(&input, &ctx);
         assert!(!findings.is_empty(), "Relay device should trigger T0884");
-        assert_eq!(findings[0].technique_id, Some("T0884".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0884.to_string()));
     }
 
     // ── T0866 ──
@@ -409,7 +409,7 @@ mod tests {
             !findings.is_empty(),
             "External SSH to OT PLC should trigger T0866"
         );
-        assert_eq!(findings[0].technique_id, Some("T0866".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0866.to_string()));
     }
 
     // ── T0800 ──
@@ -435,7 +435,7 @@ mod tests {
             !findings.is_empty(),
             "CIP File access to PLC should trigger T0800"
         );
-        assert_eq!(findings[0].technique_id, Some("T0800".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0800.to_string()));
     }
 
     // ── T0801 ──
@@ -458,6 +458,6 @@ mod tests {
             !findings.is_empty(),
             "25 OT endpoints polled should trigger T0801"
         );
-        assert_eq!(findings[0].technique_id, Some("T0801".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0801.to_string()));
     }
 }

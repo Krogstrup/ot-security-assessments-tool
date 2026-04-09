@@ -25,7 +25,7 @@ pub(super) fn detect_bacnet_attacks(input: &AnalysisInput) -> Vec<Finding> {
                     "Source {} wrote to BACnet AnalogOutput or BinaryOutput object",
                     ip
                 ),
-                Some("T0855".to_string()),
+                Some(crate::attack_codes::T0855.to_string()),
             ));
         }
 
@@ -45,7 +45,7 @@ pub(super) fn detect_bacnet_attacks(input: &AnalysisInput) -> Vec<Finding> {
                     "Source {} modified BACnet NotificationClass object (alarm routing)",
                     ip
                 ),
-                Some("T0856".to_string()),
+                Some(crate::attack_codes::T0856.to_string()),
             ));
         }
 
@@ -61,7 +61,7 @@ pub(super) fn detect_bacnet_attacks(input: &AnalysisInput) -> Vec<Finding> {
                     .to_string(),
                 vec![ip.clone()],
                 format!("Source {} sent BACnet ReinitializeDevice command", ip),
-                Some("T0816".to_string()),
+                Some(crate::attack_codes::T0816.to_string()),
             ));
         }
 
@@ -80,7 +80,7 @@ pub(super) fn detect_bacnet_attacks(input: &AnalysisInput) -> Vec<Finding> {
                     "Source {} sent BACnet DeviceCommunicationControl command",
                     ip
                 ),
-                Some("T0811".to_string()),
+                Some(crate::attack_codes::T0811.to_string()),
             ));
         }
     }
@@ -91,11 +91,10 @@ pub(super) fn detect_bacnet_attacks(input: &AnalysisInput) -> Vec<Finding> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(test)]
+    use crate::attack::test_utils::make_input;
     use crate::*;
 
-    fn make_input() -> AnalysisInput {
-        AnalysisInput::default()
-    }
 
     #[test]
     fn test_t0855_bacnet_write_output() {
@@ -117,7 +116,7 @@ mod tests {
         let findings = detect_bacnet_attacks(&input);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].severity, Severity::High);
-        assert_eq!(findings[0].technique_id, Some("T0855".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0855.to_string()));
     }
 
     #[test]
@@ -140,6 +139,6 @@ mod tests {
         let findings = detect_bacnet_attacks(&input);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].severity, Severity::High);
-        assert_eq!(findings[0].technique_id, Some("T0811".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0811.to_string()));
     }
 }

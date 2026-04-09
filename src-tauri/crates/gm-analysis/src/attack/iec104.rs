@@ -26,7 +26,7 @@ pub(super) fn detect_iec104_attacks(input: &AnalysisInput) -> Vec<Finding> {
                     "Source {} sent IEC 104 control command ASDUs (type IDs 45–69)",
                     ip
                 ),
-                Some("T0855".to_string()),
+                Some(crate::attack_codes::T0855.to_string()),
             ));
         }
 
@@ -46,7 +46,7 @@ pub(super) fn detect_iec104_attacks(input: &AnalysisInput) -> Vec<Finding> {
                     "Source {} sent IEC 104 Reset Process (C_RP_NA_1, type ID 105)",
                     ip
                 ),
-                Some("T0816".to_string()),
+                Some(crate::attack_codes::T0816.to_string()),
             ));
         }
 
@@ -73,7 +73,7 @@ pub(super) fn detect_iec104_attacks(input: &AnalysisInput) -> Vec<Finding> {
                         "Device {} (type: {}) sent IEC 104 General Interrogation (C_IC_NA_1)",
                         ip, src_type
                     ),
-                    Some("T0814".to_string()),
+                    Some(crate::attack_codes::T0814.to_string()),
                 ));
             }
         }
@@ -85,11 +85,10 @@ pub(super) fn detect_iec104_attacks(input: &AnalysisInput) -> Vec<Finding> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(test)]
+    use crate::attack::test_utils::make_input;
     use crate::*;
 
-    fn make_input() -> AnalysisInput {
-        AnalysisInput::default()
-    }
 
     #[test]
     fn test_t0855_iec104_control_commands() {
@@ -110,7 +109,7 @@ mod tests {
         let findings = detect_iec104_attacks(&input);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].severity, Severity::High);
-        assert_eq!(findings[0].technique_id, Some("T0855".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0855.to_string()));
     }
 
     #[test]
@@ -132,6 +131,6 @@ mod tests {
         let findings = detect_iec104_attacks(&input);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].severity, Severity::Critical);
-        assert_eq!(findings[0].technique_id, Some("T0816".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0816.to_string()));
     }
 }

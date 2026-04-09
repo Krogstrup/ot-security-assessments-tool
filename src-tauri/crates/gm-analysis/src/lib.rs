@@ -16,6 +16,7 @@
 //! results back into AppState.
 
 pub mod allowlist;
+pub mod attack_codes;
 pub mod anomaly;
 pub mod attack;
 pub mod comm_patterns;
@@ -484,11 +485,11 @@ mod tests {
             "Description".to_string(),
             vec!["10.0.0.1".to_string()],
             "Evidence".to_string(),
-            Some("T0855".to_string()),
+            Some(crate::attack_codes::T0855.to_string()),
         );
         assert!(!f.id.is_empty());
         assert_eq!(f.severity, Severity::High);
-        assert_eq!(f.technique_id, Some("T0855".to_string()));
+        assert_eq!(f.technique_id, Some(crate::attack_codes::T0855.to_string()));
     }
 
     #[test]

@@ -139,7 +139,7 @@ fn evaluate_check(check_type: &str, inputs: &CheckInputs<'_>) -> (ComplianceStat
 fn check_flat_network(inputs: &CheckInputs<'_>) -> (ComplianceStatus, String) {
     let flat = inputs.findings.iter().find(|f| {
         f.title.to_lowercase().contains("flat network")
-            || (f.technique_id.as_deref() == Some("T0869"))
+            || (f.technique_id.as_deref() == Some(crate::attack_codes::T0869))
     });
 
     if let Some(f) = flat {
@@ -454,7 +454,7 @@ fn check_purdue_assigned(inputs: &CheckInputs<'_>) -> (ComplianceStatus, String)
 fn check_external_access(inputs: &CheckInputs<'_>) -> (ComplianceStatus, String) {
     // T0822 = External Remote Services
     let remote_finding = inputs.findings.iter().find(|f| {
-        f.technique_id.as_deref() == Some("T0822")
+        f.technique_id.as_deref() == Some(crate::attack_codes::T0822)
             || f.title.to_lowercase().contains("remote access")
             || f.title.to_lowercase().contains("external remote")
     });
@@ -712,7 +712,7 @@ mod tests {
             "Unauthorized Command Message",
             FindingType::AttackTechnique,
             Severity::Critical,
-            Some("T0855"),
+            Some(crate::attack_codes::T0855),
         )];
         let assets = vec![make_asset("10.0.1.1", "plc", Some(1))];
 
@@ -730,7 +730,7 @@ mod tests {
             "Cross-Zone Communication",
             FindingType::PurdueViolation,
             Severity::Medium,
-            Some("T0886"),
+            Some(crate::attack_codes::T0886),
         )];
         let assets = vec![make_asset("10.0.1.1", "plc", Some(1))];
 

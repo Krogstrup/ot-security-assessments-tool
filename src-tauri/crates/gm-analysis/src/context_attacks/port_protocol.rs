@@ -46,7 +46,7 @@ pub(super) fn detect_t0822_external_remote_services(
                     "OT device {} → {} on {} (port {}), {} packets",
                     conn.src_ip, conn.dst_ip, service, conn.dst_port, conn.packet_count
                 ),
-                Some("T0822".to_string()),
+                Some(crate::attack_codes::T0822.to_string()),
             ));
         }
     }
@@ -92,7 +92,7 @@ pub(super) fn detect_t0867_lateral_tool_transfer(
                     "{} from {} to {} (port {}), {} packets",
                     proto_name, conn.src_ip, conn.dst_ip, conn.dst_port, conn.packet_count
                 ),
-                Some("T0867".to_string()),
+                Some(crate::attack_codes::T0867.to_string()),
             ));
         }
     }
@@ -137,7 +137,7 @@ pub(super) fn detect_t0885_commonly_used_port(input: &AnalysisInput) -> Vec<Find
                     canonical_str.join("/"),
                     conn.packet_count
                 ),
-                Some("T0885".to_string()),
+                Some(crate::attack_codes::T0885.to_string()),
             ));
         }
     }
@@ -195,7 +195,7 @@ pub(super) fn detect_t0849_masquerading(input: &AnalysisInput) -> Vec<Finding> {
                         "{}→{}:{} uses '{}', expected '{}'",
                         conn.src_ip, conn.dst_ip, conn.dst_port, proto, expected
                     ),
-                    Some("T0849".to_string()),
+                    Some(crate::attack_codes::T0849.to_string()),
                 ));
             }
         }
@@ -251,7 +251,7 @@ mod tests {
         let ctx = CaptureContext::default();
         let findings = detect_t0822_external_remote_services(&input, &ctx);
         assert!(!findings.is_empty(), "RDP from OT PLC should be flagged");
-        assert_eq!(findings[0].technique_id, Some("T0822".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0822.to_string()));
     }
 
     #[test]
@@ -282,7 +282,7 @@ mod tests {
             !findings.is_empty(),
             "FTP involving OT device should be flagged"
         );
-        assert_eq!(findings[0].technique_id, Some("T0867".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0867.to_string()));
     }
 
     #[test]
@@ -293,7 +293,7 @@ mod tests {
         let ctx = CaptureContext::default();
         let findings = detect_t0867_lateral_tool_transfer(&input, &ctx);
         assert!(!findings.is_empty());
-        assert_eq!(findings[0].technique_id, Some("T0867".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0867.to_string()));
     }
 
     // ── T0885 ──
@@ -307,7 +307,7 @@ mod tests {
             !findings.is_empty(),
             "Modbus on port 503 should trigger T0885"
         );
-        assert_eq!(findings[0].technique_id, Some("T0885".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0885.to_string()));
     }
 
     #[test]
@@ -329,6 +329,6 @@ mod tests {
             !findings.is_empty(),
             "HTTP on port 502 should trigger T0849"
         );
-        assert_eq!(findings[0].technique_id, Some("T0849".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0849.to_string()));
     }
 }

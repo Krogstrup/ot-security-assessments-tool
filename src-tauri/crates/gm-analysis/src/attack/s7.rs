@@ -22,7 +22,7 @@ pub(super) fn detect_s7_attacks(input: &AnalysisInput) -> Vec<Finding> {
                     .to_string(),
                 vec![ip.clone()],
                 format!("Source {} initiated S7comm Download Start (FC 0x1D)", ip),
-                Some("T0843".to_string()),
+                Some(crate::attack_codes::T0843.to_string()),
             ));
         }
 
@@ -38,7 +38,7 @@ pub(super) fn detect_s7_attacks(input: &AnalysisInput) -> Vec<Finding> {
                     .to_string(),
                 vec![ip.clone()],
                 format!("Source {} initiated S7comm Upload Start (FC 0x1A)", ip),
-                Some("T0845".to_string()),
+                Some(crate::attack_codes::T0845.to_string()),
             ));
         }
 
@@ -54,7 +54,7 @@ pub(super) fn detect_s7_attacks(input: &AnalysisInput) -> Vec<Finding> {
                     .to_string(),
                 vec![ip.clone()],
                 format!("Source {} sent S7comm PLC Stop (FC 0x29)", ip),
-                Some("T0816".to_string()),
+                Some(crate::attack_codes::T0816.to_string()),
             ));
         }
 
@@ -70,7 +70,7 @@ pub(super) fn detect_s7_attacks(input: &AnalysisInput) -> Vec<Finding> {
                     .to_string(),
                 vec![ip.clone()],
                 format!("Source {} sent S7comm PI Service (FC 0x28)", ip),
-                Some("T0809".to_string()),
+                Some(crate::attack_codes::T0809.to_string()),
             ));
         }
 
@@ -86,7 +86,7 @@ pub(super) fn detect_s7_attacks(input: &AnalysisInput) -> Vec<Finding> {
                     .to_string(),
                 vec![ip.clone()],
                 format!("Source {} sent S7comm Write Var (FC 0x05)", ip),
-                Some("T0855".to_string()),
+                Some(crate::attack_codes::T0855.to_string()),
             ));
         }
     }
@@ -97,11 +97,10 @@ pub(super) fn detect_s7_attacks(input: &AnalysisInput) -> Vec<Finding> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(test)]
+    use crate::attack::test_utils::make_input;
     use crate::*;
 
-    fn make_input() -> AnalysisInput {
-        AnalysisInput::default()
-    }
 
     #[test]
     fn test_t0843_s7_download_start() {
@@ -120,7 +119,7 @@ mod tests {
         let findings = detect_s7_attacks(&input);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].severity, Severity::Critical);
-        assert_eq!(findings[0].technique_id, Some("T0843".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0843.to_string()));
     }
 
     #[test]
@@ -140,6 +139,6 @@ mod tests {
         let findings = detect_s7_attacks(&input);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].severity, Severity::Critical);
-        assert_eq!(findings[0].technique_id, Some("T0816".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0816.to_string()));
     }
 }

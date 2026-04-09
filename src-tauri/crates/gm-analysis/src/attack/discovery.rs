@@ -76,7 +76,7 @@ pub(super) fn detect_t0846_remote_discovery(input: &AnalysisInput) -> Vec<Findin
                     targets.len(),
                     targets.iter().cloned().collect::<Vec<_>>().join(", ")
                 ),
-                Some("T0846".to_string()),
+                Some(crate::attack_codes::T0846.to_string()),
             ));
         }
     }
@@ -87,11 +87,10 @@ pub(super) fn detect_t0846_remote_discovery(input: &AnalysisInput) -> Vec<Findin
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(test)]
+    use crate::attack::test_utils::make_input;
     use crate::*;
 
-    fn make_input() -> AnalysisInput {
-        AnalysisInput::default()
-    }
 
     #[test]
     fn test_t0846_unknown_device_scanning() {
@@ -140,7 +139,7 @@ mod tests {
         let findings = detect_t0846_remote_discovery(&input);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].severity, Severity::High);
-        assert_eq!(findings[0].technique_id, Some("T0846".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0846.to_string()));
     }
 
     #[test]

@@ -302,7 +302,7 @@ pub fn detect_purdue_violations(
                     conn.dst_port,
                     conn.packet_count
                 ),
-                Some("T0886".to_string()),
+                Some(crate::attack_codes::T0886.to_string()),
             ));
         }
 
@@ -331,7 +331,7 @@ pub fn detect_purdue_violations(
                     conn.dst_port,
                     conn.packet_count
                 ),
-                Some("T0886".to_string()),
+                Some(crate::attack_codes::T0886.to_string()),
             ));
         }
     }
@@ -557,7 +557,7 @@ mod tests {
             .any(|f| f.finding_type == FindingType::PurdueViolation));
         assert!(findings
             .iter()
-            .any(|f| f.technique_id == Some("T0886".to_string())));
+            .any(|f| f.technique_id == Some(crate::attack_codes::T0886.to_string())));
     }
 
     #[test]

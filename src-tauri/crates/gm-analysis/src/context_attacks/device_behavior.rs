@@ -50,7 +50,7 @@ pub(super) fn detect_t0868_detect_operating_mode(input: &AnalysisInput) -> Vec<F
                 ip,
                 upload_download.join(", ")
             ),
-            Some("T0868".to_string()),
+            Some(crate::attack_codes::T0868.to_string()),
         ));
     }
 
@@ -78,7 +78,7 @@ pub(super) fn detect_t0806_brute_force_io(
                     .to_string(),
                 vec![src.clone(), dst.clone()],
                 format!("{} sent {} write-class commands to {}", src, count, dst),
-                Some("T0806".to_string()),
+                Some(crate::attack_codes::T0806.to_string()),
             ));
         }
     }
@@ -126,7 +126,7 @@ pub(super) fn detect_t0806_brute_force_io(
                 "{} sent {} Modbus write commands (FC 5/6/15/16) to {}",
                 ip, write_total, slave
             ),
-            Some("T0806".to_string()),
+            Some(crate::attack_codes::T0806.to_string()),
         ));
     }
 
@@ -164,7 +164,7 @@ pub(super) fn detect_t0802_automated_collection(
                     targets.len(),
                     sample.join(", ")
                 ),
-                Some("T0802".to_string()),
+                Some(crate::attack_codes::T0802.to_string()),
             ));
         }
     }
@@ -203,7 +203,7 @@ pub(super) fn detect_t0802_automated_collection(
                         src,
                         targets.len()
                     ),
-                    Some("T0802".to_string()),
+                    Some(crate::attack_codes::T0802.to_string()),
                 ));
             }
         }
@@ -250,7 +250,7 @@ pub(super) fn detect_t0861_point_tag_identification(input: &AnalysisInput) -> Ve
                 modbus.unit_ids.len(),
                 uid_str.join(", ")
             ),
-            Some("T0861".to_string()),
+            Some(crate::attack_codes::T0861.to_string()),
         ));
     }
 
@@ -280,7 +280,7 @@ pub(super) fn detect_t0840_network_connection_enumeration(
                     "{} contacted {} distinct OT service ports",
                     src, ot_port_count
                 ),
-                Some("T0840".to_string()),
+                Some(crate::attack_codes::T0840.to_string()),
             ));
         }
     }
@@ -313,7 +313,7 @@ pub(super) fn detect_t0840_network_connection_enumeration(
                         src,
                         hosts.len()
                     ),
-                    Some("T0840".to_string()),
+                    Some(crate::attack_codes::T0840.to_string()),
                 ));
             }
         }
@@ -379,7 +379,7 @@ mod tests {
         );
         let findings = detect_t0868_detect_operating_mode(&input);
         assert!(!findings.is_empty(), "S7 upload should trigger T0868");
-        assert_eq!(findings[0].technique_id, Some("T0868".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0868.to_string()));
     }
 
     // ── T0806 ──
@@ -391,7 +391,7 @@ mod tests {
             .insert(("10.0.0.10".to_string(), "10.0.0.1".to_string()), 600);
         let findings = detect_t0806_brute_force_io(&input, &ctx);
         assert!(!findings.is_empty(), "600 writes should trigger T0806");
-        assert_eq!(findings[0].technique_id, Some("T0806".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0806.to_string()));
         let _ = &mut input; // suppress unused warning
     }
 
@@ -442,7 +442,7 @@ mod tests {
             !findings.is_empty(),
             "Polling 12 OT targets should trigger T0802"
         );
-        assert_eq!(findings[0].technique_id, Some("T0802".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0802.to_string()));
         let _ = &mut input;
     }
 
@@ -469,7 +469,7 @@ mod tests {
         );
         let findings = detect_t0861_point_tag_identification(&input);
         assert!(!findings.is_empty(), "8 unit IDs should trigger T0861");
-        assert_eq!(findings[0].technique_id, Some("T0861".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0861.to_string()));
     }
 
     // ── T0840 ──
@@ -491,6 +491,6 @@ mod tests {
             !findings.is_empty(),
             "Connecting to 12 OT hosts should trigger T0840"
         );
-        assert_eq!(findings[0].technique_id, Some("T0840".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0840.to_string()));
     }
 }

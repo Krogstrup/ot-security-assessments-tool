@@ -60,7 +60,7 @@ pub(super) fn detect_t0856_dnp3_unsolicited(input: &AnalysisInput) -> Vec<Findin
                     ip,
                     unknown_targets.join(", ")
                 ),
-                Some("T0856".to_string()),
+                Some(crate::attack_codes::T0856.to_string()),
             ));
         }
 
@@ -80,7 +80,7 @@ pub(super) fn detect_t0856_dnp3_unsolicited(input: &AnalysisInput) -> Vec<Findin
                      but no DNP3 masters detected on network",
                     ip
                 ),
-                Some("T0856".to_string()),
+                Some(crate::attack_codes::T0856.to_string()),
             ));
         }
     }
@@ -91,11 +91,10 @@ pub(super) fn detect_t0856_dnp3_unsolicited(input: &AnalysisInput) -> Vec<Findin
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(test)]
+    use crate::attack::test_utils::make_input;
     use crate::*;
 
-    fn make_input() -> AnalysisInput {
-        AnalysisInput::default()
-    }
 
     #[test]
     fn test_t0856_unsolicited_unknown_master() {
@@ -125,6 +124,6 @@ mod tests {
 
         let findings = detect_t0856_dnp3_unsolicited(&input);
         assert!(!findings.is_empty());
-        assert_eq!(findings[0].technique_id, Some("T0856".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0856.to_string()));
     }
 }

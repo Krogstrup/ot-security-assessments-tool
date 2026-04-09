@@ -71,7 +71,7 @@ pub(super) fn detect_t0803_block_command_reporting(input: &AnalysisInput) -> Vec
                 "Field device {} has network traffic but received no OT-port commands",
                 ip
             ),
-            Some("T0803".to_string()),
+            Some(crate::attack_codes::T0803.to_string()),
         ));
     }
 
@@ -118,7 +118,7 @@ pub(super) fn detect_t0804_block_reporting_message(input: &AnalysisInput) -> Vec
                 "DNP3 outstation {} has master relationship but sends no OT-port traffic",
                 ip
             ),
-            Some("T0804".to_string()),
+            Some(crate::attack_codes::T0804.to_string()),
         ));
     }
 
@@ -175,7 +175,7 @@ pub(super) fn detect_t0881_service_stop(input: &AnalysisInput) -> Vec<Finding> {
                     "Device {} received {} OT-port packets vs average {} across OT devices",
                     ip, incoming, avg
                 ),
-                Some("T0881".to_string()),
+                Some(crate::attack_codes::T0881.to_string()),
             ));
         }
     }
@@ -231,7 +231,7 @@ pub(super) fn detect_t0864_transient_cyber_asset(
                 duration,
                 duration / 60.0
             ),
-            Some("T0864".to_string()),
+            Some(crate::attack_codes::T0864.to_string()),
         ));
     }
 
@@ -297,7 +297,7 @@ mod tests {
             !findings.is_empty(),
             "PLC with no incoming OT commands should trigger T0803"
         );
-        assert_eq!(findings[0].technique_id, Some("T0803".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0803.to_string()));
     }
 
     // ── T0804 ──
@@ -326,7 +326,7 @@ mod tests {
             !findings.is_empty(),
             "Outstation with master but no outgoing traffic → T0804"
         );
-        assert_eq!(findings[0].technique_id, Some("T0804".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0804.to_string()));
     }
 
     // ── T0881 ──
@@ -353,7 +353,7 @@ mod tests {
             .push(conn("10.0.0.100", "10.0.0.3", 502, "Modbus", 1));
         let findings = detect_t0881_service_stop(&input);
         let t0881 = findings.iter().any(|f| {
-            f.technique_id == Some("T0881".to_string())
+            f.technique_id == Some(crate::attack_codes::T0881.to_string())
                 && f.affected_assets.contains(&"10.0.0.3".to_string())
         });
         assert!(t0881, "Silent OT device should trigger T0881");
@@ -376,6 +376,6 @@ mod tests {
             !findings.is_empty(),
             "Device seen for 120s touching OT should trigger T0864"
         );
-        assert_eq!(findings[0].technique_id, Some("T0864".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0864.to_string()));
     }
 }

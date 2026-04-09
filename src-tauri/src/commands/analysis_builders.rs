@@ -6,6 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use gm_constants::OT_SERVER_PORTS;
 use gm_analysis::{
     AnalysisInput, BacnetSnapshot, CaptureContext, DeepParseSnapshot, Dnp3Snapshot, EnipSnapshot,
     FcSnapshot, Iec104Snapshot, ModbusSnapshot, PollingSnapshot, ProfinetDcpSnapshot,
@@ -178,12 +179,8 @@ pub fn build_capture_context(
         .collect();
 
     // Also include IPs from connections to OT ports (passive inference).
-    let ot_ports: &[u16] = &[
-        102, 502, 1089, 1090, 1091, 2222, 2404, 4840, 5007, 5094, 18245, 18246, 20000, 34962,
-        34963, 34964, 44818, 47808,
-    ];
     for conn in &capture.connections {
-        if ot_ports.contains(&conn.dst_port) {
+        if OT_SERVER_PORTS.contains(&conn.dst_port) {
             ot_device_ips.insert(conn.dst_ip.clone());
         }
     }
@@ -331,7 +328,7 @@ pub fn build_capture_context(
     // Read targets: OT connections that are NOT write targets.
     let mut per_source_read_targets: HashMap<String, HashSet<String>> = HashMap::new();
     for conn in &capture.connections {
-        if ot_ports.contains(&conn.dst_port) {
+        if OT_SERVER_PORTS.contains(&conn.dst_port) {
             let is_write_target = per_source_write_targets
                 .get(&conn.src_ip)
                 .map(|wt| wt.contains(&conn.dst_ip))

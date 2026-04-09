@@ -25,7 +25,7 @@ pub(super) fn detect_enip_attacks(input: &AnalysisInput) -> Vec<Finding> {
                     "Source {} sent CIP Write/ReadModifyWrite to Assembly (class 0x04)",
                     ip
                 ),
-                Some("T0855".to_string()),
+                Some(crate::attack_codes::T0855.to_string()),
             ));
         }
 
@@ -44,7 +44,7 @@ pub(super) fn detect_enip_attacks(input: &AnalysisInput) -> Vec<Finding> {
                     .to_string(),
                 vec![ip.clone()],
                 format!("Source {} accessed CIP File object class (0x37)", ip),
-                Some("T0836".to_string()),
+                Some(crate::attack_codes::T0836.to_string()),
             ));
         }
 
@@ -70,7 +70,7 @@ pub(super) fn detect_enip_attacks(input: &AnalysisInput) -> Vec<Finding> {
                         "Device {} (type: {}) sent EtherNet/IP ListIdentity requests",
                         ip, src_type
                     ),
-                    Some("T0846".to_string()),
+                    Some(crate::attack_codes::T0846.to_string()),
                 ));
             }
         }
@@ -82,11 +82,10 @@ pub(super) fn detect_enip_attacks(input: &AnalysisInput) -> Vec<Finding> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(test)]
+    use crate::attack::test_utils::make_input;
     use crate::*;
 
-    fn make_input() -> AnalysisInput {
-        AnalysisInput::default()
-    }
 
     #[test]
     fn test_t0855_cip_write_assembly() {
@@ -107,7 +106,7 @@ mod tests {
         let findings = detect_enip_attacks(&input);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].severity, Severity::High);
-        assert_eq!(findings[0].technique_id, Some("T0855".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0855.to_string()));
     }
 
     #[test]
@@ -129,6 +128,6 @@ mod tests {
         let findings = detect_enip_attacks(&input);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].severity, Severity::Critical);
-        assert_eq!(findings[0].technique_id, Some("T0836".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0836.to_string()));
     }
 }

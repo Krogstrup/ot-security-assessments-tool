@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use gm_constants::MAX_ANOMALY_RESULTS;
+use gm_constants::{MAX_ANOMALY_RESULTS, MAX_FINDINGS};
 use gm_analysis::{
     assess_switch_security, detect_malware_patterns, generate_compliance_report, AnalysisResult,
     AnomalyScore, ComplianceMapping, CredentialChecker, CriticalityAssessment, CveMatch,
@@ -80,9 +80,6 @@ fn build_malware_deep_parse(
 }
 
 // ─── Commands ─────────────────────────────────────────────────────────────────
-
-/// Maximum findings returned by get_findings — nobody reads 50 000 findings.
-const MAX_FINDINGS: usize = 1_000;
 
 fn persist_analysis_result(
     result: &AnalysisResult,

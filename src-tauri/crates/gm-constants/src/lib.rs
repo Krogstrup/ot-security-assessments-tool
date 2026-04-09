@@ -102,6 +102,9 @@ pub const MAX_TOPOLOGY_EDGES: usize = 20_000;
 /// Maximum anomaly scores returned by the analysis API in a single response.
 pub const MAX_ANOMALY_RESULTS: usize = 500;
 
+/// Maximum findings returned by the findings API in a single response.
+pub const MAX_FINDINGS: usize = 1_000;
+
 /// Packet batch size for the live-capture processing thread.  Once this many
 /// packets have accumulated (or the flush interval elapses) the batch is
 /// committed to shared state.

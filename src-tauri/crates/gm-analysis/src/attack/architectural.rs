@@ -62,7 +62,7 @@ pub(super) fn detect_flat_network(input: &AnalysisInput) -> Vec<Finding> {
                     pct * 100.0,
                     subnet
                 ),
-                Some("T0886".to_string()),
+                Some(crate::attack_codes::T0886.to_string()),
             ));
         }
     }
@@ -213,7 +213,7 @@ pub(super) fn detect_internet_exposed_ot(input: &AnalysisInput) -> Vec<Finding> 
                 ot_protocols.join(", "),
                 shodan_query
             ),
-            Some("T0846".to_string()),
+            Some(crate::attack_codes::T0846.to_string()),
         ));
     }
 
@@ -223,11 +223,10 @@ pub(super) fn detect_internet_exposed_ot(input: &AnalysisInput) -> Vec<Finding> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(test)]
+    use crate::attack::test_utils::make_input;
     use crate::*;
 
-    fn make_input() -> AnalysisInput {
-        AnalysisInput::default()
-    }
 
     #[test]
     fn test_flat_network_detection() {
@@ -261,7 +260,7 @@ mod tests {
 
         let findings = detect_flat_network(&input);
         assert!(!findings.is_empty(), "should detect flat network");
-        assert_eq!(findings[0].technique_id, Some("T0886".to_string()));
+        assert_eq!(findings[0].technique_id, Some(crate::attack_codes::T0886.to_string()));
     }
 
     #[test]

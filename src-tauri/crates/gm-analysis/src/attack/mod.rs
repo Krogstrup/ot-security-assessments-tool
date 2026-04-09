@@ -21,6 +21,8 @@ mod enip;
 mod iec104;
 mod modbus;
 mod s7;
+#[cfg(test)]
+pub(super) mod test_utils;
 
 use crate::{AnalysisInput, CaptureContext, Finding};
 
