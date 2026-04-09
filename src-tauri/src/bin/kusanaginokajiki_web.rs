@@ -20,10 +20,6 @@ mod web_api_paths;
 mod web_routes;
 #[path = "kusanaginokajiki_web/web_runtime.rs"]
 mod web_runtime;
-#[path = "kusanaginokajiki_web/http_types.rs"]
-mod http_types;
-#[path = "kusanaginokajiki_web/import_support.rs"]
-mod import_support;
 #[path = "kusanaginokajiki_web/web_support.rs"]
 mod web_support;
 
