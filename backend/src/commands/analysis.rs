@@ -1,57 +1,26 @@
 //! Security analysis commands: ATT&CK detection, Purdue assignment, anomaly scoring.
 //!
-//! These commands bridge the gm-analysis crate to API endpoints.
-//! They construct AnalysisInput from AppState, run analysis, and
-//! store results back into AppState.
-
-use std::collections::HashMap;
+//! These commands are thin adapters over application-layer analysis use-cases.
+//! They snapshot runtime state, delegate, and persist returned projections.
 
 use gm_analysis::{
-    detect_malware_patterns, generate_compliance_report, AnalysisResult, AnomalyScore,
-    ComplianceMapping, ConnectionStats, CriticalityAssessment, CveMatch, DefaultCredential,
-    Finding, MalwareFinding, NamingSuggestion, PatternAnomaly, PurdueAssignment,
-    SwitchSecurityFinding,
+    AnalysisResult, AnomalyScore, ComplianceMapping, ConnectionStats, CriticalityAssessment,
+    CveMatch, DefaultCredential, Finding, MalwareFinding, NamingSuggestion, PatternAnomaly,
+    PurdueAssignment, SwitchSecurityFinding,
 };
 use gm_parsers::RedundancyInfo;
 use gm_types::{MAX_ANOMALY_RESULTS, MAX_FINDINGS};
 
-use crate::application::mappers::{
-    analysis_input::build_analysis_input, deep_parse::build_deep_parse_snapshot_map,
-};
+use crate::application::mappers::capture_context::build_capture_context_snapshot;
 use crate::application::use_cases::analysis as analysis_use_case;
 
 use super::{
-    capture_context_builder::build_capture_context,
     error::AppError,
     support::{read_state, write_state},
-    AnalysisState, AppState, InventoryState,
+    AppState,
 };
 
 // ─── Commands ─────────────────────────────────────────────────────────────────
-
-fn persist_analysis_result(
-    result: &AnalysisResult,
-    inventory: &mut InventoryState,
-    analysis: &mut AnalysisState,
-) {
-    analysis.findings = result.findings.clone();
-    analysis.purdue_assignments = result.purdue_assignments.clone();
-    analysis.anomalies = result.anomalies.clone();
-
-    let purdue_map: HashMap<&str, u8> = result
-        .purdue_assignments
-        .iter()
-        .map(|a| (a.ip_address.as_str(), a.level))
-        .collect();
-
-    for asset in &mut inventory.assets {
-        if asset.purdue_level.is_none() {
-            if let Some(&level) = purdue_map.get(asset.ip_address.as_str()) {
-                asset.purdue_level = Some(level);
-            }
-        }
-    }
-}
 
 /// Run the full security analysis pipeline.
 ///
@@ -64,15 +33,28 @@ pub fn run_analysis(state: &AppState) -> Result<AnalysisResult, AppError> {
     let mut inventory = write_state(&state.inventory, "inventory").map_err(AppError::state_lock)?;
     let mut analysis = write_state(&state.analysis, "analysis").map_err(AppError::state_lock)?;
 
-    let input = build_analysis_input(
+    let context = build_capture_context_snapshot(
+        &inventory.assets,
+        &capture.connections,
+        &analysis.connection_stats,
+        &inventory.deep_parse_info,
+    );
+    let result = analysis_use_case::run_full_analysis(
         &inventory.assets,
         &capture.connections,
         &inventory.deep_parse_info,
+        &context,
     );
-    let ctx = build_capture_context(&capture, &inventory, &analysis);
-    let result = gm_analysis::run_full_analysis(&input, &ctx);
+    let projection = analysis_use_case::project_analysis_state(&result);
 
-    persist_analysis_result(&result, &mut inventory, &mut analysis);
+    analysis.findings = projection.findings;
+    analysis.purdue_assignments = projection.purdue_assignments;
+    analysis.anomalies = projection.anomalies;
+
+    analysis_use_case::apply_purdue_assignments(
+        inventory.assets.as_mut_slice(),
+        &analysis.purdue_assignments,
+    );
 
     Ok(result)
 }
@@ -113,24 +95,22 @@ pub fn get_credential_warnings(state: &AppState) -> Result<Vec<DefaultCredential
 pub fn get_criticality(state: &AppState) -> Result<Vec<CriticalityAssessment>, AppError> {
     let capture = read_state(&state.capture, "capture").map_err(AppError::state_lock)?;
     let inventory = read_state(&state.inventory, "inventory").map_err(AppError::state_lock)?;
-    let input = build_analysis_input(
+    Ok(analysis_use_case::assess_criticality(
         &inventory.assets,
         &capture.connections,
         &inventory.deep_parse_info,
-    );
-    Ok(gm_analysis::assess_criticality_all(&input.assets))
+    ))
 }
 
 /// Get naming suggestions for all discovered assets.
 pub fn get_naming_suggestions(state: &AppState) -> Result<Vec<NamingSuggestion>, AppError> {
     let capture = read_state(&state.capture, "capture").map_err(AppError::state_lock)?;
     let inventory = read_state(&state.inventory, "inventory").map_err(AppError::state_lock)?;
-    let input = build_analysis_input(
+    Ok(analysis_use_case::suggest_names(
         &inventory.assets,
         &capture.connections,
         &inventory.deep_parse_info,
-    );
-    Ok(gm_analysis::suggest_names_all(&input.assets))
+    ))
 }
 
 /// Run switch port security assessment against the current dataset.
@@ -164,16 +144,18 @@ pub fn get_malware_findings(state: &AppState) -> Result<Vec<MalwareFinding>, App
     let inventory = read_state(&state.inventory, "inventory").map_err(AppError::state_lock)?;
     let analysis = read_state(&state.analysis, "analysis").map_err(AppError::state_lock)?;
 
-    let ctx = build_capture_context(&capture, &inventory, &analysis);
-    let connections = build_analysis_input(
+    let context = build_capture_context_snapshot(
         &inventory.assets,
         &capture.connections,
+        &analysis.connection_stats,
         &inventory.deep_parse_info,
-    )
-    .connections;
-    let deep_parse = build_deep_parse_snapshot_map(&inventory.deep_parse_info);
+    );
 
-    Ok(detect_malware_patterns(&ctx, &connections, &deep_parse))
+    Ok(analysis_use_case::malware_findings(
+        &context,
+        &capture.connections,
+        &inventory.deep_parse_info,
+    ))
 }
 
 /// Get CVE warnings for a specific device based on its LLDP/SNMP identity.
@@ -202,16 +184,12 @@ pub fn get_compliance_report(
     let inventory = read_state(&state.inventory, "inventory").map_err(AppError::state_lock)?;
     let analysis = read_state(&state.analysis, "analysis").map_err(AppError::state_lock)?;
 
-    let input = build_analysis_input(
+    Ok(analysis_use_case::compliance_report(
+        &framework,
+        &analysis.findings,
         &inventory.assets,
         &capture.connections,
         &inventory.deep_parse_info,
-    );
-    Ok(generate_compliance_report(
-        &analysis.findings,
-        &input.assets,
-        &input.connections,
-        &framework,
     ))
 }
 

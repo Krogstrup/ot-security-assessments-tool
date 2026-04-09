@@ -1,28 +1,24 @@
-//! Builds [`CaptureContext`] from domain state slices for Phase 14C detections.
+//! Build `CaptureContext` snapshots from runtime-domain slices.
 
 use std::collections::{HashMap, HashSet};
 
+use gm_analysis::ConnectionStats;
 use gm_analysis::CaptureContext;
+use gm_parsers::DeepParseInfo;
+use gm_types::AssetInfo;
+use gm_types::ConnectionInfo;
 use gm_types::OT_DEVICE_TYPES;
 use gm_types::OT_PROTOCOL_NAMES;
 use gm_types::OT_SERVER_PORTS;
 
-use super::{AnalysisState, CaptureState, InventoryState};
-
-/// Build a [`CaptureContext`] from domain state slices.
-///
-/// Produces the richer per-capture metadata (MAC/IP mappings, first/last-seen
-/// timestamps, write-rate counters, OT device IP sets) required by context-aware
-/// ATT&CK detections.
-pub fn build_capture_context(
-    capture: &CaptureState,
-    inventory: &InventoryState,
-    analysis: &AnalysisState,
+/// Build a [`CaptureContext`] from immutable domain snapshots.
+pub fn build_capture_context_snapshot(
+    assets: &[AssetInfo],
+    connections: &[ConnectionInfo],
+    connection_stats: &[ConnectionStats],
+    deep_parse_info: &HashMap<String, DeepParseInfo>,
 ) -> CaptureContext {
-    // OT device IPs: assets running OT protocols or with OT device types.
-
-    let mut ot_device_ips: HashSet<String> = inventory
-        .assets
+    let mut ot_device_ips: HashSet<String> = assets
         .iter()
         .filter(|a| {
             OT_DEVICE_TYPES.contains(&a.device_type.as_str())
@@ -33,24 +29,20 @@ pub fn build_capture_context(
         .map(|a| a.ip_address.clone())
         .collect();
 
-    // Also include IPs from connections to OT ports (passive inference).
-    for conn in &capture.connections {
+    for conn in connections {
         if OT_SERVER_PORTS.contains(&conn.dst_port) {
             ot_device_ips.insert(conn.dst_ip.clone());
         }
     }
 
-    // External IPs from asset classification.
-    let external_ips: HashSet<String> = inventory
-        .assets
+    let external_ips: HashSet<String> = assets
         .iter()
         .filter(|a| a.is_public_ip)
         .map(|a| a.ip_address.clone())
         .collect();
 
-    // IP ↔ MAC mappings: from assets and connection headers.
     let mut ip_to_macs: HashMap<String, Vec<String>> = HashMap::new();
-    for asset in &inventory.assets {
+    for asset in assets {
         if let Some(mac) = &asset.mac_address {
             let macs = ip_to_macs.entry(asset.ip_address.clone()).or_default();
             if !macs.contains(mac) {
@@ -58,7 +50,7 @@ pub fn build_capture_context(
             }
         }
     }
-    for conn in &capture.connections {
+    for conn in connections {
         if let Some(mac) = &conn.src_mac {
             let macs = ip_to_macs.entry(conn.src_ip.clone()).or_default();
             if !macs.contains(mac) {
@@ -72,6 +64,7 @@ pub fn build_capture_context(
             }
         }
     }
+
     let mut mac_to_ips: HashMap<String, Vec<String>> = HashMap::new();
     for (ip, macs) in &ip_to_macs {
         for mac in macs {
@@ -79,13 +72,12 @@ pub fn build_capture_context(
         }
     }
 
-    // Per-device first/last seen from connection_stats (f64 Unix timestamps).
     let mut device_first_seen: HashMap<String, f64> = HashMap::new();
     let mut device_last_seen: HashMap<String, f64> = HashMap::new();
     let mut capture_start = f64::INFINITY;
     let mut capture_end = f64::NEG_INFINITY;
 
-    for cs in &analysis.connection_stats {
+    for cs in connection_stats {
         if cs.first_seen < capture_start {
             capture_start = cs.first_seen;
         }
@@ -93,33 +85,33 @@ pub fn build_capture_context(
             capture_end = cs.last_seen;
         }
 
-        let e = device_first_seen
+        let src_first = device_first_seen
             .entry(cs.src_ip.clone())
             .or_insert(f64::INFINITY);
-        if cs.first_seen < *e {
-            *e = cs.first_seen;
+        if cs.first_seen < *src_first {
+            *src_first = cs.first_seen;
         }
-        let e = device_last_seen
+        let src_last = device_last_seen
             .entry(cs.src_ip.clone())
             .or_insert(f64::NEG_INFINITY);
-        if cs.last_seen > *e {
-            *e = cs.last_seen;
+        if cs.last_seen > *src_last {
+            *src_last = cs.last_seen;
         }
 
-        let e = device_first_seen
+        let dst_first = device_first_seen
             .entry(cs.dst_ip.clone())
             .or_insert(f64::INFINITY);
-        if cs.first_seen < *e {
-            *e = cs.first_seen;
+        if cs.first_seen < *dst_first {
+            *dst_first = cs.first_seen;
         }
-        let e = device_last_seen
+        let dst_last = device_last_seen
             .entry(cs.dst_ip.clone())
             .or_insert(f64::NEG_INFINITY);
-        if cs.last_seen > *e {
-            *e = cs.last_seen;
+        if cs.last_seen > *dst_last {
+            *dst_last = cs.last_seen;
         }
     }
-    // Sanitise infinity values.
+
     let capture_start = if capture_start.is_finite() {
         capture_start
     } else {
@@ -130,6 +122,7 @@ pub fn build_capture_context(
     } else {
         0.0
     };
+
     for v in device_first_seen.values_mut() {
         if !v.is_finite() {
             *v = 0.0;
@@ -141,20 +134,17 @@ pub fn build_capture_context(
         }
     }
 
-    // Per-source dst ports.
     let mut per_source_dst_ports: HashMap<String, HashSet<u16>> = HashMap::new();
-    for conn in &capture.connections {
+    for conn in connections {
         per_source_dst_ports
             .entry(conn.src_ip.clone())
             .or_default()
             .insert(conn.dst_port);
     }
 
-    // Write targets and write rates from Modbus deep parse.
     let mut per_source_write_targets: HashMap<String, HashSet<String>> = HashMap::new();
     let mut per_connection_write_rate: HashMap<(String, String), u64> = HashMap::new();
-
-    for (ip, dp) in &inventory.deep_parse_info {
+    for (ip, dp) in deep_parse_info {
         if let Some(modbus) = &dp.modbus {
             if modbus.role == "master" || modbus.role == "both" {
                 let write_count: u64 = modbus
@@ -180,9 +170,8 @@ pub fn build_capture_context(
         }
     }
 
-    // Read targets: OT connections that are NOT write targets.
     let mut per_source_read_targets: HashMap<String, HashSet<String>> = HashMap::new();
-    for conn in &capture.connections {
+    for conn in connections {
         if OT_SERVER_PORTS.contains(&conn.dst_port) {
             let is_write_target = per_source_write_targets
                 .get(&conn.src_ip)

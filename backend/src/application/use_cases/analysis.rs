@@ -3,13 +3,97 @@
 use std::collections::HashMap;
 
 use gm_analysis::{
-    assess_switch_security, CredentialChecker, CveMatch, CveMatcher, DefaultCredential,
-    SwitchSecurityFinding, SwitchSecurityInput,
+    assess_switch_security, detect_malware_patterns, generate_compliance_report,
+    run_full_analysis as run_engine_full_analysis, AnalysisResult, AnomalyScore, ComplianceMapping,
+    CredentialChecker, CriticalityAssessment, CveMatch, CveMatcher, DefaultCredential, Finding,
+    MalwareFinding, NamingSuggestion, PurdueAssignment, SwitchSecurityFinding, SwitchSecurityInput,
 };
 use gm_parsers::{DeepParseInfo, RedundancyInfo};
-use gm_types::AssetInfo;
+use gm_types::{AssetInfo, ConnectionInfo};
 
-use crate::application::mappers::snapshots::asset_snapshots;
+use crate::application::mappers::{
+    analysis_input::build_analysis_input, deep_parse::build_deep_parse_snapshot_map,
+    snapshots::{asset_snapshots, connection_snapshots},
+};
+
+/// Projection written into runtime analysis state after a full run.
+pub struct AnalysisProjection {
+    pub findings: Vec<Finding>,
+    pub purdue_assignments: Vec<PurdueAssignment>,
+    pub anomalies: Vec<AnomalyScore>,
+}
+
+pub fn run_full_analysis(
+    assets: &[AssetInfo],
+    connections: &[ConnectionInfo],
+    deep_parse_info: &HashMap<String, DeepParseInfo>,
+    context: &gm_analysis::CaptureContext,
+) -> AnalysisResult {
+    let input = build_analysis_input(assets, connections, deep_parse_info);
+    run_engine_full_analysis(&input, context)
+}
+
+pub fn project_analysis_state(result: &AnalysisResult) -> AnalysisProjection {
+    AnalysisProjection {
+        findings: result.findings.clone(),
+        purdue_assignments: result.purdue_assignments.clone(),
+        anomalies: result.anomalies.clone(),
+    }
+}
+
+pub fn apply_purdue_assignments(assets: &mut [AssetInfo], assignments: &[PurdueAssignment]) {
+    let purdue_map: HashMap<&str, u8> = assignments
+        .iter()
+        .map(|a| (a.ip_address.as_str(), a.level))
+        .collect();
+
+    for asset in assets {
+        if asset.purdue_level.is_none() {
+            if let Some(&level) = purdue_map.get(asset.ip_address.as_str()) {
+                asset.purdue_level = Some(level);
+            }
+        }
+    }
+}
+
+pub fn assess_criticality(
+    assets: &[AssetInfo],
+    connections: &[ConnectionInfo],
+    deep_parse_info: &HashMap<String, DeepParseInfo>,
+) -> Vec<CriticalityAssessment> {
+    let input = build_analysis_input(assets, connections, deep_parse_info);
+    gm_analysis::assess_criticality_all(&input.assets)
+}
+
+pub fn suggest_names(
+    assets: &[AssetInfo],
+    connections: &[ConnectionInfo],
+    deep_parse_info: &HashMap<String, DeepParseInfo>,
+) -> Vec<NamingSuggestion> {
+    let input = build_analysis_input(assets, connections, deep_parse_info);
+    gm_analysis::suggest_names_all(&input.assets)
+}
+
+pub fn malware_findings(
+    context: &gm_analysis::CaptureContext,
+    connections: &[ConnectionInfo],
+    deep_parse_info: &HashMap<String, DeepParseInfo>,
+) -> Vec<MalwareFinding> {
+    let deep_parse = build_deep_parse_snapshot_map(deep_parse_info);
+    let connections = connection_snapshots(connections);
+    detect_malware_patterns(context, &connections, &deep_parse)
+}
+
+pub fn compliance_report(
+    framework: &str,
+    findings: &[Finding],
+    assets: &[AssetInfo],
+    connections: &[ConnectionInfo],
+    deep_parse_info: &HashMap<String, DeepParseInfo>,
+) -> Vec<ComplianceMapping> {
+    let input = build_analysis_input(assets, connections, deep_parse_info);
+    generate_compliance_report(findings, &input.assets, &input.connections, framework)
+}
 
 pub fn credential_warnings(assets: &[AssetInfo]) -> Result<Vec<DefaultCredential>, String> {
     let checker = CredentialChecker::new()?;

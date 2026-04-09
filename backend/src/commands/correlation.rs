@@ -4,57 +4,20 @@
 //! device inventory data — hostname, device type, Purdue level — for the
 //! "External Alerts" tab in AnalysisView and the device detail panel.
 
-use serde::Serialize;
+use crate::application::use_cases::correlation as use_case;
 
-use super::{
-    support::{read_state, write_state},
-    AppState, InventoryState, StoredAlert,
-};
-
-/// An IDS/SIEM alert enriched with device inventory information.
-#[derive(Debug, Clone, Serialize)]
-pub struct CorrelatedAlert {
-    // ─── Alert fields ───────────────────────────────────────────
-    pub timestamp: String,
-    pub src_ip: String,
-    pub src_port: u16,
-    pub dst_ip: String,
-    pub dst_port: u16,
-    pub signature_id: u64,
-    pub signature: String,
-    pub category: String,
-    /// 1 = high, 2 = medium, 3 = low
-    pub severity: u8,
-    pub source: String,
-
-    // ─── Correlated device info (src) ──────────────────────────
-    pub src_hostname: Option<String>,
-    pub src_device_type: Option<String>,
-    pub src_purdue_level: Option<u8>,
-
-    // ─── Correlated device info (dst) ──────────────────────────
-    pub dst_hostname: Option<String>,
-    pub dst_device_type: Option<String>,
-    pub dst_purdue_level: Option<u8>,
-}
+use super::{support::read_state, support::write_state, AppState};
 
 // ─── Commands ────────────────────────────────────────────────
+pub use use_case::CorrelatedAlert;
 
 /// Return all imported IDS/SIEM alerts, enriched with device inventory data.
 pub async fn get_correlated_alerts(state: &AppState) -> Result<Vec<CorrelatedAlert>, String> {
     let inventory = read_state(&state.inventory, "inventory")?;
-    let mut alerts: Vec<CorrelatedAlert> = inventory
-        .imported_alerts
-        .iter()
-        .map(|a| correlate_alert(a, &inventory))
-        .collect();
-    // Sort by severity (1=high first), then timestamp descending
-    alerts.sort_by(|a, b| {
-        a.severity
-            .cmp(&b.severity)
-            .then(b.timestamp.cmp(&a.timestamp))
-    });
-    Ok(alerts)
+    Ok(use_case::correlate_alerts(
+        &inventory.imported_alerts,
+        &inventory.assets,
+    ))
 }
 
 /// Return alerts involving a specific IP address (as src or dst).
@@ -63,18 +26,11 @@ pub async fn get_alerts_for_ip(
     state: &AppState,
 ) -> Result<Vec<CorrelatedAlert>, String> {
     let inventory = read_state(&state.inventory, "inventory")?;
-    let mut alerts: Vec<CorrelatedAlert> = inventory
-        .imported_alerts
-        .iter()
-        .filter(|a| a.src_ip == ip || a.dst_ip == ip)
-        .map(|a| correlate_alert(a, &inventory))
-        .collect();
-    alerts.sort_by(|a, b| {
-        a.severity
-            .cmp(&b.severity)
-            .then(b.timestamp.cmp(&a.timestamp))
-    });
-    Ok(alerts)
+    Ok(use_case::correlate_alerts_for_ip(
+        &ip,
+        &inventory.imported_alerts,
+        &inventory.assets,
+    ))
 }
 
 /// Clear all stored alerts.
@@ -83,50 +39,4 @@ pub async fn clear_alerts(state: &AppState) -> Result<(), String> {
     inventory.imported_alerts.clear();
     log::info!("Cleared all imported alerts");
     Ok(())
-}
-
-// ─── Helpers ─────────────────────────────────────────────────
-
-/// Enrich a StoredAlert with device inventory info from InventoryState.
-fn correlate_alert(alert: &StoredAlert, inventory: &InventoryState) -> CorrelatedAlert {
-    let (src_hostname, src_device_type, src_purdue_level) = lookup_device(&alert.src_ip, inventory);
-    let (dst_hostname, dst_device_type, dst_purdue_level) = lookup_device(&alert.dst_ip, inventory);
-
-    CorrelatedAlert {
-        timestamp: alert.timestamp.clone(),
-        src_ip: alert.src_ip.clone(),
-        src_port: alert.src_port,
-        dst_ip: alert.dst_ip.clone(),
-        dst_port: alert.dst_port,
-        signature_id: alert.signature_id,
-        signature: alert.signature.clone(),
-        category: alert.category.clone(),
-        severity: alert.severity,
-        source: alert.source.clone(),
-        src_hostname,
-        src_device_type,
-        src_purdue_level,
-        dst_hostname,
-        dst_device_type,
-        dst_purdue_level,
-    }
-}
-
-/// Look up a device by IP in the asset inventory.
-/// Returns (hostname, device_type, purdue_level).
-fn lookup_device(
-    ip: &str,
-    inventory: &InventoryState,
-) -> (Option<String>, Option<String>, Option<u8>) {
-    if ip.is_empty() {
-        return (None, None, None);
-    }
-    match inventory.assets.iter().find(|a| a.ip_address == ip) {
-        Some(asset) => (
-            asset.hostname.clone(),
-            Some(asset.device_type.clone()),
-            asset.purdue_level,
-        ),
-        None => (None, None, None),
-    }
 }

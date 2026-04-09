@@ -1,7 +1,6 @@
 pub mod analysis;
 pub mod baseline;
 pub mod capture;
-pub mod capture_context_builder;
 pub mod correlation;
 pub mod data;
 pub mod error;

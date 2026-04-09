@@ -1,5 +1,6 @@
 pub mod mappers {
     pub mod analysis_input;
+    pub mod capture_context;
     pub mod deep_parse;
     pub mod snapshots;
 }
@@ -16,6 +17,7 @@ pub mod use_cases {
     pub mod analysis;
     pub mod baseline;
     pub mod capture;
+    pub mod correlation;
     pub mod export;
     pub mod ingest;
     pub mod physical;

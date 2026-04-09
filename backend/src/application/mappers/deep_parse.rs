@@ -2,7 +2,7 @@
 //!
 //! Single source of truth consumed by:
 //!   - `build_analysis_input()` in application/mappers/analysis_input.rs
-//!   - malware detection in commands/analysis.rs
+//!   - malware detection in application/use_cases/analysis.rs
 
 use std::collections::HashMap;
 
