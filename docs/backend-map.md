@@ -42,9 +42,9 @@ Ownership intent:
 
 Runtime flow:
 1. `backend/src/bin/kusanaginokajiki_web.rs` starts the web server and owns route registration.
-2. Routes call `backend/src/commands/*` functions.
-3. Commands operate on `AppState` from `backend/src/commands/mod.rs`.
-4. Domain logic lives in `backend/crates/gm-*` crates.
+2. HTTP handlers in `backend/src/bin/kusanaginokajiki_web/api_*.rs` call adapter functions in `backend/src/commands/*`.
+3. Adapter modules read/write `AppState`, then invoke detached use-cases/queries/services in `backend/src/application/*`.
+4. Application modules operate on DTOs/snapshots/ports and call domain/infra logic in `backend/crates/gm-*`.
 5. Results are serialized using shared models (`gm-types`) and generated TS types (`bindings/gen/types`).
 
 Critical state rule:
@@ -72,7 +72,7 @@ Critical state rule:
   - Why: files directly under `src/bin/*.rs` are auto-discovered by Cargo as standalone binaries.
   - Maintain: keep helper modules under `src/bin/kusanaginokajiki_web/` and reference them from `kusanaginokajiki_web.rs` with explicit `#[path = "..."]` attributes.
 - Route path literals are centralized in `backend/src/bin/kusanaginokajiki_web/web_api_paths.rs`.
-  - Maintain: add/update endpoint paths there first, then consume constants in `web_routes_*`.
+  - Maintain: add/update endpoint paths there first, then consume constants in `api_*.rs` route modules.
 - Shared command helpers are centralized in `backend/src/commands/support.rs`.
   - Maintain: use `read_state` / `write_state` / `mutex_state` for lock access and `app_data_dir()` for `~/.kusanaginokajiki` paths.
 - Sort contracts for data endpoints are now explicit enums in `backend/src/commands/data.rs`:
@@ -104,9 +104,9 @@ Critical state rule:
 ### `backend/src/bin/kusanaginokajiki_web.rs`
 
 - For: primary WebUI-first backend runtime (headless HTTP + static frontend server).
-- Does: parses CLI args, creates `AppState`, registers `/api` routes, serves SSE events, keeps legacy invoke-compat endpoint.
+- Does: parses CLI args, creates `AppState`, registers `/api` routes, and serves SSE events.
 - Used in code: central entrypoint for web mode; calls nearly all command modules.
-- Maintain: add new functionality as resource-style routes first, keep invoke passthrough only for compatibility, preserve route ordering notes (`/active` before `/{id}`, etc).
+- Maintain: add new functionality as resource-style routes first; keep API composition explicit in `build_api_router()`.
 
 ### `backend/src/bin/kusanaginokajiki_web/http_types.rs`
 
@@ -120,13 +120,13 @@ Critical state rule:
 - For: import/export path resolution and file listing for web mode.
 - Does: `ImportKind` enum, `HeadlessRuntimeConfig`, `RUNTIME_CONFIG` static, `resolve_frontend_dist`, `resolve_export_output_path`, `resolve_import_input_path`, `list_import_files_for_kind`.
 - Used in code: import handlers and web runtime startup.
-- Maintain: keep env var names stable (`KK_IMPORT_DIR`, `KK_EXPORT_DIR`); path resolution must be consistent across headless and dev modes.
+- Maintain: keep env var names stable (`KK_HEADLESS_IMPORTS_ROOT`, `KK_HEADLESS_EXPORT_DIR`, `KK_HEADLESS_IMPORT_DIR` legacy override); path resolution must be consistent across headless and dev modes.
 
 ### `backend/src/bin/kusanaginokajiki_web/web_support.rs`
 
 - For: backward-compatibility re-export shim for handler files.
 - Does: re-exports `ApiError`, `ImportPcapFilesResponse` from `http_types` and all import helpers from `import_support`.
-- Used in code: all 7 handler files (`web_handlers_*.rs`) import via `super::web_support::*`.
+- Used in code: `api_*.rs` route modules import via `super::web_support::*`.
 - Maintain: this is a thin shim — add new items to `http_types.rs` or `import_support.rs`, then re-export here.
 
 ---
