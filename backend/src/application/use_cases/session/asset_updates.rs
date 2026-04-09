@@ -1,9 +1,7 @@
 //! Asset update use-cases: single and bulk field updates.
 
-use crate::commands::{
-    support::{mutex_state, write_state},
-    AppState, AssetInfo,
-};
+use gm_db::Database;
+use gm_types::AssetInfo;
 
 use super::AssetUpdate;
 
@@ -38,24 +36,21 @@ fn apply_asset_update(asset: &mut AssetInfo, updates: &AssetUpdate) {
 }
 
 /// Update a single asset's editable fields.
-pub async fn update_asset(
+pub fn update_asset(
     asset_id: String,
     updates: AssetUpdate,
-    state: &AppState,
+    assets: &mut [AssetInfo],
+    db: Option<&Database>,
+    has_active_session: bool,
 ) -> Result<AssetInfo, String> {
-    let updated = {
-        let mut inv = write_state(&state.inventory, "inventory")?;
-        let asset = inv
-            .assets
-            .iter_mut()
-            .find(|a| a.id == asset_id)
-            .ok_or_else(|| format!("Asset {} not found", asset_id))?;
-        apply_asset_update(asset, &updates);
-        asset.clone()
-    };
+    let asset = assets
+        .iter_mut()
+        .find(|a| a.id == asset_id)
+        .ok_or_else(|| format!("Asset {} not found", asset_id))?;
+    apply_asset_update(asset, &updates);
+    let updated = asset.clone();
 
-    let sess = mutex_state(&state.session, "session")?;
-    if let (Some(ref db), Some(ref _session_id)) = (&sess.db, &sess.current_session_id) {
+    if let (Some(db), true) = (db, has_active_session) {
         if let Some(ref dt) = updates.device_type {
             let _ = db.update_asset_field(&asset_id, "device_type", dt);
         }
@@ -78,28 +73,24 @@ pub async fn update_asset(
 }
 
 /// Bulk update assets (same field on multiple assets).
-pub async fn bulk_update_assets(
+pub fn bulk_update_assets(
     asset_ids: Vec<String>,
     updates: AssetUpdate,
-    state: &AppState,
+    assets: &mut [AssetInfo],
+    db: Option<&Database>,
+    has_active_session: bool,
 ) -> Result<usize, String> {
-    let asset_id_set: std::collections::HashSet<&str> =
-        asset_ids.iter().map(String::as_str).collect();
+    let asset_id_set: std::collections::HashSet<&str> = asset_ids.iter().map(String::as_str).collect();
 
-    let count = {
-        let mut inv = write_state(&state.inventory, "inventory")?;
-        let mut count = 0;
-        for asset in &mut inv.assets {
-            if asset_id_set.contains(asset.id.as_str()) {
-                apply_asset_update(asset, &updates);
-                count += 1;
-            }
+    let mut count = 0;
+    for asset in assets.iter_mut() {
+        if asset_id_set.contains(asset.id.as_str()) {
+            apply_asset_update(asset, &updates);
+            count += 1;
         }
-        count
-    };
+    }
 
-    let sess = mutex_state(&state.session, "session")?;
-    if let (Some(ref db), Some(ref _session_id)) = (&sess.db, &sess.current_session_id) {
+    if let (Some(db), true) = (db, has_active_session) {
         if let Some(ref dt) = updates.device_type {
             let _ = db.bulk_update_asset_field(&asset_ids, "device_type", dt);
         }

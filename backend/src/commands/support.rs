@@ -43,7 +43,3 @@ pub fn read_text_file(path: &Path) -> Result<String, String> {
 pub fn write_text_file(path: &Path, content: &str) -> Result<(), String> {
     std::fs::write(path, content).map_err(|e| format!("write {}: {e}", path.display()))
 }
-
-pub fn write_bytes_file(path: &Path, content: &[u8]) -> Result<(), String> {
-    std::fs::write(path, content).map_err(|e| format!("write {}: {e}", path.display()))
-}

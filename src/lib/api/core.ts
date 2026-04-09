@@ -29,13 +29,20 @@ export async function httpJson<T>(path: string, init?: RequestInit): Promise<T> 
 	const response = await fetch(url, init);
 	if (!response.ok) {
 		let message = `${response.status} ${response.statusText}`;
+		let code = 'http_error';
 		try {
-			const body = (await response.json()) as { error?: string };
-			if (body.error) message = body.error;
+			const body = (await response.json()) as {
+				code?: string;
+				message?: string;
+				error?: string;
+			};
+			if (body.code) code = body.code;
+			if (body.message) message = body.message;
+			else if (body.error) message = body.error;
 		} catch {
 			// ignore JSON parse errors
 		}
-		throw new Error(message);
+		throw { code, message } as AppError;
 	}
 	return response.json() as Promise<T>;
 }

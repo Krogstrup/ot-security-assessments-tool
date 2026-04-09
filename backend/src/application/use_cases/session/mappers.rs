@@ -1,8 +1,7 @@
 //! DB row ↔ domain type converters for session persistence.
 
 use gm_db::{AssetRow, ConnectionRow};
-
-use crate::commands::{AssetInfo, ConnectionInfo};
+use gm_types::{AssetInfo, ConnectionInfo};
 
 pub fn asset_info_to_row(asset: &AssetInfo, session_id: &str) -> AssetRow {
     AssetRow {

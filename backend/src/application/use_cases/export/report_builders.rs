@@ -1,13 +1,12 @@
 //! State → gm-report type converters and report data assembly.
 
 use gm_report::{ExportAsset, ExportConnection, ExportProtocolStat, ReportData};
+use gm_types::{AssetInfo, ConnectionInfo};
 
 use crate::application::queries::data::protocol_stats_from_connections;
-use crate::commands::{CaptureState, InventoryState};
 
-pub fn state_assets_to_export(inventory: &InventoryState) -> Vec<ExportAsset> {
-    inventory
-        .assets
+pub fn assets_to_export(assets: &[AssetInfo]) -> Vec<ExportAsset> {
+    assets
         .iter()
         .map(|a| ExportAsset {
             ip_address: a.ip_address.clone(),
@@ -31,9 +30,8 @@ pub fn state_assets_to_export(inventory: &InventoryState) -> Vec<ExportAsset> {
         .collect()
 }
 
-pub fn state_connections_to_export(capture: &CaptureState) -> Vec<ExportConnection> {
-    capture
-        .connections
+pub fn connections_to_export(connections: &[ConnectionInfo]) -> Vec<ExportConnection> {
+    connections
         .iter()
         .map(|c| ExportConnection {
             src_ip: c.src_ip.clone(),
@@ -50,8 +48,8 @@ pub fn state_connections_to_export(capture: &CaptureState) -> Vec<ExportConnecti
         .collect()
 }
 
-pub fn compute_protocol_stats(capture: &CaptureState) -> Vec<ExportProtocolStat> {
-    protocol_stats_from_connections(&capture.connections)
+pub fn compute_protocol_stats(connections: &[ConnectionInfo]) -> Vec<ExportProtocolStat> {
+    protocol_stats_from_connections(connections)
         .into_iter()
         .map(|stat| ExportProtocolStat {
             protocol: stat.protocol,
@@ -64,14 +62,14 @@ pub fn compute_protocol_stats(capture: &CaptureState) -> Vec<ExportProtocolStat>
 }
 
 pub fn build_report_data(
-    capture: &CaptureState,
-    inventory: &InventoryState,
+    assets: &[AssetInfo],
+    connections: &[ConnectionInfo],
     session_name: Option<&str>,
 ) -> ReportData {
     ReportData {
-        assets: state_assets_to_export(inventory),
-        connections: state_connections_to_export(capture),
-        protocol_stats: compute_protocol_stats(capture),
+        assets: assets_to_export(assets),
+        connections: connections_to_export(connections),
+        protocol_stats: compute_protocol_stats(connections),
         findings: Vec::new(),
         session_name: session_name.map(|s| s.to_string()),
     }

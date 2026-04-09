@@ -5,17 +5,13 @@ use std::collections::HashSet;
 use gm_types::{MAX_TOPOLOGY_EDGES, MAX_TOPOLOGY_NODES};
 use gm_topology::TopologyGraph;
 
-use crate::commands::{support::read_state, AppState};
-
 /// Get the current network topology graph for visualization.
 ///
 /// Nodes are capped at [`gm_types::MAX_TOPOLOGY_NODES`] by packet_count
 /// descending. Edges are filtered to retained nodes and capped at
 /// [`gm_types::MAX_TOPOLOGY_EDGES`]. For smaller datasets the full graph
 /// is returned unchanged.
-pub fn get_topology(state: &AppState) -> Result<TopologyGraph, String> {
-    let capture = read_state(&state.capture, "capture")?;
-    let topo = &capture.topology;
+pub fn get_topology(topo: &TopologyGraph) -> Result<TopologyGraph, String> {
 
     if topo.nodes.len() <= MAX_TOPOLOGY_NODES && topo.edges.len() <= MAX_TOPOLOGY_EDGES {
         return Ok(topo.clone());

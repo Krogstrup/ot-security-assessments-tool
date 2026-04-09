@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::commands::{support::read_state, AppState, ConnectionInfo, ProtocolStatInfo};
+use gm_types::{ConnectionInfo, ProtocolStatInfo};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -25,12 +25,11 @@ pub enum ProtocolStatsSortBy {
 /// all protocols in one loop, avoiding the previous O(protocols × connections)
 /// double-loop.
 pub fn get_protocol_stats(
-    state: &AppState,
+    connections: &[ConnectionInfo],
     sort_by: Option<ProtocolStatsSortBy>,
 ) -> Result<Vec<ProtocolStatInfo>, String> {
-    let capture = read_state(&state.capture, "capture")?;
     Ok(protocol_stats_from_connections_with_sort(
-        &capture.connections,
+        connections,
         sort_by.unwrap_or(ProtocolStatsSortBy::Packets),
     ))
 }

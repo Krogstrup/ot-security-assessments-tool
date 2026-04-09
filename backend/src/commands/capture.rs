@@ -5,7 +5,9 @@ use std::time::Instant;
 
 use super::processor::PacketProcessor;
 use super::{support::read_state, support::write_state, AppState};
-use crate::application::services::capture_pipeline_commit::commit_capture_pipeline_state;
+use crate::application::services::capture_pipeline_commit::{
+    compute_capture_pipeline_state, CapturePipelineDependencies, CapturePipelineSource,
+};
 use gm_capture::PcapReader;
 
 #[derive(Serialize)]
@@ -172,13 +174,106 @@ fn compute_and_apply_import_state(
         .map(|f| f.filename.clone())
         .collect();
 
-    let result = commit_capture_pipeline_state(state, &mut processor, &imported_files)?;
+    let existing_imported_files = read_state(&state.capture, "capture")?
+        .imported_files
+        .clone();
+    let inv = read_state(&state.inventory, "inventory")?;
+    let sigs = read_state(&state.signatures, "signatures")?;
+
+    let deps = CapturePipelineDependencies {
+        signature_engine: &sigs.signature_engine,
+        oui_lookup: &inv.oui_lookup,
+        geoip_lookup: &inv.geoip_lookup,
+    };
+    let mut source = PacketProcessorCaptureSource {
+        processor: &mut processor,
+    };
+    let (update, result) = compute_capture_pipeline_state(
+        &mut source,
+        &deps,
+        &existing_imported_files,
+        &imported_files,
+    );
+
+    drop(sigs);
+    drop(inv);
+
+    {
+        let mut cap = write_state(&state.capture, "capture")?;
+        cap.topology = update.topology;
+        cap.connections = update.connections;
+        cap.packet_summaries = update.packet_summaries;
+        cap.redundancy_protocols = update.redundancy_protocols;
+        cap.imported_files = update.imported_files;
+    }
+    {
+        let mut inv = write_state(&state.inventory, "inventory")?;
+        inv.assets = update.assets;
+        inv.deep_parse_info = update.deep_parse_info;
+    }
+    {
+        let mut analysis = write_state(&state.analysis, "analysis")?;
+        analysis.connection_stats = update.connection_stats;
+        analysis.pattern_anomalies = update.pattern_anomalies;
+    }
 
     Ok((
         result.connection_count,
         result.asset_count,
         result.protocols_detected,
     ))
+}
+
+struct PacketProcessorCaptureSource<'a> {
+    processor: &'a mut PacketProcessor,
+}
+
+impl CapturePipelineSource for PacketProcessorCaptureSource<'_> {
+    fn build_deep_parse_info(&self) -> std::collections::HashMap<String, super::DeepParseInfo> {
+        self.processor.build_deep_parse_info()
+    }
+
+    fn build_assets(
+        &self,
+        signature_engine: &gm_signatures::SignatureEngine,
+        deep_parse_info: &std::collections::HashMap<String, super::DeepParseInfo>,
+        oui_lookup: &gm_db::OuiLookup,
+        geoip_lookup: &gm_db::GeoIpLookup,
+    ) -> (
+        Vec<super::AssetInfo>,
+        std::collections::HashMap<String, Vec<super::AssetSignatureMatch>>,
+    ) {
+        self.processor
+            .build_assets(signature_engine, deep_parse_info, oui_lookup, geoip_lookup)
+    }
+
+    fn topology_snapshot(&self) -> gm_topology::TopologyGraph {
+        self.processor.topo_builder.snapshot()
+    }
+
+    fn get_connections(&mut self) -> Vec<super::ConnectionInfo> {
+        self.processor.get_connections()
+    }
+
+    fn get_packet_summaries(
+        &self,
+    ) -> std::collections::HashMap<String, Vec<super::PacketSummary>> {
+        self.processor.get_packet_summaries()
+    }
+
+    fn build_pattern_results(
+        &mut self,
+    ) -> (Vec<gm_analysis::ConnectionStats>, Vec<gm_analysis::PatternAnomaly>) {
+        self.processor.build_pattern_results()
+    }
+
+    fn build_redundancy_info(&self) -> Vec<gm_parsers::RedundancyInfo> {
+        self.processor.build_redundancy_info()
+    }
+
+    fn get_protocols_detected(&self) -> Vec<String> {
+        self.processor.get_protocols_detected()
+    }
 }
 
 #[cfg(test)]

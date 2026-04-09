@@ -1,6 +1,9 @@
 use super::web_support::ApiError;
 use super::SharedState;
-use crate::application::services::capture_pipeline_commit::commit_capture_pipeline_state;
+use crate::application::services::capture_pipeline_commit::{
+    compute_capture_pipeline_state, CapturePipelineDependencies, CapturePipelineSource,
+};
+use crate::commands::support::{read_state, write_state};
 use crate::commands::processor::PacketProcessor;
 use axum::Json;
 use gm_types::LIVE_CAPTURE_BATCH_SIZE;
@@ -10,6 +13,58 @@ use serde_json::{json, Value};
 use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
+
+struct PacketProcessorCaptureSource<'a> {
+    processor: &'a mut PacketProcessor,
+}
+
+impl CapturePipelineSource for PacketProcessorCaptureSource<'_> {
+    fn build_deep_parse_info(&self) -> std::collections::HashMap<String, crate::commands::DeepParseInfo> {
+        self.processor.build_deep_parse_info()
+    }
+
+    fn build_assets(
+        &self,
+        signature_engine: &gm_signatures::SignatureEngine,
+        deep_parse_info: &std::collections::HashMap<String, crate::commands::DeepParseInfo>,
+        oui_lookup: &gm_db::OuiLookup,
+        geoip_lookup: &gm_db::GeoIpLookup,
+    ) -> (
+        Vec<crate::commands::AssetInfo>,
+        std::collections::HashMap<String, Vec<crate::commands::AssetSignatureMatch>>,
+    ) {
+        self.processor
+            .build_assets(signature_engine, deep_parse_info, oui_lookup, geoip_lookup)
+    }
+
+    fn topology_snapshot(&self) -> gm_topology::TopologyGraph {
+        self.processor.topo_builder.snapshot()
+    }
+
+    fn get_connections(&mut self) -> Vec<crate::commands::ConnectionInfo> {
+        self.processor.get_connections()
+    }
+
+    fn get_packet_summaries(
+        &self,
+    ) -> std::collections::HashMap<String, Vec<crate::commands::PacketSummary>> {
+        self.processor.get_packet_summaries()
+    }
+
+    fn build_pattern_results(
+        &mut self,
+    ) -> (Vec<gm_analysis::ConnectionStats>, Vec<gm_analysis::PatternAnomaly>) {
+        self.processor.build_pattern_results()
+    }
+
+    fn build_redundancy_info(&self) -> Vec<gm_parsers::RedundancyInfo> {
+        self.processor.build_redundancy_info()
+    }
+
+    fn get_protocols_detected(&self) -> Vec<String> {
+        self.processor.get_protocols_detected()
+    }
+}
 
 pub(crate) fn to_json<T: Serialize>(value: T) -> Result<Json<Value>, ApiError> {
     serde_json::to_value(value)
@@ -62,7 +117,63 @@ fn flush_batch_headless(
         processor.process_packet(&packet);
     }
 
-    if let Err(err) = commit_capture_pipeline_state(state.as_ref(), processor, &[]) {
+    let existing_imported_files = match read_state(&state.capture, "capture") {
+        Ok(capture) => capture.imported_files.clone(),
+        Err(err) => {
+            log::error!("capture flush read error: {}", err);
+            return;
+        }
+    };
+    let inventory = match read_state(&state.inventory, "inventory") {
+        Ok(inventory) => inventory,
+        Err(err) => {
+            log::error!("capture flush inventory lock error: {}", err);
+            return;
+        }
+    };
+    let signatures = match read_state(&state.signatures, "signatures") {
+        Ok(signatures) => signatures,
+        Err(err) => {
+            log::error!("capture flush signatures lock error: {}", err);
+            return;
+        }
+    };
+    let deps = CapturePipelineDependencies {
+        signature_engine: &signatures.signature_engine,
+        oui_lookup: &inventory.oui_lookup,
+        geoip_lookup: &inventory.geoip_lookup,
+    };
+    let mut source = PacketProcessorCaptureSource { processor };
+    let (update, _) = compute_capture_pipeline_state(
+        &mut source,
+        &deps,
+        &existing_imported_files,
+        &[],
+    );
+    drop(signatures);
+    drop(inventory);
+
+    if let Err(err) = (|| -> Result<(), String> {
+        {
+            let mut capture = write_state(&state.capture, "capture")?;
+            capture.topology = update.topology;
+            capture.connections = update.connections;
+            capture.packet_summaries = update.packet_summaries;
+            capture.redundancy_protocols = update.redundancy_protocols;
+            capture.imported_files = update.imported_files;
+        }
+        {
+            let mut inventory = write_state(&state.inventory, "inventory")?;
+            inventory.assets = update.assets;
+            inventory.deep_parse_info = update.deep_parse_info;
+        }
+        {
+            let mut analysis = write_state(&state.analysis, "analysis")?;
+            analysis.connection_stats = update.connection_stats;
+            analysis.pattern_anomalies = update.pattern_anomalies;
+        }
+        Ok(())
+    })() {
         log::error!("capture flush commit error: {}", err);
         return;
     }

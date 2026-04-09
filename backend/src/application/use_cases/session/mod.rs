@@ -15,7 +15,7 @@ pub use crud::{delete_session, list_sessions, load_session, save_session};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::commands::DeepParseInfo;
+use gm_parsers::DeepParseInfo;
 
 /// Session info returned to the frontend.
 #[derive(Debug, Clone, Serialize)]
@@ -41,28 +41,21 @@ pub struct AssetUpdate {
 
 /// Session metadata stored as JSON in the database.
 #[derive(Debug, Serialize, Deserialize)]
-pub(super) struct SessionMetadata {
-    pub(super) deep_parse_info: HashMap<String, DeepParseInfo>,
-    pub(super) imported_files: Vec<String>,
+pub struct SessionMetadata {
+    pub deep_parse_info: HashMap<String, DeepParseInfo>,
+    pub imported_files: Vec<String>,
 }
 
 // ─── Shared helpers (used by crud + archive) ──────────────────────────────────
 
 use gm_db::{Database, SessionRow};
 use gm_topology::{TopologyBuilder, TopologyGraph};
-
-use crate::commands::{
-    support::{mutex_state, write_state},
-    AppState, AssetInfo, ConnectionInfo, SessionState,
-};
+use gm_types::{AssetInfo, ConnectionInfo};
 
 pub(super) const DATABASE_NOT_AVAILABLE: &str = "Database not available";
 
-pub(super) fn db_from_session(session: &SessionState) -> Result<&Database, String> {
-    session
-        .db
-        .as_ref()
-        .ok_or_else(|| DATABASE_NOT_AVAILABLE.to_string())
+pub(super) fn db_or_error(db: Option<&Database>) -> Result<&Database, String> {
+    db.ok_or_else(|| DATABASE_NOT_AVAILABLE.to_string())
 }
 
 pub(super) fn parse_session_metadata(metadata: &str) -> SessionMetadata {
@@ -88,33 +81,14 @@ pub(super) fn build_topology_from_connections(connections: &[ConnectionInfo]) ->
     topo_builder.snapshot()
 }
 
-pub(super) fn apply_loaded_session_state(
-    state: &AppState,
-    session_id: String,
-    session_name: String,
-    topology: TopologyGraph,
-    connections: Vec<ConnectionInfo>,
-    assets: Vec<AssetInfo>,
-    metadata: SessionMetadata,
-) -> Result<(), String> {
-    {
-        let mut cap = write_state(&state.capture, "capture")?;
-        cap.topology = topology;
-        cap.connections = connections;
-        cap.packet_summaries = HashMap::new();
-        cap.imported_files = metadata.imported_files;
-    }
-    {
-        let mut inv = write_state(&state.inventory, "inventory")?;
-        inv.assets = assets;
-        inv.deep_parse_info = metadata.deep_parse_info;
-    }
-    {
-        let mut sess = mutex_state(&state.session, "session")?;
-        sess.current_session_id = Some(session_id);
-        sess.current_session_name = Some(session_name);
-    }
-    Ok(())
+/// Fully materialized session payload for adapter-owned state application.
+pub struct LoadedSessionData {
+    pub session_id: String,
+    pub session_name: String,
+    pub topology: TopologyGraph,
+    pub connections: Vec<ConnectionInfo>,
+    pub assets: Vec<AssetInfo>,
+    pub metadata: SessionMetadata,
 }
 
 pub(super) fn session_info_from_row(row: SessionRow) -> SessionInfo {

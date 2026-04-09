@@ -3,20 +3,17 @@
 
 use std::collections::HashMap;
 
-use crate::commands::{
-    support::read_state, AppState, DeepParseInfo, FunctionCodeStat, PacketSummary,
-};
+use gm_parsers::{DeepParseInfo, FunctionCodeStat};
+use gm_types::PacketSummary;
 
 /// Get packet summaries for a specific connection (for the connection tree detail view).
 ///
 /// Already capped at 1000 per connection during ingestion (see processor.rs).
 pub fn get_connection_packets(
     connection_id: String,
-    state: &AppState,
+    packet_summaries: &HashMap<String, Vec<PacketSummary>>,
 ) -> Result<Vec<PacketSummary>, String> {
-    let capture = read_state(&state.capture, "capture")?;
-    Ok(capture
-        .packet_summaries
+    Ok(packet_summaries
         .get(&connection_id)
         .cloned()
         .unwrap_or_default())
@@ -28,10 +25,9 @@ pub fn get_connection_packets(
 /// register ranges, device identification, and polling intervals.
 pub fn get_deep_parse_info(
     ip_address: String,
-    state: &AppState,
+    deep_parse_info: &HashMap<String, DeepParseInfo>,
 ) -> Result<Option<DeepParseInfo>, String> {
-    let inventory = read_state(&state.inventory, "inventory")?;
-    Ok(inventory.deep_parse_info.get(&ip_address).cloned())
+    Ok(deep_parse_info.get(&ip_address).cloned())
 }
 
 /// Get function code distribution across all protocols.
@@ -39,14 +35,12 @@ pub fn get_deep_parse_info(
 /// Returns aggregated function code stats for the protocol stats view,
 /// showing which function codes are most used across the network.
 pub fn get_function_code_stats(
-    state: &AppState,
+    deep_parse_info: &HashMap<String, DeepParseInfo>,
 ) -> Result<HashMap<String, Vec<FunctionCodeStat>>, String> {
-    let inventory = read_state(&state.inventory, "inventory")?;
-
     let mut modbus_fcs: HashMap<u8, u64> = HashMap::new();
     let mut dnp3_fcs: HashMap<u8, u64> = HashMap::new();
 
-    for info in inventory.deep_parse_info.values() {
+    for info in deep_parse_info.values() {
         if let Some(ref modbus) = info.modbus {
             for fc in &modbus.function_codes {
                 *modbus_fcs.entry(fc.code).or_insert(0) += fc.count;

@@ -1,20 +1,13 @@
 //! Canonical snapshot mappers: convert in-memory state slices into the
 //! lightweight `AssetSnapshot` / `ConnectionSnapshot` types consumed by
 //! `gm-analysis` (analysis, allowlist, segmentation, etc.).
-//!
-//! # Layering note
-//! These mappers borrow `CaptureState` / `InventoryState` from the commands
-//! module, which is a known interim dependency on the interface layer.
-//! These state types will move to `application/state` in a future step.
 
 use gm_analysis::{AssetSnapshot, ConnectionSnapshot};
+use gm_types::{AssetInfo, ConnectionInfo};
 
-use crate::commands::{CaptureState, InventoryState};
-
-/// Map every asset in `InventoryState` to an `AssetSnapshot`.
-pub fn asset_snapshots(inventory: &InventoryState) -> Vec<AssetSnapshot> {
-    inventory
-        .assets
+/// Map every asset to an `AssetSnapshot`.
+pub fn asset_snapshots(assets: &[AssetInfo]) -> Vec<AssetSnapshot> {
+    assets
         .iter()
         .map(|a| AssetSnapshot {
             ip_address: a.ip_address.clone(),
@@ -30,10 +23,9 @@ pub fn asset_snapshots(inventory: &InventoryState) -> Vec<AssetSnapshot> {
         .collect()
 }
 
-/// Map every connection in `CaptureState` to a `ConnectionSnapshot`.
-pub fn connection_snapshots(capture: &CaptureState) -> Vec<ConnectionSnapshot> {
-    capture
-        .connections
+/// Map every connection to a `ConnectionSnapshot`.
+pub fn connection_snapshots(connections: &[ConnectionInfo]) -> Vec<ConnectionSnapshot> {
+    connections
         .iter()
         .map(|c| ConnectionSnapshot {
             src_ip: c.src_ip.clone(),

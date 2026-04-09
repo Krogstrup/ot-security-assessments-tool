@@ -2,24 +2,26 @@
 
 use std::collections::{HashMap, HashSet};
 
+use gm_analysis::{ConnectionStats, Finding, PatternAnomaly};
+use gm_parsers::DeepParseInfo;
 use gm_segmentation::{
     AssetProfile, ObservedConnection, ProtocolRole, SecurityFinding, SegmentationInput,
 };
+use gm_types::{AssetInfo, ConnectionInfo};
 
 use crate::application::mappers::snapshots::{asset_snapshots, connection_snapshots};
-use crate::commands::{AnalysisState, CaptureState, InventoryState};
 
-/// Assemble a `SegmentationInput` from domain state slices.
-///
-/// Lock order for callers: capture → inventory → analysis
+/// Assemble a `SegmentationInput` from snapshot inputs.
 pub fn build_segmentation_input(
-    capture: &CaptureState,
-    inventory: &InventoryState,
-    analysis: &AnalysisState,
+    assets: &[AssetInfo],
+    connections: &[ConnectionInfo],
+    deep_parse_info: &HashMap<String, DeepParseInfo>,
+    connection_stats: &[ConnectionStats],
+    pattern_anomalies: &[PatternAnomaly],
+    findings: &[Finding],
 ) -> SegmentationInput {
     // ── Assets → AssetProfile ─────────────────────────────────────────────────
-    let assets: Vec<AssetProfile> = inventory
-        .assets
+    let asset_profiles: Vec<AssetProfile> = assets
         .iter()
         .map(|a| {
             let ot_protocols: HashSet<&str> = [
@@ -55,7 +57,7 @@ pub fn build_segmentation_input(
             let is_it = !is_ot && !a.protocols.is_empty();
 
             let mut protocol_roles: Vec<ProtocolRole> = Vec::new();
-            if let Some(dp) = inventory.deep_parse_info.get(&a.ip_address) {
+            if let Some(dp) = deep_parse_info.get(&a.ip_address) {
                 if let Some(m) = &dp.modbus {
                     protocol_roles.push(ProtocolRole {
                         protocol: "modbus".to_string(),
@@ -114,16 +116,15 @@ pub fn build_segmentation_input(
         .collect();
 
     // ── Connections → ObservedConnection ─────────────────────────────────────
-    let stats_map: HashMap<(&str, &str, u16), &gm_analysis::ConnectionStats> = analysis
-        .connection_stats
+    let stats_map: HashMap<(&str, &str, u16), &ConnectionStats> = connection_stats
         .iter()
         .map(|s| (s.src_ip.as_str(), s.dst_ip.as_str(), s.port))
-        .zip(analysis.connection_stats.iter())
+        .zip(connection_stats.iter())
         .collect();
 
     let mut write_ops_set: HashSet<String> = HashSet::new();
     let mut config_ops_set: HashSet<String> = HashSet::new();
-    for (ip, dp) in &inventory.deep_parse_info {
+    for (ip, dp) in deep_parse_info {
         if let Some(m) = &dp.modbus {
             let has_write = m.function_codes.iter().any(|fc| fc.is_write);
             if has_write {
@@ -157,25 +158,23 @@ pub fn build_segmentation_input(
 
     let allowlist_set: HashSet<String> = {
         use gm_analysis::generate_allowlist;
-        let asset_snaps = asset_snapshots(inventory);
-        let conn_snaps = connection_snapshots(capture);
-        let entries = generate_allowlist(&conn_snaps, &asset_snaps, &analysis.connection_stats);
+        let asset_snaps = asset_snapshots(assets);
+        let conn_snaps = connection_snapshots(connections);
+        let entries = generate_allowlist(&conn_snaps, &asset_snaps, connection_stats);
         entries
             .iter()
             .map(|e| format!("{}→{}:{}:{}", e.src_ip, e.dst_ip, e.protocol, e.dst_port))
             .collect()
     };
 
-    let connections: Vec<ObservedConnection> = capture
-        .connections
+    let observed_connections: Vec<ObservedConnection> = connections
         .iter()
         .map(|c| {
             let stat = stats_map
                 .get(&(c.src_ip.as_str(), c.dst_ip.as_str(), c.dst_port))
                 .copied();
             let is_periodic = stat.map(|s| s.is_periodic).unwrap_or(false);
-            let pattern_anomaly = analysis
-                .pattern_anomalies
+            let pattern_anomaly = pattern_anomalies
                 .iter()
                 .any(|pa| pa.src_ip == c.src_ip && pa.dst_ip == c.dst_ip && pa.port == c.dst_port);
 
@@ -208,8 +207,7 @@ pub fn build_segmentation_input(
         .collect();
 
     // ── SecurityFindings ──────────────────────────────────────────────────────
-    let findings: Vec<SecurityFinding> = analysis
-        .findings
+    let security_findings: Vec<SecurityFinding> = findings
         .iter()
         .map(|f| SecurityFinding {
             id: f.id.clone(),
@@ -221,9 +219,9 @@ pub fn build_segmentation_input(
         .collect();
 
     SegmentationInput {
-        assets,
-        connections,
-        findings,
+        assets: asset_profiles,
+        connections: observed_connections,
+        findings: security_findings,
     }
 }
 

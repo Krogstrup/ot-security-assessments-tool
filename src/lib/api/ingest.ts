@@ -3,11 +3,12 @@
  */
 
 import type { IngestImportResult } from '$lib/types/operations';
-import { httpJson } from './core';
+import { deviceZeekEventsSchema, ingestImportResultSchema } from '$lib/schemas';
+import { httpValidated } from './core';
 import type { DeviceZeekEvents } from '$lib/types';
 
 export async function importZeekLogs(paths: string[]): Promise<IngestImportResult> {
-	return httpJson<IngestImportResult>('/api/v1/ingest/zeek', {
+	return httpValidated(ingestImportResultSchema, '/api/v1/ingest/zeek', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ paths })
@@ -15,7 +16,7 @@ export async function importZeekLogs(paths: string[]): Promise<IngestImportResul
 }
 
 export async function importSuricataEve(path: string): Promise<IngestImportResult> {
-	return httpJson<IngestImportResult>('/api/v1/ingest/suricata', {
+	return httpValidated(ingestImportResultSchema, '/api/v1/ingest/suricata', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ path })
@@ -23,7 +24,7 @@ export async function importSuricataEve(path: string): Promise<IngestImportResul
 }
 
 export async function importNmapXml(path: string): Promise<IngestImportResult> {
-	return httpJson<IngestImportResult>('/api/v1/ingest/nmap', {
+	return httpValidated(ingestImportResultSchema, '/api/v1/ingest/nmap', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ path })
@@ -31,7 +32,7 @@ export async function importNmapXml(path: string): Promise<IngestImportResult> {
 }
 
 export async function importMasscanJson(path: string): Promise<IngestImportResult> {
-	return httpJson<IngestImportResult>('/api/v1/ingest/masscan', {
+	return httpValidated(ingestImportResultSchema, '/api/v1/ingest/masscan', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ path })
@@ -39,7 +40,7 @@ export async function importMasscanJson(path: string): Promise<IngestImportResul
 }
 
 export async function importWazuhAlerts(path: string): Promise<IngestImportResult> {
-	return httpJson<IngestImportResult>('/api/v1/ingest/wazuh', {
+	return httpValidated(ingestImportResultSchema, '/api/v1/ingest/wazuh', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ path })
@@ -47,7 +48,7 @@ export async function importWazuhAlerts(path: string): Promise<IngestImportResul
 }
 
 export async function importSinemaCsv(path: string): Promise<IngestImportResult> {
-	return httpJson<IngestImportResult>('/api/v1/ingest/sinema', {
+	return httpValidated(ingestImportResultSchema, '/api/v1/ingest/sinema', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ path })
@@ -55,7 +56,7 @@ export async function importSinemaCsv(path: string): Promise<IngestImportResult>
 }
 
 export async function importTiaXml(path: string): Promise<IngestImportResult> {
-	return httpJson<IngestImportResult>('/api/v1/ingest/tia', {
+	return httpValidated(ingestImportResultSchema, '/api/v1/ingest/tia', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ path })
@@ -63,7 +64,8 @@ export async function importTiaXml(path: string): Promise<IngestImportResult> {
 }
 
 export async function getDeviceZeekEvents(deviceIp: string): Promise<DeviceZeekEvents> {
-	return httpJson<DeviceZeekEvents>(
+	return httpValidated(
+		deviceZeekEventsSchema,
 		`/api/v1/ingest/zeek-device-events/${encodeURIComponent(deviceIp)}`
 	);
 }

@@ -1,29 +1,29 @@
 //! Session archive: export to / import from a `.kkj` ZIP file.
 
-use gm_db::{AssetRow, ConnectionRow};
-
-use crate::commands::{support::mutex_state, AppState};
+use gm_db::{AssetRow, ConnectionRow, Database};
 
 use super::{
-    apply_loaded_session_state, build_topology_from_connections, db_from_session,
+    build_topology_from_connections, db_or_error,
     mappers::{row_to_asset_info, row_to_connection_info},
-    parse_session_metadata, session_info_from_row, SessionInfo,
+    parse_session_metadata, session_info_from_row, LoadedSessionData, SessionInfo,
 };
 
+pub struct ImportSessionArchiveResult {
+    pub info: SessionInfo,
+    pub data: LoadedSessionData,
+}
+
 /// Export a session to a `.kkj` ZIP archive.
-pub async fn export_session_archive(
+pub fn export_session_archive(
     session_id: String,
     output_path: String,
-    state: &AppState,
+    db: Option<&Database>,
 ) -> Result<String, String> {
-    let sess = mutex_state(&state.session, "session")?;
-    let db = db_from_session(&sess)?;
+    let db = db_or_error(db)?;
 
     let session = db.get_session(&session_id).map_err(|e| e.to_string())?;
     let assets = db.list_assets(&session_id).map_err(|e| e.to_string())?;
-    let connections = db
-        .list_connections(&session_id)
-        .map_err(|e| e.to_string())?;
+    let connections = db.list_connections(&session_id).map_err(|e| e.to_string())?;
 
     let session_data = serde_json::json!({
         "session": {
@@ -72,16 +72,16 @@ pub async fn export_session_archive(
     .map_err(|e| e.to_string())?;
 
     zip.finish().map_err(|e| e.to_string())?;
-
-    log::info!("Exported session archive to {}", output_path);
     Ok(output_path)
 }
 
 /// Import a session from a `.kkj` ZIP archive.
-pub async fn import_session_archive(
+pub fn import_session_archive(
     archive_path: String,
-    state: &AppState,
-) -> Result<SessionInfo, String> {
+    db: Option<&Database>,
+) -> Result<ImportSessionArchiveResult, String> {
+    let db = db_or_error(db)?;
+
     let file = std::fs::File::open(&archive_path).map_err(|e| e.to_string())?;
     let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
 
@@ -108,68 +108,48 @@ pub async fn import_session_archive(
     let connections: Vec<ConnectionRow> =
         serde_json::from_value(session_json["connections"].clone()).unwrap_or_default();
 
-    let (new_session_id, session_row, asset_count, conn_count, metadata, assets_vec, conns_vec) = {
-        let sess = mutex_state(&state.session, "session")?;
-        let db = db_from_session(&sess)?;
+    let new_session_id = uuid::Uuid::new_v4().to_string();
+    db.create_session(&new_session_id, &session_name, &session_desc, &metadata_str)
+        .map_err(|e| e.to_string())?;
 
-        let new_session_id = uuid::Uuid::new_v4().to_string();
-        db.create_session(&new_session_id, &session_name, &session_desc, &metadata_str)
-            .map_err(|e| e.to_string())?;
+    for mut asset in assets {
+        asset.session_id = new_session_id.clone();
+        db.insert_asset(&asset).map_err(|e| e.to_string())?;
+    }
 
-        for mut asset in assets {
-            asset.session_id = new_session_id.clone();
-            db.insert_asset(&asset).map_err(|e| e.to_string())?;
-        }
+    for mut conn in connections {
+        conn.session_id = new_session_id.clone();
+        db.insert_connection(&conn).map_err(|e| e.to_string())?;
+    }
 
-        for mut conn in connections {
-            conn.session_id = new_session_id.clone();
-            db.insert_connection(&conn).map_err(|e| e.to_string())?;
-        }
+    let session_row = db.get_session(&new_session_id).map_err(|e| e.to_string())?;
+    let loaded_assets = db.list_assets(&new_session_id).map_err(|e| e.to_string())?;
+    let loaded_conns = db
+        .list_connections(&new_session_id)
+        .map_err(|e| e.to_string())?;
+    let asset_count = loaded_assets.len() as i64;
+    let conn_count = loaded_conns.len() as i64;
+    db.update_session_counts(&new_session_id, asset_count, conn_count)
+        .map_err(|e| e.to_string())?;
 
-        let session_row = db.get_session(&new_session_id).map_err(|e| e.to_string())?;
-        let loaded_assets = db.list_assets(&new_session_id).map_err(|e| e.to_string())?;
-        let loaded_conns = db
-            .list_connections(&new_session_id)
-            .map_err(|e| e.to_string())?;
-        let asset_count = loaded_assets.len() as i64;
-        let conn_count = loaded_conns.len() as i64;
-
-        db.update_session_counts(&new_session_id, asset_count, conn_count)
-            .map_err(|e| e.to_string())?;
-
-        let metadata = parse_session_metadata(&metadata_str);
-        let assets_vec: Vec<_> = loaded_assets.into_iter().map(row_to_asset_info).collect();
-        let conns_vec: Vec<_> = loaded_conns.into_iter().map(row_to_connection_info).collect();
-        (
-            new_session_id,
-            session_row,
-            asset_count,
-            conn_count,
-            metadata,
-            assets_vec,
-            conns_vec,
-        )
-    };
-
+    let metadata = parse_session_metadata(&metadata_str);
+    let assets_vec: Vec<_> = loaded_assets.into_iter().map(row_to_asset_info).collect();
+    let conns_vec: Vec<_> = loaded_conns.into_iter().map(row_to_connection_info).collect();
     let topology = build_topology_from_connections(&conns_vec);
-    apply_loaded_session_state(
-        state,
-        new_session_id,
-        session_name.clone(),
-        topology,
-        conns_vec,
-        assets_vec,
-        metadata,
-    )?;
-
-    log::info!(
-        "Imported session archive '{}' from {}",
-        session_name,
-        archive_path
-    );
-
+    let session_name = session_row.name.clone();
     let mut info = session_info_from_row(session_row);
     info.asset_count = asset_count;
     info.connection_count = conn_count;
-    Ok(info)
+
+    Ok(ImportSessionArchiveResult {
+        info,
+        data: LoadedSessionData {
+            session_id: new_session_id,
+            session_name,
+            topology,
+            connections: conns_vec,
+            assets: assets_vec,
+            metadata,
+        },
+    })
 }

@@ -8,7 +8,10 @@ export type AppErrorCode =
 	| 'db_error'
 	| 'io_error'
 	| 'no_capture_running'
-	| 'external_process';
+	| 'external_process'
+	| 'bad_request'
+	| 'internal_error'
+	| 'http_error';
 
 /** Structured error payload shared by IPC responses. */
 export interface AppError {

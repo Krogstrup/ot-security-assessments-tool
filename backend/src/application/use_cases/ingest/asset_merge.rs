@@ -3,8 +3,7 @@
 use gm_analysis::infer_device_type;
 use gm_ingest::IngestedAsset;
 use gm_parsers::IcsProtocol;
-
-use crate::commands::AssetInfo;
+use gm_types::AssetInfo;
 
 /// Enrich an existing asset with data from an ingested asset.
 pub(super) fn enrich_asset(existing: &mut AssetInfo, ingested: &IngestedAsset, is_active: bool) {

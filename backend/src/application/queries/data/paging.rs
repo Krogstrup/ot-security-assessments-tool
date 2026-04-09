@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::commands::{support::read_state, AppState, AssetInfo, ConnectionInfo};
+use gm_types::{AssetInfo, ConnectionInfo};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -62,39 +62,35 @@ fn paginate<T>(items: Vec<T>, page: usize, page_size: usize) -> (Vec<T>, bool) {
     )
 }
 
-fn count_asset_connections(state: &AppState) -> Result<HashMap<String, u64>, String> {
-    let capture = read_state(&state.capture, "capture")?;
+fn count_asset_connections(connections: &[ConnectionInfo]) -> HashMap<String, u64> {
     let mut counts: HashMap<String, u64> = HashMap::new();
-    for conn in &capture.connections {
+    for conn in connections {
         *counts.entry(conn.src_ip.clone()).or_insert(0) += 1;
         *counts.entry(conn.dst_ip.clone()).or_insert(0) += 1;
     }
-    Ok(counts)
+    counts
 }
 
 // ─── Queries ──────────────────────────────────────────────────────────────────
 
 /// Get discovered assets, paginated and optionally sorted.
-///
-/// Lock order (when sort_by = Connections): capture → inventory.
 pub fn get_assets(
-    state: &AppState,
+    assets: &[AssetInfo],
+    connections: &[ConnectionInfo],
     page: Option<usize>,
     page_size: Option<usize>,
     sort_by: Option<AssetSortBy>,
 ) -> Result<AssetPage, String> {
     let connection_counts = if matches!(sort_by, Some(AssetSortBy::Connections)) {
-        Some(count_asset_connections(state)?)
+        Some(count_asset_connections(connections))
     } else {
         None
     };
 
-    let inventory = read_state(&state.inventory, "inventory")?;
-
     let page = page.unwrap_or(0);
     let page_size = page_size.unwrap_or(200);
 
-    let mut all_assets = inventory.assets.clone();
+    let mut all_assets = assets.to_vec();
     let total = all_assets.len();
 
     match sort_by {
@@ -135,17 +131,15 @@ pub fn get_assets(
 
 /// Get observed connections, paginated and optionally sorted.
 pub fn get_connections(
-    state: &AppState,
+    connections: &[ConnectionInfo],
     page: Option<usize>,
     page_size: Option<usize>,
     sort_by: Option<ConnectionSortBy>,
 ) -> Result<ConnectionPage, String> {
-    let capture = read_state(&state.capture, "capture")?;
-
     let page = page.unwrap_or(0);
     let page_size = page_size.unwrap_or(500);
 
-    let mut all_connections = capture.connections.clone();
+    let mut all_connections = connections.to_vec();
     let total = all_connections.len();
 
     match sort_by {
@@ -170,9 +164,9 @@ pub fn get_connections(
 }
 
 /// Get lightweight asset/connection counts (avoids serializing full datasets).
-pub fn get_data_counts(state: &AppState) -> Result<DataCounts, String> {
-    let asset_count = read_state(&state.inventory, "inventory")?.assets.len();
-    let connection_count = read_state(&state.capture, "capture")?.connections.len();
+pub fn get_data_counts(assets: &[AssetInfo], connections: &[ConnectionInfo]) -> Result<DataCounts, String> {
+    let asset_count = assets.len();
+    let connection_count = connections.len();
     Ok(DataCounts {
         asset_count,
         connection_count,

@@ -5,13 +5,19 @@
  */
 
 import type { CaptureStatusInfo, StopCaptureResult, PacketEvent, CaptureStatsEvent } from '$lib/types/capture';
-import { httpJson } from './core';
+import { z } from 'zod';
+import {
+	captureStatusInfoSchema,
+	importResultSchema,
+	stopCaptureResultSchema
+} from '$lib/schemas';
+import { httpJson, httpValidated } from './core';
 import type { ImportResult } from '$lib/types/capture';
 import { getProtocolStats as getProtocolStatsFromConnections } from './connections';
 import type { ProtocolStatsSortBy } from './contracts';
 
 export async function importPcap(paths: string[]): Promise<ImportResult> {
-	return httpJson<ImportResult>('/api/capture/import-pcap', {
+	return httpValidated(importResultSchema, '/api/capture/import-pcap', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ paths })
@@ -19,7 +25,7 @@ export async function importPcap(paths: string[]): Promise<ImportResult> {
 }
 
 export async function cancelImport(): Promise<void> {
-	await httpJson('/api/v1/capture/cancel', { method: 'POST' });
+	await httpValidated(z.unknown(), '/api/v1/capture/cancel', { method: 'POST' });
 }
 
 export interface ImportProgressEvent {
@@ -48,7 +54,7 @@ export async function onImportProgress(
 }
 
 export async function startCapture(interfaceName: string, bpfFilter?: string): Promise<void> {
-	await httpJson('/api/v1/capture/start', {
+	await httpValidated(z.unknown(), '/api/v1/capture/start', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ interfaceName, bpfFilter: bpfFilter ?? null })
@@ -56,7 +62,7 @@ export async function startCapture(interfaceName: string, bpfFilter?: string): P
 }
 
 export async function stopCapture(savePath?: string): Promise<StopCaptureResult> {
-	return httpJson<StopCaptureResult>('/api/v1/capture/stop', {
+	return httpValidated(stopCaptureResultSchema, '/api/v1/capture/stop', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ savePath: savePath ?? null })
@@ -68,15 +74,15 @@ export async function getProtocolStats(sortBy?: ProtocolStatsSortBy) {
 }
 
 export async function pauseCapture(): Promise<void> {
-	await httpJson('/api/v1/capture/pause', { method: 'POST' });
+	await httpValidated(z.unknown(), '/api/v1/capture/pause', { method: 'POST' });
 }
 
 export async function resumeCapture(): Promise<void> {
-	await httpJson('/api/v1/capture/resume', { method: 'POST' });
+	await httpValidated(z.unknown(), '/api/v1/capture/resume', { method: 'POST' });
 }
 
 export async function getCaptureStatus(): Promise<CaptureStatusInfo> {
-	return httpJson<CaptureStatusInfo>('/api/v1/capture/status');
+	return httpValidated(captureStatusInfoSchema, '/api/v1/capture/status');
 }
 
 export async function onPacketEvent(_callback: (event: PacketEvent) => void): Promise<() => void> {

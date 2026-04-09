@@ -3,19 +3,20 @@
  */
 
 import type { LiveAttackAlert } from '$lib/types/analysis';
-import { httpJson } from './core';
+import { z } from 'zod';
+import { httpValidated } from './core';
 import type { CorrelatedAlert } from '$lib/types/analysis';
 
 export async function getCorrelatedAlerts(): Promise<CorrelatedAlert[]> {
-	return httpJson<CorrelatedAlert[]>('/api/v1/correlation/alerts');
+	return httpValidated(z.unknown(), '/api/v1/correlation/alerts') as Promise<CorrelatedAlert[]>;
 }
 
 export async function getAlertsForIp(ip: string): Promise<CorrelatedAlert[]> {
-	return httpJson<CorrelatedAlert[]>(`/api/v1/correlation/alerts/${encodeURIComponent(ip)}`);
+	return httpValidated(z.unknown(), `/api/v1/correlation/alerts/${encodeURIComponent(ip)}`) as Promise<CorrelatedAlert[]>;
 }
 
 export async function clearAlerts(): Promise<void> {
-	await httpJson('/api/v1/correlation/alerts', { method: 'DELETE' });
+	await httpValidated(z.unknown(), '/api/v1/correlation/alerts', { method: 'DELETE' });
 }
 
 export async function onLiveAttackAlert(

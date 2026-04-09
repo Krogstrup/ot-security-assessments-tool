@@ -11,17 +11,17 @@
 //! # Lock order
 //! Always acquire: capture (write) → inventory (write).
 
-mod alert_index;
-mod asset_merge;
+pub mod alert_index;
+pub mod asset_merge;
 
 use std::collections::HashMap;
 use std::time::Instant;
 
-use gm_ingest::{IngestResult, IngestSource};
+use gm_ingest::{DeviceZeekEvents, IngestResult, IngestSource, StoredAlert};
 use gm_parsers::IcsProtocol;
 use serde::Serialize;
-
-use crate::commands::{support::write_state, AppState, ConnectionInfo};
+use gm_topology::TopologyGraph;
+use gm_types::{AssetInfo, ConnectionInfo};
 
 use alert_index::{ingested_alert_to_stored, rebuild_zeek_device_events};
 use asset_merge::{create_asset_from_ingested, enrich_asset};
@@ -44,6 +44,20 @@ pub struct IngestImportResult {
     pub errors: Vec<String>,
 }
 
+/// Mutable capture-domain fields required by ingest merging.
+pub struct CaptureIngestState<'a> {
+    pub connections: &'a mut Vec<ConnectionInfo>,
+    pub imported_files: &'a mut Vec<String>,
+    pub topology: &'a mut TopologyGraph,
+}
+
+/// Mutable inventory-domain fields required by ingest merging.
+pub struct InventoryIngestState<'a> {
+    pub assets: &'a mut Vec<AssetInfo>,
+    pub imported_alerts: &'a mut Vec<StoredAlert>,
+    pub zeek_device_events: &'a mut HashMap<String, DeviceZeekEvents>,
+}
+
 // ─── Public use-case entry point ──────────────────────────────────────────────
 
 /// Merge an [`IngestResult`] into application state and return a summary.
@@ -55,12 +69,10 @@ pub struct IngestImportResult {
 /// Lock order: capture (write) → inventory (write).
 pub fn run_ingest(
     ingest: IngestResult,
-    state: &AppState,
+    capture: &mut CaptureIngestState<'_>,
+    inventory: &mut InventoryIngestState<'_>,
     start: Instant,
 ) -> Result<IngestImportResult, String> {
-    let mut capture = write_state(&state.capture, "capture")?;
-    let mut inventory = write_state(&state.inventory, "inventory")?;
-
     let source_name = ingest
         .source
         .map(|s| s.display_name().to_string())
@@ -151,13 +163,13 @@ pub fn run_ingest(
 
     // ── Zeek event index ──────────────────────────────────────────────────────
     if ingest_source == Some(IngestSource::Zeek) {
-        inventory.zeek_device_events =
+        *inventory.zeek_device_events =
             rebuild_zeek_device_events(&capture.connections, &inventory.imported_alerts);
     }
 
     // ── Topology rebuild ──────────────────────────────────────────────────────
     let mut topo = gm_topology::TopologyBuilder::new();
-    for conn in &capture.connections {
+    for conn in capture.connections.iter() {
         let protocol = IcsProtocol::from_name(&conn.protocol);
         topo.add_connection(
             &conn.src_ip,
@@ -168,7 +180,7 @@ pub fn run_ingest(
             conn.byte_count,
         );
     }
-    capture.topology = topo.snapshot();
+    *capture.topology = topo.snapshot();
 
     // Enrich topology nodes with asset data
     let asset_lookup: HashMap<String, (Option<String>, String, u8)> = inventory

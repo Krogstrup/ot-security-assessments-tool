@@ -2,11 +2,10 @@
 
 use std::collections::HashMap;
 
-use gm_ingest::IngestedAlert;
+use gm_ingest::{DeviceZeekEvents, IngestedAlert, StoredAlert, ZeekEventSummary};
+use gm_types::ConnectionInfo;
 
-use crate::commands::{ConnectionInfo, DeviceZeekEvents, StoredAlert, ZeekEventSummary};
-
-/// Convert an [`IngestedAlert`] to the [`StoredAlert`] type used in AppState.
+/// Convert an [`IngestedAlert`] to the persisted [`StoredAlert`] representation.
 pub(super) fn ingested_alert_to_stored(alert: &IngestedAlert) -> StoredAlert {
     StoredAlert {
         timestamp: alert.timestamp.to_rfc3339(),

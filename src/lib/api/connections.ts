@@ -7,7 +7,13 @@ import type { PacketSummary } from '$lib/types/connections';
 import type { RedundancyInfo } from '$lib/types/deep-parse';
 import type { DataCounts } from '$lib/types/pagination';
 import type { ProtocolStats } from '$lib/types/protocols';
-import { httpJson } from './core';
+import { z } from 'zod';
+import {
+	connectionPageSchema,
+	dataCountsSchema,
+	protocolStatSchema
+} from '$lib/schemas';
+import { httpValidated } from './core';
 import type { ConnectionPage } from '$lib/types';
 import {
 	DEFAULT_CONNECTION_PAGE_SIZE,
@@ -25,34 +31,38 @@ export async function getConnections(
 		pageSize: String(pageSize)
 	});
 	if (sortBy) params.set('sortBy', sortBy);
-	return httpJson<ConnectionPage>(`/api/data/connections?${params.toString()}`);
+	return httpValidated(connectionPageSchema, `/api/data/connections?${params.toString()}`) as Promise<ConnectionPage>;
 }
 
 export async function getDataCounts(): Promise<DataCounts> {
-	return httpJson<DataCounts>('/api/data/counts');
+	return httpValidated(dataCountsSchema, '/api/data/counts');
 }
 
 export async function getConnectionPackets(connectionId: string): Promise<PacketSummary[]> {
-	return httpJson<PacketSummary[]>(
+	return httpValidated(
+		z.unknown(),
 		`/api/data/connection-packets/${encodeURIComponent(connectionId)}`
-	);
+	) as Promise<PacketSummary[]>;
 }
 
 export async function getProtocolStats(sortBy?: ProtocolStatsSortBy): Promise<ProtocolStats[]> {
 	const params = new URLSearchParams();
 	if (sortBy) params.set('sortBy', sortBy);
 	const query = params.toString();
-	return httpJson<ProtocolStats[]>(query ? `/api/data/protocol-stats?${query}` : '/api/data/protocol-stats');
+	return httpValidated(
+		z.array(protocolStatSchema),
+		query ? `/api/data/protocol-stats?${query}` : '/api/data/protocol-stats'
+	) as Promise<ProtocolStats[]>;
 }
 
 export async function getConnectionStats(): Promise<ConnectionStats[]> {
-	return httpJson<ConnectionStats[]>('/api/v1/patterns/connection-stats');
+	return httpValidated(z.unknown(), '/api/v1/patterns/connection-stats') as Promise<ConnectionStats[]>;
 }
 
 export async function getPatternAnomalies(): Promise<PatternAnomaly[]> {
-	return httpJson<PatternAnomaly[]>('/api/v1/patterns/anomalies');
+	return httpValidated(z.unknown(), '/api/v1/patterns/anomalies') as Promise<PatternAnomaly[]>;
 }
 
 export async function getRedundancyProtocols(): Promise<RedundancyInfo[]> {
-	return httpJson<RedundancyInfo[]>('/api/v1/patterns/redundancy-protocols');
+	return httpValidated(z.unknown(), '/api/v1/patterns/redundancy-protocols') as Promise<RedundancyInfo[]>;
 }

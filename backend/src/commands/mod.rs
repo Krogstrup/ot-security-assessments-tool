@@ -3,7 +3,9 @@ pub mod capture_context_builder;
 pub mod baseline;
 pub mod capture;
 pub mod correlation;
+pub mod data;
 pub mod error;
+pub mod export;
 pub mod handlers;
 pub mod ingest;
 pub mod physical;
@@ -11,50 +13,17 @@ pub mod processor;
 pub mod projects;
 pub mod protocol_handler;
 pub mod resource_paths;
+pub mod segmentation;
+pub mod session;
 pub mod signatures;
 pub mod support;
 pub mod system;
 pub mod wireshark;
 
-/// Data-query adapter layer.
-pub mod data {
-    pub use crate::application::queries::data::{
-        get_assets, get_connection_packets, get_connections, get_data_counts, get_deep_parse_info,
-        get_function_code_stats, get_protocol_stats, get_timeline_range, get_topology, AssetPage,
-        AssetSortBy, ConnectionPage, ConnectionSortBy, DataCounts, ProtocolStatsSortBy,
-    };
-}
-
-/// Export & reporting adapter layer.
-pub mod export {
-    pub use crate::application::use_cases::export::{
-        export_allowlist_csv, export_assets_csv, export_assets_json, export_connections_csv,
-        export_filtered_pcap, export_firewall_rules, export_sbom, export_stix_bundle,
-        export_topology_json, generate_communication_allowlist, generate_pdf_report,
-        save_topology_image, ReportConfigInput,
-    };
-}
-
-/// Session management adapter layer.
-pub mod session {
-    pub use crate::application::use_cases::session::AssetUpdate;
-    pub use crate::application::use_cases::session::{
-        bulk_update_assets, delete_session, export_session_archive, import_session_archive,
-        list_sessions, load_session, save_session, update_asset,
-    };
-}
-
-/// Segmentation adapter layer.
-pub mod segmentation {
-    pub use crate::application::use_cases::segmentation::{
-        export_enforcement_config, run_segmentation,
-    };
-}
-
 use gm_analysis::{AnomalyScore, ConnectionStats, Finding, PatternAnomaly, PurdueAssignment};
 use gm_capture::LiveCaptureHandle;
 use gm_db::{Database, GeoIpLookup, OuiLookup};
-pub use gm_ingest::{DeviceZeekEvents, StoredAlert, ZeekEventSummary};
+pub use gm_ingest::{DeviceZeekEvents, StoredAlert};
 pub use gm_types::{
     AssetInfo, AssetSignatureMatch, ConnectionInfo, PacketSummary, ProtocolStatInfo,
 };

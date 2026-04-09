@@ -3,15 +3,17 @@
  */
 
 import type { FrameRow } from '$lib/types/operations';
-import { httpJson } from './core';
+import { z } from 'zod';
+import { frameRowSchema, wiresharkInfoSchema } from '$lib/schemas';
+import { httpValidated } from './core';
 import type { WiresharkInfo } from '$lib/types';
 
 export async function detectWireshark(): Promise<WiresharkInfo> {
-	return httpJson<WiresharkInfo>('/api/v1/wireshark/info');
+	return httpValidated(wiresharkInfoSchema, '/api/v1/wireshark/info');
 }
 
 export async function openInWireshark(connectionId: string): Promise<void> {
-	await httpJson('/api/v1/wireshark/open-connection', {
+	await httpValidated(z.unknown(), '/api/v1/wireshark/open-connection', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ connectionId })
@@ -19,7 +21,7 @@ export async function openInWireshark(connectionId: string): Promise<void> {
 }
 
 export async function openWiresharkForNode(ipAddress: string): Promise<void> {
-	await httpJson('/api/v1/wireshark/open-node', {
+	await httpValidated(z.unknown(), '/api/v1/wireshark/open-node', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ ipAddress })
@@ -27,15 +29,18 @@ export async function openWiresharkForNode(ipAddress: string): Promise<void> {
 }
 
 export async function getConnectionFrames(connectionId: string): Promise<FrameRow[]> {
-	return httpJson<FrameRow[]>(`/api/v1/wireshark/frames/${encodeURIComponent(connectionId)}`);
+	return httpValidated(
+		z.array(frameRowSchema),
+		`/api/v1/wireshark/frames/${encodeURIComponent(connectionId)}`
+	);
 }
 
 export async function exportFramesCsv(connectionId: string): Promise<string> {
-	return httpJson<string>(`/api/v1/wireshark/frames/${encodeURIComponent(connectionId)}/csv`);
+	return httpValidated(z.string(), `/api/v1/wireshark/frames/${encodeURIComponent(connectionId)}/csv`);
 }
 
 export async function saveFramesCsv(connectionId: string, outputPath: string): Promise<void> {
-	await httpJson(`/api/v1/wireshark/frames/${encodeURIComponent(connectionId)}/csv`, {
+	await httpValidated(z.unknown(), `/api/v1/wireshark/frames/${encodeURIComponent(connectionId)}/csv`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ outputPath })

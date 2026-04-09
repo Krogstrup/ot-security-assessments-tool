@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 
+use gm_analysis::{ConnectionStats, PatternAnomaly};
+use gm_db::{GeoIpLookup, OuiLookup};
+use gm_parsers::{DeepParseInfo, RedundancyInfo};
+use gm_signatures::SignatureEngine;
 use gm_topology::TopologyGraph;
-
-use crate::commands::processor::PacketProcessor;
-use crate::commands::{support::read_state, support::write_state, AppState, AssetSignatureMatch};
+use gm_types::{AssetInfo, AssetSignatureMatch, ConnectionInfo, PacketSummary};
 
 pub struct CapturePipelineCommitResult {
     pub connection_count: usize,
@@ -11,63 +13,92 @@ pub struct CapturePipelineCommitResult {
     pub protocols_detected: Vec<String>,
 }
 
-pub fn commit_capture_pipeline_state(
-    state: &AppState,
-    processor: &mut PacketProcessor,
-    imported_files: &[String],
-) -> Result<CapturePipelineCommitResult, String> {
-    let deep_parse_info = processor.build_deep_parse_info();
-    let (assets, sig_results) = {
-        let sigs = read_state(&state.signatures, "signatures")?;
-        let inv = read_state(&state.inventory, "inventory")?;
-        processor.build_assets(
-            &sigs.signature_engine,
-            &deep_parse_info,
-            &inv.oui_lookup,
-            &inv.geoip_lookup,
-        )
-    };
+pub struct CapturePipelineDependencies<'a> {
+    pub signature_engine: &'a SignatureEngine,
+    pub oui_lookup: &'a OuiLookup,
+    pub geoip_lookup: &'a GeoIpLookup,
+}
 
-    let mut topology = processor.topo_builder.snapshot();
+pub struct CapturePipelineStateUpdate {
+    pub topology: TopologyGraph,
+    pub connections: Vec<ConnectionInfo>,
+    pub packet_summaries: HashMap<String, Vec<PacketSummary>>,
+    pub redundancy_protocols: Vec<RedundancyInfo>,
+    pub imported_files: Vec<String>,
+    pub assets: Vec<AssetInfo>,
+    pub deep_parse_info: HashMap<String, DeepParseInfo>,
+    pub connection_stats: Vec<ConnectionStats>,
+    pub pattern_anomalies: Vec<PatternAnomaly>,
+}
+
+pub trait CapturePipelineSource {
+    fn build_deep_parse_info(&self) -> HashMap<String, DeepParseInfo>;
+    fn build_assets(
+        &self,
+        signature_engine: &SignatureEngine,
+        deep_parse_info: &HashMap<String, DeepParseInfo>,
+        oui_lookup: &OuiLookup,
+        geoip_lookup: &GeoIpLookup,
+    ) -> (Vec<AssetInfo>, HashMap<String, Vec<AssetSignatureMatch>>);
+    fn topology_snapshot(&self) -> TopologyGraph;
+    fn get_connections(&mut self) -> Vec<ConnectionInfo>;
+    fn get_packet_summaries(&self) -> HashMap<String, Vec<PacketSummary>>;
+    fn build_pattern_results(&mut self) -> (Vec<ConnectionStats>, Vec<PatternAnomaly>);
+    fn build_redundancy_info(&self) -> Vec<RedundancyInfo>;
+    fn get_protocols_detected(&self) -> Vec<String>;
+}
+
+pub fn compute_capture_pipeline_state(
+    source: &mut dyn CapturePipelineSource,
+    deps: &CapturePipelineDependencies<'_>,
+    existing_imported_files: &[String],
+    newly_imported_files: &[String],
+) -> (CapturePipelineStateUpdate, CapturePipelineCommitResult) {
+    let deep_parse_info = source.build_deep_parse_info();
+    let (assets, sig_results) = source.build_assets(
+        deps.signature_engine,
+        &deep_parse_info,
+        deps.oui_lookup,
+        deps.geoip_lookup,
+    );
+
+    let mut topology = source.topology_snapshot();
     enrich_topology_with_signatures(&mut topology, &sig_results);
 
-    let connections = processor.get_connections();
-    let packet_summaries = processor.get_packet_summaries();
-    let (connection_stats, pattern_anomalies) = processor.build_pattern_results();
-    let redundancy_protocols = processor.build_redundancy_info();
-    let protocols_detected = processor.get_protocols_detected();
+    let connections = source.get_connections();
+    let packet_summaries = source.get_packet_summaries();
+    let (connection_stats, pattern_anomalies) = source.build_pattern_results();
+    let redundancy_protocols = source.build_redundancy_info();
+    let protocols_detected = source.get_protocols_detected();
+
+    let mut imported_files = existing_imported_files.to_vec();
+    if !newly_imported_files.is_empty() {
+        imported_files.extend(newly_imported_files.iter().cloned());
+        imported_files.sort();
+        imported_files.dedup();
+    }
 
     let asset_count = assets.len();
     let connection_count = connections.len();
 
-    {
-        let mut cap = write_state(&state.capture, "capture")?;
-        cap.topology = topology;
-        cap.connections = connections;
-        cap.packet_summaries = packet_summaries;
-        cap.redundancy_protocols = redundancy_protocols;
-        if !imported_files.is_empty() {
-            cap.imported_files.extend(imported_files.iter().cloned());
-            cap.imported_files.sort();
-            cap.imported_files.dedup();
-        }
-    }
-    {
-        let mut inv = write_state(&state.inventory, "inventory")?;
-        inv.assets = assets;
-        inv.deep_parse_info = deep_parse_info;
-    }
-    {
-        let mut analysis = write_state(&state.analysis, "analysis")?;
-        analysis.connection_stats = connection_stats;
-        analysis.pattern_anomalies = pattern_anomalies;
-    }
-
-    Ok(CapturePipelineCommitResult {
-        connection_count,
-        asset_count,
-        protocols_detected,
-    })
+    (
+        CapturePipelineStateUpdate {
+            topology,
+            connections,
+            packet_summaries,
+            redundancy_protocols,
+            imported_files,
+            assets,
+            deep_parse_info,
+            connection_stats,
+            pattern_anomalies,
+        },
+        CapturePipelineCommitResult {
+            connection_count,
+            asset_count,
+            protocols_detected,
+        },
+    )
 }
 
 fn enrich_topology_with_signatures(

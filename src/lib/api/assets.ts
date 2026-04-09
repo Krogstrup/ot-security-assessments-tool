@@ -6,7 +6,9 @@ import type { Asset } from '$lib/types/assets';
 import type { DeepParseInfo, FunctionCodeStat } from '$lib/types/deep-parse';
 import type { AssetUpdate } from '$lib/types/operations';
 import type { TopologyGraph } from '$lib/types/topology';
-import { httpJson } from './core';
+import { z } from 'zod';
+import { assetPageSchema, assetSchema } from '$lib/schemas';
+import { httpJson, httpValidated } from './core';
 import type { AssetPage } from '$lib/types';
 import { DEFAULT_ASSET_PAGE_SIZE, type AssetSortBy } from './contracts';
 
@@ -20,19 +22,19 @@ export async function getAssets(
 		pageSize: String(pageSize)
 	});
 	if (sortBy) params.set('sortBy', sortBy);
-	return httpJson<AssetPage>(`/api/data/assets?${params.toString()}`);
+	return httpValidated(assetPageSchema, `/api/data/assets?${params.toString()}`) as Promise<AssetPage>;
 }
 
 export async function updateAsset(assetId: string, updates: AssetUpdate): Promise<Asset> {
-	return httpJson<Asset>(`/api/v1/assets/${encodeURIComponent(assetId)}`, {
+	return httpValidated(assetSchema, `/api/v1/assets/${encodeURIComponent(assetId)}`, {
 		method: 'PUT',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ updates })
-	});
+	}) as Promise<Asset>;
 }
 
 export async function bulkUpdateAssets(assetIds: string[], updates: AssetUpdate): Promise<number> {
-	return httpJson<number>('/api/v1/assets/bulk-update', {
+	return httpValidated(z.number(), '/api/v1/assets/bulk-update', {
 		method: 'PUT',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ assetIds, updates })
@@ -40,13 +42,18 @@ export async function bulkUpdateAssets(assetIds: string[], updates: AssetUpdate)
 }
 
 export async function getDeepParseInfo(ipAddress: string): Promise<DeepParseInfo | null> {
-	return httpJson<DeepParseInfo | null>(`/api/v1/data/deep-parse/${encodeURIComponent(ipAddress)}`);
+	return httpValidated(
+		z.unknown(),
+		`/api/v1/data/deep-parse/${encodeURIComponent(ipAddress)}`
+	) as Promise<DeepParseInfo | null>;
 }
 
 export async function getFunctionCodeStats(): Promise<Record<string, FunctionCodeStat[]>> {
-	return httpJson<Record<string, FunctionCodeStat[]>>('/api/v1/data/function-code-stats');
+	return httpValidated(z.unknown(), '/api/v1/data/function-code-stats') as Promise<
+		Record<string, FunctionCodeStat[]>
+	>;
 }
 
 export async function getTopology(): Promise<TopologyGraph> {
-	return httpJson<TopologyGraph>('/api/data/topology');
+	return httpValidated(z.unknown(), '/api/data/topology') as Promise<TopologyGraph>;
 }

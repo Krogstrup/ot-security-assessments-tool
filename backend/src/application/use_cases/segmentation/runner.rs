@@ -1,55 +1,39 @@
 //! Segmentation analysis runner and enforcement config export.
 
+use std::collections::HashMap;
+
+use gm_analysis::{ConnectionStats, Finding, PatternAnomaly};
+use gm_parsers::DeepParseInfo;
 use gm_segmentation::{run_segmentation_analysis, EnforcementFormat, SegmentationReport};
+use gm_types::{AssetInfo, ConnectionInfo};
 
 use super::input_builder::build_segmentation_input;
-use crate::commands::support::{read_state, write_state};
-use crate::commands::AppState;
 
-/// Run the full microsegmentation analysis (Phases 15A–15E) and return
-/// the complete [`SegmentationReport`].
-///
-/// The result is cached in AppState for subsequent `export_enforcement_config`
-/// calls without re-running analysis.
-///
-/// Lock order: capture → inventory → analysis (read), then segmentation (write).
-pub fn run_segmentation(state: &AppState) -> Result<SegmentationReport, String> {
-    let capture = read_state(&state.capture, "capture")?;
-    let inventory = read_state(&state.inventory, "inventory")?;
-    let analysis = read_state(&state.analysis, "analysis")?;
-
-    let input = build_segmentation_input(&capture, &inventory, &analysis);
-    let report = run_segmentation_analysis(&input);
-
-    drop(capture);
-    drop(inventory);
-    drop(analysis);
-
-    let mut seg = write_state(&state.segmentation, "segmentation")?;
-    seg.segmentation_report = Some(report.clone());
-
-    log::info!(
-        "Segmentation analysis complete: {} groups, {} zones, {} conduits, {} rules",
-        report.policy_groups.len(),
-        report.zone_model.zones.len(),
-        report.zone_model.conduits.len(),
-        report.communication_matrix.zone_pairs.len(),
+/// Run the full microsegmentation analysis (Phases 15A–15E).
+pub fn run_segmentation(
+    assets: &[AssetInfo],
+    connections: &[ConnectionInfo],
+    deep_parse_info: &HashMap<String, DeepParseInfo>,
+    connection_stats: &[ConnectionStats],
+    pattern_anomalies: &[PatternAnomaly],
+    findings: &[Finding],
+) -> Result<SegmentationReport, String> {
+    let input = build_segmentation_input(
+        assets,
+        connections,
+        deep_parse_info,
+        connection_stats,
+        pattern_anomalies,
+        findings,
     );
-
-    Ok(report)
+    Ok(run_segmentation_analysis(&input))
 }
 
-/// Export one of the five enforcement config formats from the last segmentation run.
-///
-/// Returns the full text content of the generated configuration file.
-/// Returns an error if `run_segmentation` has not been called yet in this session.
-pub fn export_enforcement_config(format: String, state: &AppState) -> Result<String, String> {
-    let seg = read_state(&state.segmentation, "segmentation")?;
-
-    let report = seg.segmentation_report.as_ref().ok_or_else(|| {
-        "No segmentation report available. Run segmentation analysis first.".to_string()
-    })?;
-
+/// Export one of the five enforcement config formats from a segmentation report.
+pub fn export_enforcement_config(
+    format: String,
+    report: &SegmentationReport,
+) -> Result<String, String> {
     let fmt = parse_enforcement_format(&format)?;
 
     let config = report

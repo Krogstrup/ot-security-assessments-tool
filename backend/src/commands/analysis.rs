@@ -64,7 +64,11 @@ pub fn run_analysis(state: &AppState) -> Result<AnalysisResult, String> {
     let mut inventory = write_state(&state.inventory, "inventory")?;
     let mut analysis = write_state(&state.analysis, "analysis")?;
 
-    let input = build_analysis_input(&capture, &inventory);
+    let input = build_analysis_input(
+        &inventory.assets,
+        &capture.connections,
+        &inventory.deep_parse_info,
+    );
     let ctx = build_capture_context(&capture, &inventory, &analysis);
     let result = gm_analysis::run_full_analysis(&input, &ctx);
 
@@ -123,7 +127,11 @@ pub fn get_credential_warnings(state: &AppState) -> Result<Vec<DefaultCredential
 pub fn get_criticality(state: &AppState) -> Result<Vec<CriticalityAssessment>, String> {
     let capture = read_state(&state.capture, "capture")?;
     let inventory = read_state(&state.inventory, "inventory")?;
-    let input = build_analysis_input(&capture, &inventory);
+    let input = build_analysis_input(
+        &inventory.assets,
+        &capture.connections,
+        &inventory.deep_parse_info,
+    );
     Ok(gm_analysis::assess_criticality_all(&input.assets))
 }
 
@@ -131,7 +139,11 @@ pub fn get_criticality(state: &AppState) -> Result<Vec<CriticalityAssessment>, S
 pub fn get_naming_suggestions(state: &AppState) -> Result<Vec<NamingSuggestion>, String> {
     let capture = read_state(&state.capture, "capture")?;
     let inventory = read_state(&state.inventory, "inventory")?;
-    let input = build_analysis_input(&capture, &inventory);
+    let input = build_analysis_input(
+        &inventory.assets,
+        &capture.connections,
+        &inventory.deep_parse_info,
+    );
     Ok(gm_analysis::suggest_names_all(&input.assets))
 }
 
@@ -147,7 +159,7 @@ pub fn get_switch_security_findings(
     let capture = read_state(&state.capture, "capture")?;
     let inventory = read_state(&state.inventory, "inventory")?;
 
-    let assets = asset_snapshots(&inventory);
+    let assets = asset_snapshots(&inventory.assets);
 
     // Build protocols_by_ip from asset protocol lists
     let protocols_by_ip = inventory
@@ -219,8 +231,13 @@ pub fn get_malware_findings(state: &AppState) -> Result<Vec<MalwareFinding>, Str
     let analysis = read_state(&state.analysis, "analysis")?;
 
     let ctx = build_capture_context(&capture, &inventory, &analysis);
-    let connections = build_analysis_input(&capture, &inventory).connections;
-    let deep_parse = build_deep_parse_snapshot_map(&inventory);
+    let connections = build_analysis_input(
+        &inventory.assets,
+        &capture.connections,
+        &inventory.deep_parse_info,
+    )
+    .connections;
+    let deep_parse = build_deep_parse_snapshot_map(&inventory.deep_parse_info);
 
     Ok(detect_malware_patterns(&ctx, &connections, &deep_parse))
 }
@@ -292,7 +309,11 @@ pub fn get_compliance_report(
     let inventory = read_state(&state.inventory, "inventory")?;
     let analysis = read_state(&state.analysis, "analysis")?;
 
-    let input = build_analysis_input(&capture, &inventory);
+    let input = build_analysis_input(
+        &inventory.assets,
+        &capture.connections,
+        &inventory.deep_parse_info,
+    );
     Ok(generate_compliance_report(
         &analysis.findings,
         &input.assets,

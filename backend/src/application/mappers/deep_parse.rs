@@ -1,11 +1,8 @@
-//! Canonical mapper: `InventoryState` deep_parse_info → `DeepParseSnapshot` map.
+//! Canonical mapper: deep-parse map → `DeepParseSnapshot` map.
 //!
 //! Single source of truth consumed by:
 //!   - `build_analysis_input()` in application/mappers/analysis_input.rs
 //!   - malware detection in commands/analysis.rs
-//!
-//! # Layering note
-//! Borrows `InventoryState` from the commands module — see snapshots.rs for context.
 
 use std::collections::HashMap;
 
@@ -14,17 +11,16 @@ use gm_analysis::{
     ModbusSnapshot, PollingSnapshot, ProfinetDcpSnapshot, RelationshipSnapshot, S7Snapshot,
 };
 
-use crate::commands::InventoryState;
+use gm_parsers::DeepParseInfo;
 
-/// Build a `DeepParseSnapshot` map from all protocol deep-parse data in inventory.
+/// Build a `DeepParseSnapshot` map from all protocol deep-parse data.
 ///
-/// Maps every IP in `inventory.deep_parse_info` to its full 7-protocol snapshot.
+/// Maps every IP in `deep_parse_info` to its full 7-protocol snapshot.
 /// Returns an empty map when no deep-parse data has been collected.
 pub fn build_deep_parse_snapshot_map(
-    inventory: &InventoryState,
+    deep_parse_info: &HashMap<String, DeepParseInfo>,
 ) -> HashMap<String, DeepParseSnapshot> {
-    inventory
-        .deep_parse_info
+    deep_parse_info
         .iter()
         .map(|(ip, dp)| {
             let modbus = dp.modbus.as_ref().map(|m| ModbusSnapshot {
