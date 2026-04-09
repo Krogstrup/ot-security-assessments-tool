@@ -49,19 +49,19 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            src-tauri/target/
+            backend/target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Check formatting
-        working-directory: src-tauri
+        working-directory: backend
         run: cargo fmt --all -- --check
 
       - name: Clippy lints
-        working-directory: src-tauri
+        working-directory: backend
         run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Run tests
-        working-directory: src-tauri
+        working-directory: backend
         run: cargo test --all
 
   frontend-checks:

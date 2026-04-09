@@ -9,7 +9,7 @@ release/
 .svelte-kit/
 
 # ─── Rust / Cargo ───────────────────────────────────
-src-tauri/target/
+backend/target/
 **/*.rs.bk
 Cargo.lock
 
