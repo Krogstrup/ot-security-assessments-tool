@@ -92,7 +92,7 @@ pub fn classify_infrastructure(asset: &AssetSnapshot) -> InfrastructureRole {
 
     // ── Step 1: Direct device_type match (set by LLDP or signature) ──────────
 
-    if device_type == "switch" {
+    if device_type == gm_constants::DEVICE_TYPE_SWITCH {
         // Check for management protocols to distinguish managed vs unmanaged
         return if has_management_protocol(&protocols) {
             InfrastructureRole::ManagedSwitch
@@ -100,10 +100,10 @@ pub fn classify_infrastructure(asset: &AssetSnapshot) -> InfrastructureRole {
             InfrastructureRole::UnmanagedSwitch
         };
     }
-    if device_type == "router" {
+    if device_type == gm_constants::DEVICE_TYPE_ROUTER {
         return InfrastructureRole::Router;
     }
-    if device_type == "firewall" || device_type == "utm" || device_type == "ngfw" {
+    if device_type == gm_constants::DEVICE_TYPE_FIREWALL || device_type == "utm" || device_type == "ngfw" {
         return InfrastructureRole::Firewall;
     }
     if device_type == "access_point" || device_type == "wlan_ap" {
@@ -180,16 +180,16 @@ pub fn classify_infrastructure(asset: &AssetSnapshot) -> InfrastructureRole {
     // Tags check: if someone tagged the device as infrastructure
     for tag in &asset.tags {
         let t = tag.to_lowercase();
-        if t == "switch" || t == "managed-switch" {
+        if t == gm_constants::DEVICE_TYPE_SWITCH || t == "managed-switch" {
             return InfrastructureRole::ManagedSwitch;
         }
         if t == "unmanaged-switch" {
             return InfrastructureRole::UnmanagedSwitch;
         }
-        if t == "router" {
+        if t == gm_constants::DEVICE_TYPE_ROUTER {
             return InfrastructureRole::Router;
         }
-        if t == "firewall" {
+        if t == gm_constants::DEVICE_TYPE_FIREWALL {
             return InfrastructureRole::Firewall;
         }
         if t == "access-point" || t == "ap" {

@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 
 use gm_constants::OT_SERVER_PORTS as OT_PORTS;
 
-use crate::helpers::is_ot_protocol_name;
+use crate::helpers::{is_ot_protocol_name, is_plc_or_rtu_family_device_type};
 use crate::thresholds;
 use crate::{AnalysisInput, Finding, FindingType, Severity};
 
@@ -18,7 +18,7 @@ pub(super) fn detect_t0803_block_command_reporting(input: &AnalysisInput) -> Vec
     let field_device_ips: HashSet<&str> = input
         .assets
         .iter()
-        .filter(|a| matches!(a.device_type.as_str(), "plc" | "rtu" | "field_device"))
+        .filter(|a| is_plc_or_rtu_family_device_type(&a.device_type))
         .map(|a| a.ip_address.as_str())
         .collect();
 

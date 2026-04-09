@@ -109,7 +109,7 @@ pub(super) fn detect_t0814_diagnostic_dos(input: &AnalysisInput) -> Vec<Finding>
     let eng_ws_ips: HashSet<&str> = input
         .assets
         .iter()
-        .filter(|a| a.device_type == "engineering_workstation")
+        .filter(|a| a.device_type == gm_constants::DEVICE_TYPE_EWS)
         .map(|a| a.ip_address.as_str())
         .collect();
 

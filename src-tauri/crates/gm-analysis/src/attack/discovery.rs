@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use gm_constants::OT_SERVER_PORTS;
 
-use crate::{AnalysisInput, Finding, FindingType, Severity};
+use crate::{helpers::is_ot_device_type, AnalysisInput, Finding, FindingType, Severity};
 
 /// T0846 — Remote System Discovery
 ///
@@ -16,12 +16,7 @@ pub(super) fn detect_t0846_remote_discovery(input: &AnalysisInput) -> Vec<Findin
     let ot_device_ips: HashSet<&str> = input
         .assets
         .iter()
-        .filter(|a| {
-            matches!(
-                a.device_type.as_str(),
-                "plc" | "rtu" | "hmi" | "historian" | "engineering_workstation" | "scada_server"
-            )
-        })
+        .filter(|a| is_ot_device_type(&a.device_type))
         .map(|a| a.ip_address.as_str())
         .collect();
 
@@ -43,7 +38,7 @@ pub(super) fn detect_t0846_remote_discovery(input: &AnalysisInput) -> Vec<Findin
             let src_type = src_asset
                 .map(|a| a.device_type.as_str())
                 .unwrap_or("unknown");
-            if src_type == "it_device" || src_type == "unknown" {
+            if src_type == gm_constants::DEVICE_TYPE_IT_DEVICE || src_type == gm_constants::DEVICE_TYPE_UNKNOWN {
                 scanner_targets
                     .entry(conn.src_ip.clone())
                     .or_default()

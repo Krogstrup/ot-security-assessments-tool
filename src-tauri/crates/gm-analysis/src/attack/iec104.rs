@@ -58,7 +58,7 @@ pub(super) fn detect_iec104_attacks(input: &AnalysisInput) -> Vec<Finding> {
                 .find(|a| a.ip_address == *ip)
                 .map(|a| a.device_type.as_str())
                 .unwrap_or("unknown");
-            if src_type == "it_device" || src_type == "unknown" {
+            if src_type == gm_constants::DEVICE_TYPE_IT_DEVICE || src_type == gm_constants::DEVICE_TYPE_UNKNOWN {
                 findings.push(Finding::new(
                     FindingType::AttackTechnique,
                     Severity::Medium,

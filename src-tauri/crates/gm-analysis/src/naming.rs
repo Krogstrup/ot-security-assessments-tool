@@ -152,21 +152,21 @@ pub fn infer_device_type(protocols: &[gm_parsers::IcsProtocol], is_server: bool)
             // Allen-Bradley (EtherNet/IP), Siemens (S7), GE (SRTP), BACnet controller
             "plc".to_string()
         } else if has_modbus || has_dnp3 {
-            "rtu".to_string()
+            gm_constants::DEVICE_TYPE_RTU.to_string()
         } else {
-            "unknown".to_string()
+            gm_constants::DEVICE_TYPE_UNKNOWN.to_string()
         }
     } else if has_suitelink && is_server {
-        "scada_server".to_string() // Wonderware SuiteLink server
+        gm_constants::DEVICE_TYPE_SCADA_SERVER.to_string() // Wonderware SuiteLink server
     } else if ot_protocol_count >= 2 {
         // Client talking multiple OT protocols → likely HMI or SCADA server
-        "hmi".to_string()
+        gm_constants::DEVICE_TYPE_HMI.to_string()
     } else if has_opc_ua && ot_protocol_count == 1 {
-        "historian".to_string()
+        gm_constants::DEVICE_TYPE_HISTORIAN.to_string()
     } else if ot_protocol_count == 0 {
-        "it_device".to_string()
+        gm_constants::DEVICE_TYPE_IT_DEVICE.to_string()
     } else {
-        "unknown".to_string()
+        gm_constants::DEVICE_TYPE_UNKNOWN.to_string()
     }
 }
 

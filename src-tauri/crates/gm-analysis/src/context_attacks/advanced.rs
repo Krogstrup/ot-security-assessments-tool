@@ -6,7 +6,9 @@ use std::collections::{HashMap, HashSet};
 
 use gm_constants::OT_SERVER_PORTS as OT_PORTS;
 
-use crate::{AnalysisInput, Finding, FindingType, Severity};
+use crate::{
+    helpers::is_plc_or_rtu_family_device_type, AnalysisInput, Finding, FindingType, Severity,
+};
 
 use super::CaptureContext;
 
@@ -159,7 +161,7 @@ pub(super) fn detect_t0800_firmware_update_mode(input: &AnalysisInput) -> Vec<Fi
     let plc_rtu_ips: HashSet<&str> = input
         .assets
         .iter()
-        .filter(|a| matches!(a.device_type.as_str(), "plc" | "rtu" | "field_device"))
+        .filter(|a| is_plc_or_rtu_family_device_type(&a.device_type))
         .map(|a| a.ip_address.as_str())
         .collect();
 
